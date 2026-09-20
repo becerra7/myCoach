@@ -352,8 +352,15 @@ const rpc = async (env, token, message) => {
 	const refreshed = await (await postForm(env, "/oauth/token", {
 		grant_type: "refresh_token", refresh_token: tokens.refresh_token, client_id: clientId,
 	})).json();
+	// Dos emisiones seguidas caen en el mismo milisegundo: sin entropia propia
+	// el token seria identico. Esta comprobacion cazo justo eso.
 	check("refresh devuelve tokens nuevos",
 		refreshed.access_token && refreshed.access_token !== tokens.access_token);
+
+	const another = await (await postForm(env, "/oauth/token", {
+		grant_type: "refresh_token", refresh_token: refreshed.refresh_token, client_id: clientId,
+	})).json();
+	check("cada emision es un token distinto", another.access_token !== refreshed.access_token);
 
 	const reuse = await (await postForm(env, "/oauth/token", {
 		grant_type: "refresh_token", refresh_token: tokens.refresh_token, client_id: clientId,

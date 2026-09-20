@@ -1060,6 +1060,9 @@ async function issueCodeAndRedirect(env, params, userId) {
 		userId,
 		redirectUri: params.redirectUri,
 		codeChallenge: params.codeChallenge,
+		// Por el mismo motivo que el token: ademas, la marca de "ya usado" se
+		// indexa por el hash del codigo, y dos codigos iguales la compartirian.
+		nonce: randomToken(),
 		exp: Date.now() + CODE_TTL * 1000,
 	});
 
@@ -1186,7 +1189,14 @@ async function handleToken(request, env) {
  * sobra — y a cambio se puede revocar.
  */
 async function issueTokens(env, clientId, userId) {
-	const accessToken = await signBlob(env, { userId, exp: Date.now() + ACCESS_TTL * 1000 });
+	// El `nonce` no es decorativo: sin el, el token es una funcion pura de
+	// (usuario, caducidad), y dos emitidos en el mismo milisegundo salen
+	// identicos. Cada token emitido debe ser un artefacto distinto.
+	const accessToken = await signBlob(env, {
+		userId,
+		nonce: randomToken(),
+		exp: Date.now() + ACCESS_TTL * 1000,
+	});
 	const refreshToken = randomToken("gmn_r_");
 
 	await env.GARMIN.put(refreshKey(await sha256Hex(refreshToken)), JSON.stringify({ userId, clientId }), {
