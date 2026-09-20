@@ -5,6 +5,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# El despliegue solo necesita leer el repo; el acceso a Cloudflare va por
+# el token, no por el GITHUB_TOKEN.
+permissions:
+  contents: read
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
