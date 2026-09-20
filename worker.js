@@ -388,7 +388,10 @@ async function apiPost(env, userId, path, payload) {
 	}
 
 	if (!res.ok) {
-		const detail = (await res.text().catch(() => "")).slice(0, 400);
+		// Generoso a proposito: cuando Garmin rechaza algo imprime el DTO que
+		// recibio, y ahi estan los nombres reales de sus campos. Es la unica
+		// documentacion que hay de este endpoint.
+		const detail = (await res.text().catch(() => "")).slice(0, 3000);
 		throw new HttpError(res.status, `Garmin rechazo la escritura en ${path} (HTTP ${res.status}): ${detail}`);
 	}
 
@@ -769,6 +772,9 @@ const TOOLS = {
 				distance: route.distance_km * 1000,
 				elevationGain: route.elevation_gain_m,
 				activityTypePk: 2, // ciclismo
+				// Garmin exige privacidad y solo acepta 1 (publica), 2 (privada)
+				// o 4 (grupo). Se crea privada: son datos de quien la pide.
+				privacyRule: { typeId: 2, typeKey: "private" },
 				coordinateSystem: "WGS84",
 				geoPoints: points.map(([lon, lat, ele]) => ({
 					longitude: lon,
@@ -1359,6 +1365,10 @@ export default {
 				},
 			});
 
+		// Un fallo de herramienta viaja como 200 con isError, asi que no lo
+		// pilla el registro por codigo de estado. Y es justo el que interesa.
+		let toolError = "";
+
 		const response = await (async () => {
 		try {
 			if (pathname === "/.well-known/oauth-authorization-server") return json(metadata(url.origin));
@@ -1403,7 +1413,11 @@ export default {
 
 				const message = await request.json();
 				if (message.id === undefined) return new Response(null, { status: 202 });
-				return json(await handleRpc(message, env, userId));
+
+				const rpc = await handleRpc(message, env, userId);
+				if (rpc.result?.isError)
+					toolError = `${message.params?.name}: ${rpc.result.content?.[0]?.text ?? ""}`;
+				return json(rpc);
 			}
 
 			if (pathname === "/")
@@ -1428,9 +1442,9 @@ esta URL como conector personalizado en Claude:</p>
 
 		// El motivo se saca del propio cuerpo de error, que es donde ya esta
 		// escrito; clonar evita consumir la respuesta que se devuelve.
-		let note = "";
-		if (response.status >= 400) note = await response.clone().text().catch(() => "");
-		else if (response.status === 302) note = "redirect";
+		let note = toolError;
+		if (!note && response.status >= 400) note = await response.clone().text().catch(() => "");
+		else if (!note && response.status === 302) note = "redirect";
 
 		if (env.LOGS) ctx?.waitUntil?.(record(env, request, response.status, note));
 		return response;
