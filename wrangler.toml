@@ -1,0 +1,19 @@
+name = "garmin"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+
+# Los identificadores son los de los recursos que ya existen en la cuenta, asi
+# que el despliegue reconfigura los bindings solo y no hay que tocarlos a mano.
+
+[[kv_namespaces]]
+binding = "GARMIN"
+id = "7711af0372714afd942bf460cff02518"
+
+[[d1_databases]]
+binding = "LOGS"
+database_name = "garmin-diag"
+database_id = "32c6dc43-3fb2-469e-85e8-6f503ea8a925"
+
+# SIGNING_KEY no se declara aqui a proposito: es un secreto y vive en el
+# dashboard. `wrangler deploy` conserva los secretos que ya existen, asi que
+# los despliegues no lo pisan.
