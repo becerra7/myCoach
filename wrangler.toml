@@ -14,8 +14,8 @@ binding = "LOGS"
 database_name = "garmin-diag"
 database_id = "32c6dc43-3fb2-469e-85e8-6f503ea8a925"
 
-# Declarar el secreto aqui hace que `wrangler deploy` falle en voz alta si no
-# esta configurado, en vez de desplegar un Worker que devuelve 500 a todo.
-# Se aprendio por las malas: un despliegue lo borro y tumbo el servicio.
-[secrets]
-required = ["SIGNING_KEY"]
+# SIGNING_KEY no se declara como requerido a proposito. Se sube en el propio
+# despliegue con --secrets-file, y exigirlo aqui podria hacer que wrangler
+# abortase por no encontrarlo *antes* de subirlo: el arreglo impediria
+# aplicarse a si mismo. Quien vigila que el Worker quede sano es la
+# comprobacion posterior del workflow, que ademas cubre cualquier otra causa.
