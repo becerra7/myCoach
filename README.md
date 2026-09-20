@@ -41,12 +41,23 @@ En **Settings → Secrets and variables → Actions**:
 |---|---|
 | `CLOUDFLARE_API_TOKEN` | Cloudflare → My Profile → API Tokens → Create Token → plantilla **Edit Cloudflare Workers**. Añade también permiso de edición sobre **D1**, que el Worker tiene un binding. |
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare → Workers & Pages → panel derecho |
+| `SIGNING_KEY` | Cadena aleatoria larga. Firma los códigos y tokens OAuth. |
 
-### Secreto del Worker
+### Sobre `SIGNING_KEY`
 
-`SIGNING_KEY` vive en el dashboard de Cloudflare (**Settings → Variables and
-Secrets**), no aquí. Los despliegues lo conservan. Es una cadena aleatoria
-larga; si se cambia, todos los conectores hay que volver a añadirlos.
+Se sube **con cada despliegue** (`wrangler deploy --secrets-file`), no se
+configura a mano en el dashboard. Se hizo así después de que un despliegue
+borrara el secreto y dejara el Worker devolviendo 500 a todo: los secretos
+puestos por el dashboard no sobrevivieron.
+
+Si su valor cambia, **todos los conectores dejan de validar** y hay que
+volver a añadirlos, porque los tokens en circulación están firmados con el
+valor anterior.
+
+El despliegue tiene dos redes contra ese fallo: `wrangler` aborta si el
+secreto no está declarado, y una comprobación posterior llama al Worker ya
+desplegado y falla si no responde. Un despliegue no cuenta como bueno hasta
+que el servidor contesta.
 
 ### Recursos
 

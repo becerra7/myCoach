@@ -27,8 +27,40 @@ jobs:
       - name: Tests
         run: node test.mjs
 
+      # El secreto viaja con el codigo. Un `wrangler deploy` a secas dejo el
+      # Worker sin SIGNING_KEY y tiro el servicio: los secretos del dashboard
+      # no sobrevivieron al despliegue.
+      - name: Preparar secretos
+        run: |
+          test -n "$SIGNING_KEY" || { echo "Falta el secreto SIGNING_KEY en el repositorio"; exit 1; }
+          printf '{"SIGNING_KEY":"%s"}' "$SIGNING_KEY" > .secrets.json
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+
       - name: Deploy
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy --secrets-file .secrets.json
+
+      - name: Borrar el fichero de secretos
+        if: always()
+        run: rm -f .secrets.json
+
+      # El despliegue anterior dijo "success" mientras dejaba el servicio
+      # caido. Un despliegue no esta bien hasta que el servidor contesta.
+      - name: Comprobacion post-despliegue
+        run: |
+          url="https://garmin.albertbecervas.workers.dev/.well-known/oauth-authorization-server"
+          for intento in 1 2 3; do
+            if curl -fsS "$url" | grep -q '"issuer"'; then
+              echo "El Worker responde correctamente."
+              exit 0
+            fi
+            echo "Intento $intento sin exito; reintentando..."
+            sleep 5
+          done
+          echo "El Worker no responde con su metadata OAuth tras desplegar."
+          curl -sS "$url" || true
+          exit 1

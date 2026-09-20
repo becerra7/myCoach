@@ -14,6 +14,8 @@ binding = "LOGS"
 database_name = "garmin-diag"
 database_id = "32c6dc43-3fb2-469e-85e8-6f503ea8a925"
 
-# SIGNING_KEY no se declara aqui a proposito: es un secreto y vive en el
-# dashboard. `wrangler deploy` conserva los secretos que ya existen, asi que
-# los despliegues no lo pisan.
+# Declarar el secreto aqui hace que `wrangler deploy` falle en voz alta si no
+# esta configurado, en vez de desplegar un Worker que devuelve 500 a todo.
+# Se aprendio por las malas: un despliegue lo borro y tumbo el servicio.
+[secrets]
+required = ["SIGNING_KEY"]
