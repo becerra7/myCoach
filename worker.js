@@ -480,6 +480,16 @@ async function routeVia(points, profile) {
 	};
 }
 
+/** Distancia en metros entre dos [lon, lat], formula del haversine. */
+function metresBetween([lon1, lat1], [lon2, lat2]) {
+	const rad = (d) => (d * Math.PI) / 180;
+	const dLat = rad(lat2 - lat1);
+	const dLon = rad(lon2 - lon1);
+	const a =
+		Math.sin(dLat / 2) ** 2 + Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLon / 2) ** 2;
+	return 2 * 6371000 * Math.asin(Math.sqrt(a));
+}
+
 const gpxFrom = (name, coords) =>
 	`<?xml version="1.0" encoding="UTF-8"?>
 <gpx version="1.1" creator="garmin-mcp" xmlns="http://www.topografix.com/GPX/1/1">
@@ -766,25 +776,47 @@ const TOOLS = {
 			const step = Math.ceil(route.coords.length / 1000);
 			const points = route.coords.filter((_, i) => i % step === 0 || i === route.coords.length - 1);
 
+			// Garmin calcula distancia y desnivel a partir del campo `distance`
+			// de cada punto, no del total que se le manda: dejandolo a null,
+			// el recorrido aparecia con 0 km y 0 m de desnivel aunque el perfil
+			// de elevacion se dibujase bien. Es la distancia acumulada desde
+			// el inicio, y se mide sobre los puntos ya submuestreados para que
+			// cuadre con la linea que Garmin acaba guardando.
+			let recorrido = 0;
+			let desnivelPositivo = 0;
+			let desnivelNegativo = 0;
+
+			const geoPoints = points.map((punto, i) => {
+				if (i > 0) {
+					recorrido += metresBetween(points[i - 1], punto);
+					const salto = (punto[2] ?? 0) - (points[i - 1][2] ?? 0);
+					if (salto > 0) desnivelPositivo += salto;
+					else desnivelNegativo -= salto;
+				}
+				const [lon, lat, ele] = punto;
+				return {
+					longitude: lon,
+					latitude: lat,
+					...(ele != null ? { elevation: ele } : {}),
+					distance: Number(recorrido.toFixed(1)),
+				};
+			});
+
 			const body = {
 				courseName: route.name,
 				description: `Trazada con perfil ${route.profile}.`,
-				distance: route.distance_km * 1000,
-				elevationGain: route.elevation_gain_m,
+				distance: Number(recorrido.toFixed(1)),
+				elevationGain: Math.round(desnivelPositivo),
+				elevationLoss: Math.round(desnivelNegativo),
 				activityTypePk: 2, // ciclismo
 				// Los tres campos que Garmin exige y que no estan documentados
 				// en ningun sitio: los dicta su propio error de validacion.
 				rulePK: 2, // privacidad: 1 publica, 2 privada, 4 grupo
 				sourceTypeId: 1,
 				coordinateSystem: "WGS84",
-				geoPoints: points.map(([lon, lat, ele]) => ({
-					longitude: lon,
-					latitude: lat,
-					...(ele != null ? { elevation: ele } : {}),
-				})),
+				geoPoints,
+				startPoint: geoPoints[0],
 			};
-
-			body.startPoint = body.geoPoints[0];
 
 			const res = await apiPost(env, userId, "/course-service/course", body);
 

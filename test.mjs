@@ -527,7 +527,17 @@ const rpc = async (env, token, message) => {
 	check("guarda y devuelve el course_id", saved.course_id === 987);
 	check("submuestrea los puntos para Garmin", posted.geoPoints.length <= 1001, `(${posted.geoPoints.length})`);
 	check("conserva el punto final", posted.geoPoints.at(-1).longitude === coords.at(-1)[0]);
-	check("envia la distancia en metros", posted.distance === 70400);
+
+	// Sin distancia acumulada por punto, Garmin mostraba el recorrido con
+	// 0 km y 0 m de desnivel aunque el trazado fuese correcto.
+	check("el primer punto arranca en cero", posted.geoPoints[0].distance === 0);
+	check("la distancia acumulada crece",
+		posted.geoPoints.every((p, i) => i === 0 || p.distance > posted.geoPoints[i - 1].distance));
+	check("el total coincide con el ultimo punto",
+		posted.distance === posted.geoPoints.at(-1).distance);
+	check("declara desnivel positivo y negativo",
+		posted.elevationGain > 0 && typeof posted.elevationLoss === "number");
+	check("el punto de inicio es el primero", posted.startPoint.latitude === posted.geoPoints[0].latitude);
 
 	// Aislamiento: la ruta de ana no la puede guardar bob
 	const bobEnv = env;
