@@ -772,9 +772,10 @@ const TOOLS = {
 				distance: route.distance_km * 1000,
 				elevationGain: route.elevation_gain_m,
 				activityTypePk: 2, // ciclismo
-				// Garmin exige privacidad y solo acepta 1 (publica), 2 (privada)
-				// o 4 (grupo). Se crea privada: son datos de quien la pide.
-				privacyRule: { typeId: 2, typeKey: "private" },
+				// Los tres campos que Garmin exige y que no estan documentados
+				// en ningun sitio: los dicta su propio error de validacion.
+				rulePK: 2, // privacidad: 1 publica, 2 privada, 4 grupo
+				sourceTypeId: 1,
 				coordinateSystem: "WGS84",
 				geoPoints: points.map(([lon, lat, ele]) => ({
 					longitude: lon,
@@ -782,6 +783,8 @@ const TOOLS = {
 					...(ele != null ? { elevation: ele } : {}),
 				})),
 			};
+
+			body.startPoint = body.geoPoints[0];
 
 			const res = await apiPost(env, userId, "/course-service/course", body);
 

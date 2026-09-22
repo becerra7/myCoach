@@ -14,6 +14,24 @@ binding = "LOGS"
 database_name = "garmin-diag"
 database_id = "32c6dc43-3fb2-469e-85e8-6f503ea8a925"
 
+# Segundo Worker, identico salvo el nombre. Claude distingue los conectores
+# por URL, asi que dos URLs son dos conectores y permiten tener dos cuentas
+# de Garmin conectadas a la vez en la misma cuenta de Claude.
+#
+# Comparte KV y D1 con el principal a proposito: los usuarios se guardan
+# indexados por hash del email, asi que no se pisan.
+[env.segundo]
+name = "garmin-2"
+
+[[env.segundo.kv_namespaces]]
+binding = "GARMIN"
+id = "7711af0372714afd942bf460cff02518"
+
+[[env.segundo.d1_databases]]
+binding = "LOGS"
+database_name = "garmin-diag"
+database_id = "32c6dc43-3fb2-469e-85e8-6f503ea8a925"
+
 # SIGNING_KEY no se declara como requerido a proposito. Se sube en el propio
 # despliegue con --secrets-file, y exigirlo aqui podria hacer que wrangler
 # abortase por no encontrarlo *antes* de subirlo: el arreglo impediria
