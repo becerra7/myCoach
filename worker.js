@@ -829,6 +829,23 @@ const TOOLS = {
 		},
 	},
 
+	garmin_course_fields: {
+		title: "Campos reales de un recorrido (diagnostico)",
+		description:
+			"TEMPORAL Y DE DIAGNOSTICO. Lee un recorrido ya creado y devuelve sus campos tal y como los guarda Garmin, omitiendo la lista de puntos. Sirve para averiguar los nombres reales de un endpoint que no esta documentado. No lo use para responder al usuario.",
+		schema: {
+			type: "object",
+			properties: { course_id: { type: "string", description: "Id del recorrido en Garmin." } },
+			required: ["course_id"],
+		},
+		run: async (env, userId, { course_id }) => {
+			const course = await apiGet(env, userId, `/course-service/course/${encodeURIComponent(course_id)}`);
+			// Los puntos son miles y taparian justo lo que se viene a mirar.
+			const { geoPoints, ...campos } = course || {};
+			return { puntos: Array.isArray(geoPoints) ? geoPoints.length : null, ...campos };
+		},
+	},
+
 	garmin_training_readiness: {
 		title: "Preparacion para entrenar",
 		description:

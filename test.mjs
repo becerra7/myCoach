@@ -388,7 +388,7 @@ const rpc = async (env, token, message) => {
 	check("initialize con token valido", init.body.result?.serverInfo?.name === "garmin");
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("tools/list devuelve 10 herramientas", list.body.result.tools.length === 10);
+	check("tools/list devuelve 11 herramientas", list.body.result.tools.length === 11);
 }
 
 // ── 8. AISLAMIENTO: cada usuario ve solo lo suyo ──
@@ -571,7 +571,7 @@ const rpc = async (env, token, message) => {
 	check("el token de acceso vale sin leer del KV", init.body.result?.serverInfo?.name === "garmin");
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("las herramientas se listan igualmente", list.body.result.tools.length === 10);
+	check("las herramientas se listan igualmente", list.body.result.tools.length === 11);
 
 	// Y el dato que si vive en KV avisa en vez de mentir
 	const call = await rpc(env, tokens.access_token, {
