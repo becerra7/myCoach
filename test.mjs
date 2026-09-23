@@ -518,13 +518,22 @@ const rpc = async (env, token, message) => {
 	let posted = null;
 	globalThis.fetch = async (url, init) => {
 		if (String(url).includes("/course-service/course")) {
-			posted = JSON.parse(init.body);
-			return new Response(JSON.stringify({ courseId: 987 }));
+			if (init?.method === "POST") {
+				posted = JSON.parse(init.body);
+				return new Response(JSON.stringify({ courseId: 987 }));
+			}
+			// La relectura: Garmin devuelve sus propios numeros, que no tienen
+			// por que coincidir con los enviados (usa otro modelo de elevacion).
+			return new Response(JSON.stringify({ distanceMeter: 70400, elevationGainMeter: 540 }));
 		}
 		return new Response(JSON.stringify({}), { status: 404 });
 	};
 	const saved = await call("garmin_save_course", { route_id: plan.route_id, confirm: true });
 	check("guarda y devuelve el course_id", saved.course_id === 987);
+
+	// Subir sin comprobar fue como se colo una ruta con el desnivel a cero.
+	check("relee lo que Garmin ha guardado", saved.segun_garmin?.distancia_km === 70.4);
+	check("devuelve el desnivel segun Garmin", saved.segun_garmin?.desnivel_m === 540);
 	check("submuestrea los puntos para Garmin", posted.geoPoints.length <= 1001, `(${posted.geoPoints.length})`);
 	check("conserva el punto final", posted.geoPoints.at(-1).longitude === coords.at(-1)[0]);
 

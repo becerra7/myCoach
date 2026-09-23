@@ -840,11 +840,31 @@ const TOOLS = {
 			};
 
 			const res = await apiPost(env, userId, "/course-service/course", body);
+			const courseId = res?.courseId ?? null;
+
+			// Se relee lo que Garmin ha guardado de verdad. Subir sin mirar es
+			// como se colaron una distancia un 1% corta y un desnivel a cero:
+			// la subida decia "correcta" y el recorrido estaba mal.
+			let guardado = null;
+			if (courseId) {
+				try {
+					const c = await apiGet(env, userId, `/course-service/course/${courseId}`);
+					guardado = {
+						distancia_km: round((c?.distanceMeter ?? 0) / 1000, 2),
+						desnivel_m: c?.elevationGainMeter ?? null,
+					};
+				} catch {
+					// No poder comprobarlo no invalida la subida, que ya esta hecha.
+					guardado = { error: "No se pudo releer el recorrido para comprobarlo." };
+				}
+			}
 
 			return {
 				saved: true,
-				course_id: res?.courseId ?? null,
+				course_id: courseId,
 				name: route.name,
+				// Lo que Garmin dice tener, para poder contrastarlo con lo pedido.
+				segun_garmin: guardado,
 				hint: "Abre Garmin Connect y usa 'Enviar al dispositivo' para tenerla en el ciclocomputador.",
 			};
 		},
