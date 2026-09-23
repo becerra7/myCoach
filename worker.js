@@ -697,6 +697,48 @@ const TOOLS = {
 		},
 	},
 
+	garmin_activity_route: {
+		title: "Por donde paso una actividad",
+		description:
+			"Devuelve el recorrido real de una actividad ya hecha, reducido a unos pocos puntos de paso representativos. Uselo cuando el usuario quiera repetir, variar o inspirarse en una salida concreta: esos puntos se pueden pasar tal cual a garmin_plan_route. Las carreteras por las que el usuario ya ha pasado son mejor prueba de lo que le gusta que cualquier suposicion.",
+		schema: {
+			type: "object",
+			properties: {
+				activity_id: { type: "string", description: "El activity_id devuelto por garmin_activities." },
+				puntos: { type: "integer", description: "Cuantos puntos de paso devolver (5-40). Por defecto 15." },
+			},
+			required: ["activity_id"],
+		},
+		run: async (env, userId, { activity_id, puntos }) => {
+			const cuantos = Math.min(Math.max(puntos || 15, 5), 40);
+			const data = await apiGet(
+				env,
+				userId,
+				`/activity-service/activity/${encodeURIComponent(activity_id)}/details`,
+				{ maxChartSize: "0", maxPolylineSize: "500" },
+			);
+
+			const linea = data?.geoPolylineDTO?.polyline || [];
+			if (linea.length < 2) throw new HttpError(404, "Esa actividad no tiene trazado guardado.");
+
+			// Se reparten los puntos a lo largo del recorrido: la forma se
+			// conserva y el resultado cabe en una conversacion.
+			const paso = (linea.length - 1) / (cuantos - 1);
+			const waypoints = Array.from({ length: cuantos }, (_, i) => {
+				const p = linea[Math.round(i * paso)];
+				return `${p.lat.toFixed(4)},${p.lon.toFixed(4)}`;
+			});
+
+			return {
+				activity_id,
+				waypoints,
+				distancia_km: round((data?.summaryDTO?.distance ?? 0) / 1000),
+				desnivel_m: round(data?.summaryDTO?.elevationGain, 0),
+				nota: "Puntos del recorrido real. Paselos a garmin_plan_route para repetirlo, o quite y anada alguno para variarlo.",
+			};
+		},
+	},
+
 	garmin_plan_route: {
 		title: "Trazar y medir una ruta de bici",
 		description:
