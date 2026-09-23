@@ -535,6 +535,15 @@ const rpc = async (env, token, message) => {
 		posted.geoPoints.every((p, i) => i === 0 || p.distance > posted.geoPoints[i - 1].distance));
 	check("el total coincide con el ultimo punto",
 		posted.distanceMeter === posted.geoPoints.at(-1).distance);
+
+	// El submuestreo no debe encoger la ruta: la distancia se mide sobre el
+	// trazado completo, no sobre las rectas entre los puntos conservados.
+	const sumaAtajos = posted.geoPoints.reduce((total, p, i, todos) =>
+		i === 0 ? 0 : total + Math.hypot(
+			(p.longitude - todos[i - 1].longitude) * 82000,
+			(p.latitude - todos[i - 1].latitude) * 111000), 0);
+	check("no pierde longitud al submuestrear", posted.distanceMeter > sumaAtajos,
+		`(real ${Math.round(posted.distanceMeter)} vs atajos ${Math.round(sumaAtajos)})`);
 	check("declara desnivel positivo y negativo",
 		posted.elevationGainMeter > 0 && typeof posted.elevationLossMeter === "number");
 	check("el punto de inicio es el primero", posted.startPoint.latitude === posted.geoPoints[0].latitude);

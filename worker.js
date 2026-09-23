@@ -773,8 +773,18 @@ const TOOLS = {
 
 			// Los recorridos de Garmin no necesitan la densidad del router, y
 			// un cuerpo enorme es la forma mas facil de que rechace la subida.
+			// Se mide sobre el trazado COMPLETO, no sobre el submuestreado: las
+			// rectas entre los puntos que se conservan recortan las curvas y
+			// acortan la ruta cerca de un 1%. Cada punto conservado se queda
+			// con su distancia real, no con la del atajo.
+			const acumuladas = [0];
+			for (let i = 1; i < route.coords.length; i++)
+				acumuladas.push(acumuladas[i - 1] + metresBetween(route.coords[i - 1], route.coords[i]));
+
 			const step = Math.ceil(route.coords.length / 1000);
-			const points = route.coords.filter((_, i) => i % step === 0 || i === route.coords.length - 1);
+			const indices = route.coords
+				.map((_, i) => i)
+				.filter((i) => i % step === 0 || i === route.coords.length - 1);
 
 			// Garmin calcula distancia y desnivel a partir del campo `distance`
 			// de cada punto, no del total que se le manda: dejandolo a null,
@@ -782,23 +792,25 @@ const TOOLS = {
 			// de elevacion se dibujase bien. Es la distancia acumulada desde
 			// el inicio, y se mide sobre los puntos ya submuestreados para que
 			// cuadre con la linea que Garmin acaba guardando.
-			let recorrido = 0;
+			// El desnivel tambien se acumula sobre el trazado completo, por el
+			// mismo motivo: saltarse puntos se come subidas y bajadas cortas.
 			let desnivelPositivo = 0;
 			let desnivelNegativo = 0;
+			for (let i = 1; i < route.coords.length; i++) {
+				const salto = (route.coords[i][2] ?? 0) - (route.coords[i - 1][2] ?? 0);
+				if (salto > 0) desnivelPositivo += salto;
+				else desnivelNegativo -= salto;
+			}
 
-			const geoPoints = points.map((punto, i) => {
-				if (i > 0) {
-					recorrido += metresBetween(points[i - 1], punto);
-					const salto = (punto[2] ?? 0) - (points[i - 1][2] ?? 0);
-					if (salto > 0) desnivelPositivo += salto;
-					else desnivelNegativo -= salto;
-				}
-				const [lon, lat, ele] = punto;
+			const recorrido = acumuladas[acumuladas.length - 1];
+
+			const geoPoints = indices.map((idx) => {
+				const [lon, lat, ele] = route.coords[idx];
 				return {
 					longitude: lon,
 					latitude: lat,
 					...(ele != null ? { elevation: ele } : {}),
-					distance: Number(recorrido.toFixed(1)),
+					distance: Number(acumuladas[idx].toFixed(1)),
 				};
 			});
 
