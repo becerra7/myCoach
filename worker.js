@@ -805,18 +805,18 @@ const TOOLS = {
 			const body = {
 				courseName: route.name,
 				description: `Trazada con perfil ${route.profile}.`,
+				// Nombres tomados del recorrido tal y como Garmin lo devuelve.
+				// Se manda tambien `distance` porque el DTO de creacion y el de
+				// lectura no tienen por que coincidir, y sobrar no cuesta nada.
 				distance: Number(recorrido.toFixed(1)),
-				// Garmin descarta en silencio los campos que no conoce —lo
-				// demostro `privacyRule`—, asi que se mandan a la vez todos los
-				// nombres plausibles para el desnivel y pega el que sea suyo.
-				// Menos elegante que saberlo, pero resuelve en una vuelta en
-				// lugar de tres, y ninguno de estos hace dano si sobra.
-				elevationGain: Math.round(desnivelPositivo),
-				elevationLoss: Math.round(desnivelNegativo),
-				totalAscent: Math.round(desnivelPositivo),
-				totalDescent: Math.round(desnivelNegativo),
+				distanceMeter: Number(recorrido.toFixed(1)),
 				elevationGainMeter: Math.round(desnivelPositivo),
 				elevationLossMeter: Math.round(desnivelNegativo),
+				// Garmin guardaba el desnivel a cero aunque se lo enviara
+				// relleno, y el recorrido sale con `elevationSource: 2`: parece
+				// que el servidor lo recalcula por su cuenta. Con 1 se le pide
+				// que respete la altitud que viene en los puntos.
+				elevationSource: 1,
 				activityTypePk: 2, // ciclismo
 				// Los tres campos que Garmin exige y que no estan documentados
 				// en ningun sitio: los dicta su propio error de validacion.

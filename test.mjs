@@ -534,9 +534,9 @@ const rpc = async (env, token, message) => {
 	check("la distancia acumulada crece",
 		posted.geoPoints.every((p, i) => i === 0 || p.distance > posted.geoPoints[i - 1].distance));
 	check("el total coincide con el ultimo punto",
-		posted.distance === posted.geoPoints.at(-1).distance);
+		posted.distanceMeter === posted.geoPoints.at(-1).distance);
 	check("declara desnivel positivo y negativo",
-		posted.elevationGain > 0 && typeof posted.elevationLoss === "number");
+		posted.elevationGainMeter > 0 && typeof posted.elevationLossMeter === "number");
 	check("el punto de inicio es el primero", posted.startPoint.latitude === posted.geoPoints[0].latitude);
 
 	// Aislamiento: la ruta de ana no la puede guardar bob
