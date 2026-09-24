@@ -388,7 +388,12 @@ const rpc = async (env, token, message) => {
 	check("initialize con token valido", init.body.result?.serverInfo?.name === "garmin");
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("tools/list devuelve 11 herramientas", list.body.result.tools.length === 11);
+	check("tools/list devuelve 13 herramientas", list.body.result.tools.length === 13);
+	// Solo garmin_save_course escribe; anunciarlas todas como de solo
+	// lectura invitaba al cliente a llamarla sin preguntar.
+	const anot = Object.fromEntries(list.body.result.tools.map((t) => [t.name, t.annotations]));
+	check("las lecturas se anuncian como tales", anot.garmin_courses.readOnlyHint === true);
+	check("la subida no se anuncia como lectura", anot.garmin_save_course.readOnlyHint === false);
 }
 
 // ── 8. AISLAMIENTO: cada usuario ve solo lo suyo ──
@@ -571,6 +576,88 @@ const rpc = async (env, token, message) => {
 		r.body.result.content[0].text.includes("otro usuario"));
 }
 
+// ── 8b bis. Lectura de recorridos ya guardados ──
+{
+	mockGarmin({ "ana@x.com": { password: "a", data: { displayName: "ana", hrv: 50 } } });
+	const env = makeEnv();
+	const { tokens } = await connect(env, "ana@x.com", "a");
+
+	const call = async (name, args) => {
+		const r = await rpc(env, tokens.access_token, {
+			jsonrpc: "2.0", id: 9, method: "tools/call", params: { name, arguments: args },
+		});
+		if (r.body.result?.isError) throw new Error(r.body.result.content[0].text);
+		return JSON.parse(r.body.result.content[0].text);
+	};
+
+	// El servicio de recorridos no esta documentado: la primera ruta
+	// conocida puede no existir, y la herramienta debe seguir probando en
+	// vez de decirle al usuario que no tiene recorridos.
+	const pedidas = [];
+	const puntos = Array.from({ length: 900 }, (_, i) => ({
+		latitude: 42.37 + i * 0.0001, longitude: 1.76 + i * 0.0002,
+	}));
+	globalThis.fetch = async (url, init) => {
+		const u = new URL(url);
+		if (u.pathname === "/userprofile-service/socialProfile")
+			return new Response(JSON.stringify({ displayName: "ana" }));
+		pedidas.push(u.pathname);
+		if (u.pathname === "/course-service/course/owner/ana")
+			return new Response("no", { status: 404 });
+		if (u.pathname === "/course-service/course/owner")
+			return new Response(JSON.stringify({
+				coursesForUser: [
+					{ courseId: 517620552, courseName: "Cerdanya: bucle solana",
+					  distanceMeter: 42880, elevationGainMeter: 718, elevationLossMeter: 715,
+					  createDate: "2026-09-22" },
+					{ id: 1, name: "Vieja", distance: 70400, elevationGain: 412 },
+				],
+			}));
+		if (u.pathname === "/course-service/course/517620552")
+			return new Response(JSON.stringify({
+				courseId: 517620552, courseName: "Cerdanya: bucle solana",
+				distanceMeter: 42880, elevationGainMeter: 718, geoPoints: puntos,
+			}));
+		return new Response(JSON.stringify({}), { status: 404 });
+	};
+
+	const lista = await call("garmin_courses", {});
+	check("prueba otra ruta si la primera no existe", lista.endpoint === "/course-service/course/owner");
+	check("insiste antes de rendirse", pedidas.includes("/course-service/course/owner/ana"));
+	check("lista los recorridos guardados", lista.courses.length === 2);
+	check("traduce los metros a km", lista.courses[0].distance_km === 42.88);
+	check("devuelve el desnivel guardado", lista.courses[0].elevation_gain_m === 718);
+	check("devuelve el course_id", lista.courses[0].course_id === 517620552);
+	// Garmin no usa los mismos nombres en la lista y en el detalle.
+	check("acepta los nombres alternativos", lista.courses[1].distance_km === 70.4
+		&& lista.courses[1].name === "Vieja" && lista.courses[1].course_id === 1);
+
+	const detalle = await call("garmin_course_detail", { course_id: "517620552", puntos: 12 });
+	check("lee un recorrido concreto", detalle.name === "Cerdanya: bucle solana");
+	check("reduce el trazado a los puntos pedidos", detalle.waypoints.length === 12);
+	check("el primer punto es el inicio", detalle.waypoints[0] === "42.3700,1.7600");
+	check("el ultimo punto es el final", detalle.waypoints.at(-1) ===
+		`${puntos.at(-1).latitude.toFixed(4)},${puntos.at(-1).longitude.toFixed(4)}`);
+	check("los puntos van como lat,lon", detalle.waypoints.every((p) => /^4\d\.\d{4},\d\.\d{4}$/.test(p)));
+
+	// Un recorrido sin trazado no debe reventar: se dice y ya.
+	globalThis.fetch = async () => new Response(JSON.stringify({ courseId: 5, courseName: "Sin linea" }));
+	const vacio = await call("garmin_course_detail", { course_id: "5" });
+	check("un recorrido sin trazado no rompe", vacio.waypoints.length === 0 && vacio.name === "Sin linea");
+
+	// Si ninguna ruta contesta, el error dice que se intento.
+	globalThis.fetch = async (url) =>
+		new URL(url).pathname === "/userprofile-service/socialProfile"
+			? new Response(JSON.stringify({ displayName: "ana" }))
+			: new Response("no", { status: 404 });
+	try {
+		await call("garmin_courses", {});
+		check("deberia fallar si ninguna ruta contesta", false);
+	} catch (e) {
+		check("el error enumera lo que se intento", e.message.includes("/course-service/course/owner"));
+	}
+}
+
 // ── 8c. El caso de Paula: el KV no ha propagado ──
 {
 	mockGarmin({ "paula@x.com": { password: "p", data: { displayName: "paula", hrv: 61 } } });
@@ -589,7 +676,7 @@ const rpc = async (env, token, message) => {
 	check("el token de acceso vale sin leer del KV", init.body.result?.serverInfo?.name === "garmin");
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("las herramientas se listan igualmente", list.body.result.tools.length === 11);
+	check("las herramientas se listan igualmente", list.body.result.tools.length === 13);
 
 	// Y el dato que si vive en KV avisa en vez de mentir
 	const call = await rpc(env, tokens.access_token, {

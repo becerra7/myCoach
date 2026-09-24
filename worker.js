@@ -409,6 +409,24 @@ async function displayName(env, userId) {
 	return profile.displayName;
 }
 
+/**
+ * Los recorridos de Garmin no se leen igual que se escriben: el DTO de
+ * lectura usa `distanceMeter`/`elevationGainMeter` y el de la lista puede
+ * traer otros nombres. Se aceptan ambos en vez de suponer cual toca.
+ */
+function resumirCourse(c) {
+	const metros = c.distanceMeter ?? c.distance ?? null;
+	return {
+		course_id: c.courseId ?? c.id ?? null,
+		name: c.courseName ?? c.name ?? null,
+		distance_km: typeof metros === "number" ? round(metros / 1000, 2) : null,
+		elevation_gain_m: c.elevationGainMeter ?? c.elevationGain ?? null,
+		elevation_loss_m: c.elevationLossMeter ?? c.elevationLoss ?? null,
+		activity_type: c.activityType?.typeKey ?? c.activityTypePk ?? null,
+		created: c.createDate ?? c.createdDate ?? null,
+	};
+}
+
 // ──────────────────────── Planificacion de rutas ────────────────────────
 
 const BROUTER = "https://brouter.de/brouter";
@@ -796,6 +814,9 @@ const TOOLS = {
 
 	garmin_save_course: {
 		title: "Guardar una ruta en Garmin Connect",
+		// La unica herramienta que escribe. El resto solo lee, y el cliente
+		// usa esta marca para decidir si puede llamarla sin preguntar.
+		write: true,
 		description:
 			"Sube una ruta ya trazada (por su route_id) a Garmin Connect como recorrido, para poder enviarla al dispositivo. ESCRIBE en la cuenta del usuario: pida su confirmacion explicita antes de llamar, y pase confirm=true solo cuando la haya dado.",
 		schema: {
@@ -912,6 +933,101 @@ const TOOLS = {
 		},
 	},
 
+	garmin_courses: {
+		title: "Recorridos guardados en Garmin",
+		description:
+			"Lista los recorridos (courses) que el usuario tiene guardados en Garmin Connect, con nombre, distancia, desnivel y fecha. Devuelve un course_id que puede pasarse a garmin_course_detail. Uselo antes de proponer una ruta nueva, para no repetirle una que ya tiene, y para comprobar que una subida ha quedado bien.",
+		schema: {
+			type: "object",
+			properties: { limit: { type: "integer", description: "Cuantos recorridos devolver (1-50). Por defecto 20." } },
+		},
+		run: async (env, userId, { limit }) => {
+			const n = Math.min(Math.max(limit || 20, 1), 50);
+			const nombre = await displayName(env, userId);
+			const params = { includeGeoPoints: "false", start: "1", limit: String(n) };
+
+			// El servicio de recorridos no esta documentado y no responde en
+			// una sola ruta segun la version de la app que se imite. Se prueban
+			// las conocidas y se devuelve cual ha contestado: si Garmin la
+			// cambia, el error dira exactamente que se intento.
+			const candidatos = [
+				`/course-service/course/owner/${encodeURIComponent(nombre)}`,
+				"/course-service/course/owner",
+				"/web-gateway/course/owner",
+			];
+
+			let datos = null;
+			let usado = null;
+			const fallos = [];
+			for (const path of candidatos) {
+				try {
+					datos = await apiGet(env, userId, path, params);
+					usado = path;
+					break;
+				} catch (e) {
+					fallos.push(`${path} (${e.message})`);
+				}
+			}
+			if (datos == null)
+				throw new HttpError(502, `Garmin no devolvio la lista de recorridos. Se intento: ${fallos.join("; ")}`);
+
+			const lista = Array.isArray(datos)
+				? datos
+				: datos.coursesForUser ?? datos.courses ?? datos.content ?? [];
+
+			return { endpoint: usado, total: lista.length, courses: lista.slice(0, n).map(resumirCourse) };
+		},
+	},
+
+	garmin_course_detail: {
+		title: "Por donde va un recorrido guardado",
+		description:
+			"Devuelve un recorrido guardado de Garmin Connect: sus metricas y su trazado reducido a unos pocos puntos de paso. Esos puntos se pueden pasar tal cual a garmin_plan_route para variarlo o rehacerlo sin partir de cero.",
+		schema: {
+			type: "object",
+			properties: {
+				course_id: {
+					type: "string",
+					description: "El course_id devuelto por garmin_courses o por garmin_save_course.",
+				},
+				puntos: { type: "integer", description: "Cuantos puntos de paso devolver (5-40). Por defecto 15." },
+			},
+			required: ["course_id"],
+		},
+		run: async (env, userId, { course_id, puntos }) => {
+			const cuantos = Math.min(Math.max(puntos || 15, 5), 40);
+			const path = `/course-service/course/${encodeURIComponent(String(course_id))}`;
+
+			// Se pide el trazado explicitamente; si ese parametro no le gusta,
+			// se repite sin el antes de darlo por perdido.
+			let c;
+			try {
+				c = await apiGet(env, userId, path, { includeGeoPoints: "true" });
+			} catch {
+				c = await apiGet(env, userId, path);
+			}
+
+			const resumen = resumirCourse(c || {});
+			const linea = c?.geoPoints || [];
+			if (linea.length < 2)
+				return { ...resumen, waypoints: [], nota: "Garmin no ha devuelto el trazado de este recorrido." };
+
+			// Mismo reparto que en las actividades: la forma se conserva y el
+			// resultado cabe en una conversacion.
+			const paso = (linea.length - 1) / (cuantos - 1);
+			const waypoints = Array.from({ length: cuantos }, (_, i) => {
+				const p = linea[Math.round(i * paso)];
+				return `${Number(p.latitude).toFixed(4)},${Number(p.longitude).toFixed(4)}`;
+			});
+
+			return {
+				...resumen,
+				waypoints,
+				nota: "Puntos del recorrido guardado. Paselos a garmin_plan_route para variarlo.",
+			};
+		},
+	},
+
 	garmin_training_readiness: {
 		title: "Preparacion para entrenar",
 		description:
@@ -965,6 +1081,8 @@ async function handleRpc(message, env, userId) {
 				"metricas. No invente el trazado ni suponga la distancia: la que cuenta es la que mide la " +
 				"herramienta. Si no cuadra con lo pedido, mueva los puntos y repita. Para saber de donde sale " +
 				"el usuario habitualmente, mire garmin_activities. Guardar la ruta en Garmin (garmin_save_course) " +
+				"Los recorridos ya guardados se leen con garmin_courses y garmin_course_detail: mirelos antes " +
+				"de proponer una ruta nueva, para no repetir una que el usuario ya tiene. " +
 				"escribe en su cuenta: pida permiso antes.",
 		});
 	}
@@ -976,7 +1094,7 @@ async function handleRpc(message, env, userId) {
 				title: t.title,
 				description: t.description,
 				inputSchema: t.schema,
-				annotations: { readOnlyHint: true },
+				annotations: { readOnlyHint: t.write !== true, destructiveHint: false },
 			})),
 		});
 

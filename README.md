@@ -31,6 +31,18 @@ propagar, mientras que el handshake cruza continentes en segundos (el
 usuario autoriza desde su país, Claude canjea el código desde EE. UU.).
 Guardarlas era una carrera que a veces se perdía.
 
+### Recorridos
+
+`garmin_plan_route` traza y mide, `garmin_save_course` sube, y
+`garmin_courses` / `garmin_course_detail` releen lo que hay guardado en la
+cuenta. Esto ultimo existe porque sin ello Claude sube rutas a ciegas: no
+puede comprobar como han quedado ni saber cuales ya tiene el usuario.
+
+El servicio de recorridos de Garmin no esta documentado y su ruta de
+listado no es estable, asi que `garmin_courses` prueba las conocidas en
+orden y devuelve cual ha contestado. Si un dia dejan de funcionar todas, el
+error enumera lo que se intento.
+
 ## Puesta en marcha
 
 ### Secretos de GitHub
