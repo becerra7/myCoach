@@ -564,6 +564,204 @@ const today = () => new Date().toISOString().slice(0, 10);
 const daysAgo = (n) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
 const round = (n, digits = 2) => (typeof n === "number" ? Number(n.toFixed(digits)) : null);
 
+// ──────────────── Análisis de una actividad a partir de sus series ────────────────
+//
+// El resumen de Garmin da medias. Para saber cómo sube, cuánto aguanta y en qué
+// zonas entrena alguien sin potenciómetro hacen falta las series (pulso,
+// altitud, distancia y tiempo). Todo lo de aquí es determinista: se calcula,
+// no se estima con un modelo.
+
+/**
+ * Las series vienen como filas de valores con un índice por métrica. Los
+ * nombres varían según el aparato, así que se buscan por lista de candidatos.
+ */
+function seriesDeActividad(details) {
+	const desc = details?.metricDescriptors || [];
+	const indice = (...claves) => {
+		for (const clave of claves) {
+			const d = desc.find((x) => x.key === clave);
+			if (d) return d.metricsIndex;
+		}
+		return -1;
+	};
+	const iFc = indice("directHeartRate");
+	const iAlt = indice("directElevation", "directCorrectedElevation");
+	const iDist = indice("sumDistance");
+	const iDur = indice("sumDuration", "sumMovingDuration", "sumElapsedDuration");
+	const iTs = indice("directTimestamp");
+	const filas = (details?.activityDetailMetrics || []).map((m) => m.metrics || []);
+	if (!filas.length || iDist < 0) return [];
+
+	const t0 = iTs >= 0 ? filas.find((f) => typeof f[iTs] === "number")?.[iTs] : null;
+	const puntos = [];
+	for (const f of filas) {
+		const d = f[iDist];
+		if (typeof d !== "number") continue;
+		let t = iDur >= 0 && typeof f[iDur] === "number" ? f[iDur] : null;
+		if (t == null && iTs >= 0 && typeof f[iTs] === "number" && t0 != null) t = (f[iTs] - t0) / 1000;
+		puntos.push({
+			t,
+			d,
+			e: iAlt >= 0 && typeof f[iAlt] === "number" ? f[iAlt] : null,
+			fc: iFc >= 0 && typeof f[iFc] === "number" && f[iFc] > 30 ? f[iFc] : null,
+		});
+	}
+	return puntos.sort((a, b) => a.d - b.d);
+}
+
+/** Media móvil por distancia, para que el ruido del barómetro no invente repechos. */
+function suavizarAltitud(puntos, ventanaM = 150) {
+	const out = [];
+	let ini = 0;
+	let suma = 0;
+	let n = 0;
+	for (let i = 0; i < puntos.length; i++) {
+		if (puntos[i].e == null) { out.push(null); continue; }
+		suma += puntos[i].e;
+		n++;
+		while (puntos[i].d - puntos[ini].d > ventanaM) {
+			if (puntos[ini].e != null) { suma -= puntos[ini].e; n--; }
+			ini++;
+		}
+		out.push(n ? suma / n : null);
+	}
+	return out;
+}
+
+const MEDIA = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+
+/**
+ * Subidas: de un mínimo a un máximo, tolerando bajadas de menos de 15 m.
+ * Se quedan las que ganan al menos 50 m al 3 % o más durante 800 m o más.
+ * La VAM (metros de desnivel por hora) es la cifra con la que se comparan
+ * escaladores sin potenciómetro; de ella sale una estimación de vatios por
+ * kilo con la fórmula de Ferrari, que se marca siempre como estimación.
+ */
+function detectarSubidas(puntos) {
+	const e = suavizarAltitud(puntos);
+	const validos = puntos.map((p, i) => ({ ...p, es: e[i] })).filter((p) => p.es != null && p.t != null);
+	const subidas = [];
+	if (validos.length < 3) return subidas;
+	const DIP = 15;
+	let s = 0;
+	let m = 0;
+	const cerrar = (a, b) => {
+		const pa = validos[a];
+		const pb = validos[b];
+		const gan = pb.es - pa.es;
+		const largo = pb.d - pa.d;
+		const seg = pb.t - pa.t;
+		if (gan < 50 || largo < 800 || seg <= 0) return;
+		const pend = (gan / largo) * 100;
+		if (pend < 3) return;
+		const fcs = validos.slice(a, b + 1).map((p) => p.fc).filter(Boolean);
+		const vam = gan / (seg / 3600);
+		subidas.push({
+			km_inicio: round(pa.d / 1000, 1),
+			largo_km: round(largo / 1000, 2),
+			desnivel_m: Math.round(gan),
+			pendiente_pct: round(pend, 1),
+			minutos: round(seg / 60, 1),
+			vam_m_h: Math.round(vam),
+			fc_media: fcs.length ? Math.round(MEDIA(fcs)) : null,
+			w_kg_estimado: round(vam / (200 + 10 * pend), 2),
+		});
+	};
+	for (let i = 1; i < validos.length; i++) {
+		if (validos[i].es > validos[m].es) m = i;
+		if (validos[m].es - validos[i].es >= DIP) {
+			cerrar(s, m);
+			s = i;
+			m = i;
+		} else if (validos[i].es <= validos[s].es + 0.5) {
+			// Mientras no se gana altura, el inicio avanza: si no, un llano
+			// largo antes del puerto se contaría como parte de la subida y
+			// diluiría la pendiente.
+			s = i;
+			m = i;
+		}
+	}
+	cerrar(s, m);
+	return subidas.sort((x, y) => y.desnivel_m - x.desnivel_m);
+}
+
+/** Pulso medio máximo sostenido durante N minutos (media móvil en el tiempo). */
+function fcMaxSostenida(puntos, minutos) {
+	const p = puntos.filter((x) => x.fc && x.t != null);
+	if (p.length < 2 || p.at(-1).t - p[0].t < minutos * 60) return null;
+	let mejor = 0;
+	let ini = 0;
+	let suma = 0;
+	for (let i = 0; i < p.length; i++) {
+		suma += p[i].fc;
+		while (p[i].t - p[ini].t > minutos * 60) { suma -= p[ini].fc; ini++; }
+		if (p[i].t - p[ini].t >= minutos * 60 * 0.95) mejor = Math.max(mejor, suma / (i - ini + 1));
+	}
+	return mejor ? Math.round(mejor) : null;
+}
+
+/**
+ * Desacople aeróbico (Friel): cuánto cae la relación velocidad/pulso de la
+ * primera mitad a la segunda. Por debajo del 5 % indica buena resistencia; el
+ * terreno lo altera, así que solo se calcula en salidas de 90 minutos o más.
+ */
+function desacople(puntos) {
+	const p = puntos.filter((x) => x.fc && x.t != null);
+	if (p.length < 20 || p.at(-1).t - p[0].t < 90 * 60) return null;
+	const mitad = p[0].t + (p.at(-1).t - p[0].t) / 2;
+	const tramo = (a) => {
+		if (a.length < 2) return null;
+		const v = (a.at(-1).d - a[0].d) / (a.at(-1).t - a[0].t);
+		const fc = MEDIA(a.map((x) => x.fc));
+		return v / fc;
+	};
+	const ef1 = tramo(p.filter((x) => x.t <= mitad));
+	const ef2 = tramo(p.filter((x) => x.t > mitad));
+	return ef1 && ef2 ? round(((ef1 - ef2) / ef1) * 100, 1) : null;
+}
+
+/** Velocidad en llano: tramos de 1 km con menos del 1,5 % de pendiente media. */
+function velocidadLlano(puntos) {
+	const e = suavizarAltitud(puntos);
+	const p = puntos.map((x, i) => ({ ...x, es: e[i] })).filter((x) => x.es != null && x.t != null);
+	const tramos = [];
+	let a = 0;
+	for (let i = 1; i < p.length; i++) {
+		if (p[i].d - p[a].d >= 1000) {
+			const pend = Math.abs(p[i].es - p[a].es) / (p[i].d - p[a].d);
+			if (pend < 0.015 && p[i].t > p[a].t) {
+				const fcs = p.slice(a, i + 1).map((x) => x.fc).filter(Boolean);
+				tramos.push({ v: ((p[i].d - p[a].d) / (p[i].t - p[a].t)) * 3.6, fc: fcs.length ? MEDIA(fcs) : null });
+			}
+			a = i;
+		}
+	}
+	if (tramos.length < 3) return null;
+	return {
+		km: tramos.length,
+		vel_media_kmh: round(MEDIA(tramos.map((x) => x.v)), 1),
+		fc_media: tramos.some((x) => x.fc) ? Math.round(MEDIA(tramos.map((x) => x.fc).filter(Boolean))) : null,
+	};
+}
+
+function analizarActividad(details) {
+	const puntos = seriesDeActividad(details);
+	if (puntos.length < 10) return { muestras: puntos.length, nota: "Sin series suficientes." };
+	return {
+		muestras: puntos.length,
+		subidas: detectarSubidas(puntos).slice(0, 8),
+		llano: velocidadLlano(puntos),
+		desacople_pct: desacople(puntos),
+		fc_max_sostenida: { min5: fcMaxSostenida(puntos, 5), min20: fcMaxSostenida(puntos, 20), min60: fcMaxSostenida(puntos, 60) },
+		nota: "W/kg estimado con la fórmula de Ferrari (VAM / (200 + 10 · pendiente)): orientativo, sin potenciómetro.",
+	};
+}
+
+/** Recorta un JSON para poder ver su forma sin llenar la conversación. */
+const muestraCruda = (x, n = 700) => {
+	try { return JSON.stringify(x).slice(0, n); } catch { return null; }
+};
+
 const TOOLS = {
 	garmin_status: {
 		title: "Estado de la conexion con Garmin",
@@ -657,15 +855,32 @@ const TOOLS = {
 			"Lista de las ultimas actividades registradas (carrera, ciclismo, fuerza, etc.) con duracion, distancia, ritmo cardiaco medio y maximo, calorias y efecto del entrenamiento. Devuelve un activity_id que puede pasarse a garmin_activity_detail.",
 		schema: {
 			type: "object",
-			properties: { limit: { type: "integer", description: "Cuantas actividades devolver (1-50). Por defecto 10." } },
+			properties: { limit: { type: "integer", description: "Cuantas actividades devolver (1-300). Por defecto 10. Por encima de 50 se devuelve un formato compacto para recorrer el historico." } },
 		},
 		run: async (env, userId, { limit }) => {
-			const n = Math.min(Math.max(limit || 10, 1), 50);
-			const list = await apiGet(env, userId, "/activitylist-service/activities/search/activities", {
-				start: "0",
-				limit: String(n),
-			});
-			return (list || []).map((a) => ({
+			const n = Math.min(Math.max(limit || 10, 1), 300);
+			const list = [];
+			for (let desde = 0; desde < n; desde += 100) {
+				const pagina = await apiGet(env, userId, "/activitylist-service/activities/search/activities", {
+					start: String(desde),
+					limit: String(Math.min(100, n - desde)),
+				});
+				list.push(...(pagina || []));
+				if (!pagina || pagina.length < Math.min(100, n - desde)) break;
+			}
+			// Pedir más de 50 es para recorrer el histórico (mapas, recuentos):
+			// entonces se devuelve lo justo para no llenar la conversación.
+			if (n > 50)
+				return list.map((a) => ({
+					id: a.activityId,
+					t: a.activityType?.typeKey ?? null,
+					d: (a.startTimeLocal || "").slice(0, 10),
+					km: round((a.distance ?? 0) / 1000, 1),
+					min: Math.round((a.duration ?? 0) / 60),
+					fc: a.averageHR ?? null,
+					n: a.activityName,
+				}));
+			return list.map((a) => ({
 				activity_id: a.activityId,
 				name: a.activityName,
 				type: a.activityType?.typeKey ?? null,
@@ -691,8 +906,17 @@ const TOOLS = {
 			required: ["activity_id"],
 		},
 		run: async (env, userId, { activity_id }) => {
-			const a = await apiGet(env, userId, `/activity-service/activity/${encodeURIComponent(activity_id)}`);
+			const id = encodeURIComponent(activity_id);
+			// El resumen manda: si las series o las zonas fallan, la respuesta
+			// sigue saliendo con lo básico.
+			const [a, zonas, details] = await Promise.all([
+				apiGet(env, userId, `/activity-service/activity/${id}`),
+				apiGet(env, userId, `/activity-service/activity/${id}/hrTimeInZones`).catch(() => null),
+				apiGet(env, userId, `/activity-service/activity/${id}/details`, { maxChartSize: "3000", maxPolylineSize: "0" }).catch(() => null),
+			]);
 			const s = a?.summaryDTO || {};
+			let analisis = null;
+			try { analisis = details ? analizarActividad(details) : null; } catch (err) { analisis = { error: String(err) }; }
 			return {
 				activity_id,
 				name: a?.activityName ?? null,
@@ -707,6 +931,11 @@ const TOOLS = {
 				calories: s.calories ?? null,
 				avg_power: s.averagePower ?? null,
 				training_effect: s.trainingEffect ?? null,
+				anaerobic_training_effect: s.anaerobicTrainingEffect ?? null,
+				zonas_fc: Array.isArray(zonas)
+					? zonas.map((z) => ({ zona: z.zoneNumber, desde_ppm: z.zoneLowBoundary, minutos: round((z.secsInZone ?? 0) / 60, 1) }))
+					: null,
+				analisis,
 			};
 		},
 	},
@@ -1082,8 +1311,15 @@ const TOOLS = {
 		},
 		run: async (env, userId, { date }) => {
 			const d = date || today();
-			const data = await apiGet(env, userId, `/metrics-service/metrics/trainingreadiness/${d}`);
+			const [data, maxmet, endurance, hill, estado] = await Promise.all([
+				apiGet(env, userId, `/metrics-service/metrics/trainingreadiness/${d}`),
+				apiGet(env, userId, `/metrics-service/metrics/maxmet/daily/${d}/${d}`).catch((e) => ({ error: e.message })),
+				apiGet(env, userId, "/metrics-service/metrics/endurancescore", { calendarDate: d }).catch((e) => ({ error: e.message })),
+				apiGet(env, userId, "/metrics-service/metrics/hillscore", { calendarDate: d }).catch((e) => ({ error: e.message })),
+				apiGet(env, userId, `/metrics-service/metrics/trainingstatus/aggregated/${d}`).catch((e) => ({ error: e.message })),
+			]);
 			const r = Array.isArray(data) ? data[0] : data;
+			const vo2 = Array.isArray(maxmet) ? maxmet[0] : maxmet;
 			return {
 				date: d,
 				score: r?.score ?? null,
@@ -1092,6 +1328,21 @@ const TOOLS = {
 				hrv_factor: r?.hrvFactorPercent ?? null,
 				recovery_time_hours: r?.recoveryTime ? round(r.recoveryTime / 60, 1) : null,
 				acute_load: r?.acuteLoad ?? null,
+				// Lo que Garmin ya puntúa por su cuenta. Se añade la muestra cruda
+				// porque la forma de estas respuestas no está documentada: en cuanto
+				// se conozca, se queda solo lo interpretado.
+				perfil_garmin: {
+					vo2max_general: vo2?.generic?.vo2MaxPreciseValue ?? vo2?.generic?.vo2MaxValue ?? null,
+					vo2max_ciclismo: vo2?.cycling?.vo2MaxPreciseValue ?? vo2?.cycling?.vo2MaxValue ?? null,
+					endurance_score: endurance?.overallScore ?? null,
+					hill_score: hill?.overallScore ?? null,
+					crudo: {
+						maxmet: muestraCruda(maxmet, 500),
+						endurance: muestraCruda(endurance, 600),
+						hill: muestraCruda(hill, 600),
+						estado: muestraCruda(estado, 1500),
+					},
+				},
 			};
 		},
 	},

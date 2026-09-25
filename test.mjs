@@ -743,6 +743,88 @@ const rpc = async (env, token, message) => {
 	}
 }
 
+// ── 8b ter. Análisis de una actividad: subidas, zonas, desacople ──
+{
+	mockGarmin({ "ana@x.com": { password: "a", data: { displayName: "ana", hrv: 50 } } });
+	const env = makeEnv();
+	const { tokens } = await connect(env, "ana@x.com", "a");
+	const call = async (name, args) => {
+		const r = await rpc(env, tokens.access_token, {
+			jsonrpc: "2.0", id: 11, method: "tools/call", params: { name, arguments: args },
+		});
+		if (r.body.result?.isError) throw new Error(r.body.result.content[0].text);
+		return JSON.parse(r.body.result.content[0].text);
+	};
+
+	// Salida sintética, una muestra cada 50 m: 5 km llanos a 30 km/h, 3 km
+	// al 6 % a 15 km/h (180 m de desnivel), bajada y 10 km llanos. El pulso
+	// sube 10 ppm en la segunda mitad a la misma velocidad: eso es desacople.
+	const filas = [];
+	let d = 0, t = 0, e = 500;
+	const tramo = (metros, kmh, pend, fc) => {
+		for (let x = 0; x < metros; x += 50) {
+			d += 50; t += 50 / (kmh / 3.6); e += 50 * pend;
+			filas.push({ metrics: [fc(t), e, d, t] });
+		}
+	};
+	tramo(5000, 30, 0, () => 130);
+	tramo(3000, 15, 0.06, () => 160);
+	tramo(3000, 40, -0.06, () => 120);
+	tramo(40000, 30, 0, (tt) => (tt > 3600 ? 145 : 135));
+	const details = {
+		metricDescriptors: [
+			{ key: "directHeartRate", metricsIndex: 0 }, { key: "directElevation", metricsIndex: 1 },
+			{ key: "sumDistance", metricsIndex: 2 }, { key: "sumDuration", metricsIndex: 3 },
+		],
+		activityDetailMetrics: filas,
+	};
+	globalThis.fetch = async (url) => {
+		const u = new URL(url);
+		if (u.pathname.endsWith("/details")) return new Response(JSON.stringify(details));
+		if (u.pathname.endsWith("/hrTimeInZones"))
+			return new Response(JSON.stringify([{ zoneNumber: 1, secsInZone: 600, zoneLowBoundary: 100 }, { zoneNumber: 2, secsInZone: 3000, zoneLowBoundary: 130 }]));
+		if (u.pathname.startsWith("/activity-service/activity/"))
+			return new Response(JSON.stringify({ activityName: "Sintética", activityTypeDTO: { typeKey: "road_biking" }, summaryDTO: { distance: d, duration: t, averageHR: 140 } }));
+		return new Response("{}", { status: 404 });
+	};
+
+	const r = await call("garmin_activity_detail", { activity_id: "1" });
+	const sub = r.analisis?.subidas || [];
+	check("detecta la subida", sub.length === 1, `(${sub.length})`);
+	check("mide su desnivel", Math.abs(sub[0]?.desnivel_m - 180) <= 15, `(${sub[0]?.desnivel_m})`);
+	check("mide su pendiente", Math.abs(sub[0]?.pendiente_pct - 6) <= 0.6, `(${sub[0]?.pendiente_pct})`);
+	check("calcula la VAM", Math.abs(sub[0]?.vam_m_h - 900) <= 90, `(${sub[0]?.vam_m_h})`);
+	check("estima vatios por kilo", Math.abs(sub[0]?.w_kg_estimado - 3.46) <= 0.4, `(${sub[0]?.w_kg_estimado})`);
+	check("lleva el pulso de la subida", sub[0]?.fc_media >= 155 && sub[0]?.fc_media <= 160, `(${sub[0]?.fc_media})`);
+	check("encuentra tramos llanos", r.analisis?.llano?.km >= 30 && Math.abs(r.analisis.llano.vel_media_kmh - 30) < 1.5,
+		`(${JSON.stringify(r.analisis?.llano)})`);
+	// El desacople solo tiene sentido en llano: dos horas a 30 km/h con el
+	// pulso subiendo de 130 a 143 en la segunda hora dan 1 - 130/143 ≈ 9 %.
+	const llanas = [];
+	for (let x = 1, tt = 0; x <= 1200; x++) { tt += 50 / (30 / 3.6); llanas.push({ metrics: [tt > 3600 ? 143 : 130, 200, x * 50, tt] }); }
+	const planaDetails = { ...details, activityDetailMetrics: llanas };
+	globalThis.fetch = async (url) => {
+		const u = new URL(url);
+		if (u.pathname.endsWith("/details")) return new Response(JSON.stringify(planaDetails));
+		if (u.pathname.endsWith("/hrTimeInZones")) return new Response("[]");
+		return new Response(JSON.stringify({ activityName: "Llana", summaryDTO: {} }));
+	};
+	const plana = await call("garmin_activity_detail", { activity_id: "3" });
+	check("mide el desacople", Math.abs(plana.analisis?.desacople_pct - 9.1) < 1.5, `(${plana.analisis?.desacople_pct})`);
+	check("en llano no ve subidas", plana.analisis?.subidas?.length === 0);
+	check("pulso máximo sostenido 5 min", r.analisis?.fc_max_sostenida?.min5 === 160, `(${r.analisis?.fc_max_sostenida?.min5})`);
+	check("devuelve las zonas de Garmin", r.zonas_fc?.[1]?.minutos === 50);
+
+	// Si las series fallan, el detalle básico sale igual.
+	globalThis.fetch = async (url) => {
+		const u = new URL(url);
+		if (u.pathname.endsWith("/details") || u.pathname.endsWith("/hrTimeInZones")) return new Response("x", { status: 500 });
+		return new Response(JSON.stringify({ activityName: "Sin series", summaryDTO: { distance: 1000 } }));
+	};
+	const basico = await call("garmin_activity_detail", { activity_id: "2" });
+	check("sin series, el detalle sigue saliendo", basico.name === "Sin series" && basico.analisis === null);
+}
+
 // ── 8c. El caso de Paula: el KV no ha propagado ──
 {
 	mockGarmin({ "paula@x.com": { password: "p", data: { displayName: "paula", hrv: 61 } } });
