@@ -1532,7 +1532,9 @@ const loginPage = (params, error) =>
 		"Conectar Garmin",
 		`<h1>Conectar Garmin</h1>
 <p>Inicia sesion con tu cuenta de Garmin para que Claude pueda leer tus datos.
-Solo se guarda el token resultante: ni tu contrasena ni tu email se almacenan.</p>
+Ni tu contrasena ni tu email se almacenan.</p>
+<p>Para poder dibujar tu progreso, este servidor guarda tus actividades y tus
+datos diarios de Garmin, y los actualiza una vez al dia.</p>
 ${error ? `<div class="err">${escapeHtml(error)}</div>` : ""}
 <form method="post" action="/oauth/authorize">
   ${hiddenFields(params)}
@@ -1569,6 +1571,1129 @@ function collectCookies(res) {
 			: [res.headers.get("set-cookie")].filter(Boolean);
 	return raw.map((c) => c.split(";")[0]).join("; ");
 }
+
+// ───────────────── Panel de progreso: almacen en D1 ─────────────────
+//
+// Hasta aqui el servidor no guardaba ni un dato de Garmin. El panel si:
+// sin historico no hay curva de forma, y la curva de forma es lo unico
+// que de verdad distingue un panel de entrenamiento de una lista de
+// salidas. Queda dicho en la pantalla de login y en el README.
+
+const ESQUEMA = [
+	`CREATE TABLE IF NOT EXISTS activities (
+		user_id TEXT NOT NULL, activity_id TEXT NOT NULL,
+		start_date TEXT NOT NULL, start_time TEXT, type TEXT, name TEXT,
+		duration_s REAL, moving_duration_s REAL, distance_m REAL, elevation_gain_m REAL,
+		avg_hr REAL, max_hr REAL, avg_speed_ms REAL, calories REAL,
+		avg_power REAL, norm_power REAL, max_power REAL,
+		avg_cadence REAL, max_cadence REAL,
+		aerobic_te REAL, anaerobic_te REAL, garmin_load REAL,
+		PRIMARY KEY (user_id, activity_id)
+	)`,
+	`CREATE INDEX IF NOT EXISTS activities_por_fecha ON activities (user_id, start_date)`,
+	`CREATE TABLE IF NOT EXISTS days (
+		user_id TEXT NOT NULL, date TEXT NOT NULL,
+		resting_hr REAL, sleep_h REAL, sleep_score REAL, hrv REAL,
+		body_battery_max REAL, body_battery_min REAL, readiness REAL, steps REAL,
+		PRIMARY KEY (user_id, date)
+	)`,
+	`CREATE TABLE IF NOT EXISTS sync_state (
+		user_id TEXT PRIMARY KEY, last_sync TEXT, oldest TEXT, newest TEXT,
+		total INTEGER DEFAULT 0, done INTEGER DEFAULT 0,
+		hr_rest REAL, hr_max REAL, ftp REAL, note TEXT
+	)`,
+];
+
+let esquemaListo = false;
+
+async function prepararEsquema(env) {
+	if (esquemaListo || !env.LOGS) return Boolean(env.LOGS);
+	for (const sentencia of ESQUEMA) await env.LOGS.prepare(sentencia).run();
+	esquemaListo = true;
+	return true;
+}
+
+const COLS_ACTIVIDAD = [
+	"user_id", "activity_id", "start_date", "start_time", "type", "name",
+	"duration_s", "moving_duration_s", "distance_m", "elevation_gain_m",
+	"avg_hr", "max_hr", "avg_speed_ms", "calories",
+	"avg_power", "norm_power", "max_power", "avg_cadence", "max_cadence",
+	"aerobic_te", "anaerobic_te", "garmin_load",
+];
+
+const COLS_DIA = [
+	"user_id", "date", "resting_hr", "sleep_h", "sleep_score", "hrv",
+	"body_battery_max", "body_battery_min", "readiness", "steps",
+];
+
+const insertaEn = (tabla, columnas) =>
+	`INSERT OR REPLACE INTO ${tabla} (${columnas.join(", ")}) VALUES (${columnas.map(() => "?").join(", ")})`;
+
+async function guardarFilas(env, tabla, columnas, filas) {
+	if (!filas.length) return;
+	const sentencia = env.LOGS.prepare(insertaEn(tabla, columnas));
+	// D1 agrupa el batch en una sola transaccion: o entran todas o ninguna,
+	// que es justo lo que interesa cuando la sincronizacion se corta a medias.
+	const lote = filas.map((fila) => sentencia.bind(...columnas.map((c) => fila[c] ?? null)));
+	for (let i = 0; i < lote.length; i += 50) await env.LOGS.batch(lote.slice(i, i + 50));
+}
+
+const leerTabla = async (env, tabla, userId, orden) =>
+	(await env.LOGS.prepare(`SELECT * FROM ${tabla} WHERE user_id = ? ORDER BY ${orden}`).bind(userId).all())
+		?.results ?? [];
+
+async function leerEstado(env, userId) {
+	const r = await env.LOGS.prepare("SELECT * FROM sync_state WHERE user_id = ?").bind(userId).first();
+	return r || { user_id: userId, total: 0, done: 0 };
+}
+
+const guardarEstado = (env, estado) =>
+	guardarFilas(env, "sync_state", Object.keys(estado), [estado]);
+
+// ──────────────── Panel: traer los datos de Garmin ────────────────
+
+/**
+ * Garmin no usa un solo nombre para la potencia ni para la cadencia segun
+ * el dispositivo que haya grabado. Se prueban los que existen y ya.
+ */
+const primerValor = (obj, ...claves) => {
+	for (const clave of claves) {
+		const v = obj?.[clave];
+		if (typeof v === "number" && Number.isFinite(v)) return v;
+	}
+	return null;
+};
+
+function normalizarActividad(userId, a) {
+	const inicio = a.startTimeLocal || a.startTimeGMT || "";
+	return {
+		user_id: userId,
+		activity_id: String(a.activityId),
+		start_date: inicio.slice(0, 10),
+		start_time: inicio,
+		type: a.activityType?.typeKey ?? null,
+		name: a.activityName ?? null,
+		duration_s: primerValor(a, "duration", "elapsedDuration"),
+		moving_duration_s: primerValor(a, "movingDuration"),
+		distance_m: primerValor(a, "distance"),
+		elevation_gain_m: primerValor(a, "elevationGain"),
+		avg_hr: primerValor(a, "averageHR", "avgHr"),
+		max_hr: primerValor(a, "maxHR", "maxHr"),
+		avg_speed_ms: primerValor(a, "averageSpeed", "avgSpeed"),
+		calories: primerValor(a, "calories"),
+		// Potencia y cadencia todavia no las tiene nadie aqui, pero el dia
+		// que se conecte un potenciometro los datos entran sin tocar nada.
+		avg_power: primerValor(a, "avgPower", "averagePower", "averageWatts"),
+		norm_power: primerValor(a, "normPower", "normalizedPower"),
+		max_power: primerValor(a, "maxPower", "maxWatts"),
+		avg_cadence: primerValor(
+			a, "averageBikingCadenceInRevPerMinute", "averageRunningCadenceInStepsPerMinute", "averageCadence"),
+		max_cadence: primerValor(
+			a, "maxBikingCadenceInRevPerMinute", "maxRunningCadenceInStepsPerMinute", "maxCadence"),
+		aerobic_te: primerValor(a, "aerobicTrainingEffect"),
+		anaerobic_te: primerValor(a, "anaerobicTrainingEffect"),
+		garmin_load: primerValor(a, "activityTrainingLoad", "trainingLoad"),
+	};
+}
+
+const PAGINA = 100;
+
+/**
+ * Trae actividades y bienestar. Se llama tanto desde el cron como desde el
+ * propio panel, y siempre avanza un trozo acotado: Garmin responde 429 si se
+ * le pide el historico entero de golpe, asi que la primera carga se completa
+ * en varias pasadas en vez de en una que falla.
+ */
+async function sincronizar(env, userId, { paginas = 4, dias = 30 } = {}) {
+	if (!(await prepararEsquema(env))) throw new HttpError(500, "Falta la base de datos D1.");
+
+	const estado = await leerEstado(env, userId);
+	let traidas = 0;
+	let agotado = false;
+
+	// Mientras falta historico se avanza por el desplazamiento guardado. Una
+	// vez completo se vuelve siempre al principio de la lista: las salidas
+	// nuevas entran por delante, asi que un desplazamiento se las saltaria.
+	const desde = estado.done ? 0 : estado.total;
+
+	for (let p = 0; p < paginas; p++) {
+		const lista = await apiGet(env, userId, "/activitylist-service/activities/search/activities", {
+			start: String(desde + traidas),
+			limit: String(PAGINA),
+		});
+		const filas = (lista || []).map((a) => normalizarActividad(userId, a)).filter((f) => f.start_date);
+		await guardarFilas(env, "activities", COLS_ACTIVIDAD, filas);
+		traidas += filas.length;
+		if (filas.length < PAGINA) { agotado = true; break; }
+	}
+
+	const bienestar = await sincronizarDias(env, userId, dias);
+
+	const fechas = await env.LOGS.prepare(
+		"SELECT MIN(start_date) AS oldest, MAX(start_date) AS newest, COUNT(*) AS n FROM activities WHERE user_id = ?",
+	).bind(userId).first();
+
+	await guardarEstado(env, {
+		user_id: userId,
+		last_sync: new Date().toISOString(),
+		oldest: fechas?.oldest ?? null,
+		newest: fechas?.newest ?? null,
+		total: agotado || estado.done ? 0 : estado.total + traidas,
+		// Una vez completo ya no se vuelve atras: si un dia caen justo 100
+		// salidas nuevas, no debe reinterpretarse como que falta historico.
+		done: agotado || estado.done ? 1 : 0,
+		hr_rest: estado.hr_rest ?? null,
+		hr_max: estado.hr_max ?? null,
+		ftp: estado.ftp ?? null,
+		note: null,
+	});
+
+	return { actividades: fechas?.n ?? 0, traidas, dias: bienestar, completo: Boolean(agotado) };
+}
+
+/**
+ * El bienestar no tiene endpoint por rangos que se pueda dar por estable, asi
+ * que va dia a dia. Por eso se piden solo los que faltan y se para al primer
+ * bloqueo: mejor quedarse corto que comerse un 429 que tumba tambien al MCP.
+ */
+async function sincronizarDias(env, userId, cuantos) {
+	const nombre = await displayName(env, userId);
+	const previos = new Set(
+		(await env.LOGS.prepare("SELECT date FROM days WHERE user_id = ? AND date >= ?")
+			.bind(userId, daysAgo(cuantos)).all())?.results?.map((r) => r.date) ?? [],
+	);
+
+	const filas = [];
+	for (let i = 1; i <= cuantos; i++) {
+		const d = daysAgo(i);
+		// Ayer se vuelve a pedir siempre: al sincronizar de madrugada el sueno
+		// y el HRV de esa noche todavia no estaban puestos.
+		if (previos.has(d) && i > 1) continue;
+		try {
+			const [resumen, sueno, hrv] = await Promise.all([
+				apiGet(env, userId, `/usersummary-service/usersummary/daily/${nombre}`, { calendarDate: d }),
+				apiGet(env, userId, `/wellness-service/wellness/dailySleepData/${nombre}`, { date: d, nonSleepBufferMinutes: "60" })
+					.catch(() => null),
+				apiGet(env, userId, `/hrv-service/hrv/${d}`).catch(() => null),
+			]);
+			filas.push({
+				user_id: userId,
+				date: d,
+				resting_hr: primerValor(resumen, "restingHeartRate"),
+				sleep_h: resumen?.sleepingSeconds ? resumen.sleepingSeconds / 3600
+					: (sueno?.dailySleepDTO?.sleepTimeSeconds ?? 0) / 3600 || null,
+				sleep_score: primerValor(sueno?.dailySleepDTO?.sleepScores?.overall || {}, "value"),
+				hrv: primerValor(hrv?.hrvSummary || {}, "lastNightAvg"),
+				body_battery_max: primerValor(resumen, "bodyBatteryHighestValue"),
+				body_battery_min: primerValor(resumen, "bodyBatteryLowestValue"),
+				readiness: null,
+				steps: primerValor(resumen, "totalSteps"),
+			});
+		} catch {
+			break; // Garmin ha dicho basta; el resto se recoge en la siguiente pasada.
+		}
+	}
+
+	await guardarFilas(env, "days", COLS_DIA, filas);
+	return filas.length;
+}
+
+// ──────────── Panel: de las salidas a un indicador de forma ────────────
+//
+// El modelo estandar (CTL/ATL/TSB de Coggan) se apoya en el TSS, que se
+// calcula con potencia. Sin potenciometro hay que sustituirlo por carga de
+// frecuencia cardiaca: TRIMP de Banister, escalado para que una hora a
+// umbral valga 100, igual que un TSS. No es lo mismo, pero se comporta
+// igual y permite la misma lectura. Si algun dia entra potencia, el mismo
+// grafico pasa a calcularse con ella sin cambiar nada del panel.
+
+const DEPORTES_BICI = new Set([
+	"cycling", "road_biking", "gravel_cycling", "mountain_biking",
+	"virtual_ride", "indoor_cycling", "cyclocross",
+]);
+
+const UMBRAL_HRR = 0.85; // fraccion de reserva cardiaca que se toma por umbral
+const TRIMP_HORA_UMBRAL = 60 * UMBRAL_HRR * 0.64 * Math.exp(1.92 * UMBRAL_HRR);
+
+const percentil = (valores, p) => {
+	const orden = valores.filter((v) => typeof v === "number" && v > 0).sort((a, b) => a - b);
+	if (!orden.length) return null;
+	return orden[Math.min(orden.length - 1, Math.floor(p * orden.length))];
+};
+
+/**
+ * Las referencias salen de los propios datos en vez de preguntarselas al
+ * usuario: la maxima, de la pulsacion mas alta registrada; el reposo, del
+ * percentil bajo de las lecturas diarias, que aguanta mejor un mal dia que
+ * el minimo absoluto. El panel las ensena y se pueden corregir a mano.
+ */
+function referenciasFC(actividades, dias, estado) {
+	const maxObservada = Math.max(0, ...actividades.map((a) => a.max_hr || 0));
+	const reposoObservado = percentil(dias.map((d) => d.resting_hr), 0.1);
+	return {
+		max: estado?.hr_max || (maxObservada > 120 ? Math.round(maxObservada) : 190),
+		rest: estado?.hr_rest || (reposoObservado || 60),
+		maxAuto: !estado?.hr_max,
+		restAuto: !estado?.hr_rest,
+	};
+}
+
+/**
+ * Sin FTP declarado se estima a partir de la potencia normalizada mas alta
+ * sostenida en salidas largas. Es una estimacion tosca y el panel lo dice:
+ * sirve para que la curva tenga forma, no para prescribir entrenamientos.
+ */
+function referenciaFTP(actividades, estado) {
+	if (estado?.ftp) return { ftp: estado.ftp, estimado: false };
+	const largas = actividades
+		.filter((a) => (a.duration_s || 0) >= 1800)
+		.map((a) => a.norm_power || a.avg_power)
+		.filter(Boolean);
+	if (!largas.length) return { ftp: null, estimado: false };
+	return { ftp: Math.round((percentil(largas, 0.95) || 0) * 0.95) || null, estimado: true };
+}
+
+function cargaDe(a, fc, ftp) {
+	const segundos = a.moving_duration_s || a.duration_s || 0;
+	if (segundos < 300) return { carga: 0, fuente: "corta" };
+
+	const np = a.norm_power || a.avg_power;
+	if (np && ftp) {
+		const intensidad = np / ftp;
+		return { carga: ((segundos * np * intensidad) / (ftp * 3600)) * 100, fuente: "potencia" };
+	}
+
+	if (a.avg_hr && fc.max > fc.rest) {
+		const reserva = Math.min(Math.max((a.avg_hr - fc.rest) / (fc.max - fc.rest), 0), 1);
+		const trimp = (segundos / 60) * reserva * 0.64 * Math.exp(1.92 * reserva);
+		return { carga: (100 * trimp) / TRIMP_HORA_UMBRAL, fuente: "pulso" };
+	}
+
+	// Sin pulso queda lo que calcula el propio reloj, que es mejor que un cero.
+	if (a.garmin_load) return { carga: a.garmin_load, fuente: "garmin" };
+	return { carga: 0, fuente: "sin datos" };
+}
+
+const sumaDias = (desde, n) => {
+	const d = new Date(`${desde}T00:00:00Z`);
+	d.setUTCDate(d.getUTCDate() + n);
+	return d.toISOString().slice(0, 10);
+};
+
+const diasEntre = (a, b) =>
+	Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86400000);
+
+/**
+ * Medias moviles exponenciales de 42 y 7 dias sobre la carga diaria. La
+ * frescura del dia se mide con los valores de ayer, que es lo que hace que
+ * un entreno duro de hoy no baje la forma antes de haberla asimilado.
+ */
+function curvaDeForma(actividades, fc, ftp) {
+	if (!actividades.length) return [];
+
+	const porDia = new Map();
+	for (const a of actividades) {
+		const { carga } = cargaDe(a, fc, ftp);
+		porDia.set(a.start_date, (porDia.get(a.start_date) || 0) + carga);
+	}
+
+	const primera = actividades[0].start_date;
+	const ultima = today() > actividades.at(-1).start_date ? today() : actividades.at(-1).start_date;
+	const total = diasEntre(primera, ultima);
+
+	const curva = [];
+	let ctl = 0;
+	let atl = 0;
+	for (let i = 0; i <= total; i++) {
+		const d = sumaDias(primera, i);
+		const carga = porDia.get(d) || 0;
+		const tsb = ctl - atl; // con los valores de ayer, antes de aplicar hoy
+		ctl += (carga - ctl) / 42;
+		atl += (carga - atl) / 7;
+		curva.push({ d, carga: round(carga, 1), ctl: round(ctl, 1), atl: round(atl, 1), tsb: round(tsb, 1) });
+	}
+	return curva;
+}
+
+const lunesDe = (fecha) => {
+	const d = new Date(`${fecha}T00:00:00Z`);
+	d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+	return d.toISOString().slice(0, 10);
+};
+
+/** Horas por deporte y semana. Los deportes minoritarios se agrupan. */
+function semanas(actividades, fc, ftp) {
+	const horasPorTipo = new Map();
+	for (const a of actividades)
+		horasPorTipo.set(a.type, (horasPorTipo.get(a.type) || 0) + (a.duration_s || 0) / 3600);
+
+	const principales = [...horasPorTipo.entries()]
+		.sort((x, y) => y[1] - x[1])
+		.slice(0, 4)
+		.map(([tipo]) => tipo);
+
+	const porSemana = new Map();
+	for (const a of actividades) {
+		const semana = lunesDe(a.start_date);
+		const fila = porSemana.get(semana) || { semana, carga: 0, horas: {}, km: 0, desnivel: 0 };
+		const clave = principales.includes(a.type) ? a.type : "otros";
+		fila.horas[clave] = round((fila.horas[clave] || 0) + (a.duration_s || 0) / 3600, 2);
+		fila.carga = round(fila.carga + cargaDe(a, fc, ftp).carga, 1);
+		if (DEPORTES_BICI.has(a.type)) {
+			fila.km = round(fila.km + (a.distance_m || 0) / 1000, 1);
+			fila.desnivel = Math.round(fila.desnivel + (a.elevation_gain_m || 0));
+		}
+		porSemana.set(semana, fila);
+	}
+
+	return {
+		deportes: [...principales, "otros"],
+		filas: [...porSemana.values()].sort((x, y) => x.semana.localeCompare(y.semana)),
+	};
+}
+
+/**
+ * Metros recorridos por pulsacion. Sin potenciometro es el mejor indicio de
+ * que uno esta mejorando: la misma velocidad con menos pulsaciones. Solo
+ * tiene sentido entre salidas comparables, asi que se limita a la bici y a
+ * salidas de al menos 45 minutos, y aun asi el viento y el desnivel mueven
+ * el punto: lo que se lee es la tendencia, no un dia suelto.
+ */
+function eficiencia(actividades) {
+	return actividades
+		.filter((a) => DEPORTES_BICI.has(a.type) && (a.duration_s || 0) >= 2700 && a.avg_hr > 60 && a.distance_m > 0)
+		.map((a) => ({
+			d: a.start_date,
+			valor: round(a.distance_m / (a.avg_hr * ((a.moving_duration_s || a.duration_s) / 60)), 2),
+			km: round(a.distance_m / 1000, 1),
+			desnivel: Math.round(a.elevation_gain_m || 0),
+			fc: Math.round(a.avg_hr),
+			vatios_por_pulso: a.avg_power ? round(a.avg_power / a.avg_hr, 2) : null,
+			nombre: a.name,
+		}));
+}
+
+/**
+ * Cuanto ha mejorado, en una cifra. Compara la eficiencia de los ultimos
+ * tres meses con la de la misma epoca del año pasado, por medianas: una
+ * salida con viento a favor no puede decidir la respuesta. Devuelve null si
+ * no hay salidas suficientes a ambos lados, que es mejor que un porcentaje
+ * calculado sobre dos dias.
+ */
+function progresoEficiencia(puntos) {
+	const mediana = (arr) => {
+		const orden = arr.slice().sort((a, b) => a - b);
+		return orden.length ? orden[Math.floor(orden.length / 2)] : null;
+	};
+	const ahora = puntos.filter((p) => diasEntre(p.d, today()) < 90).map((p) => p.valor);
+	const antes = puntos
+		.filter((p) => diasEntre(p.d, today()) >= 335 && diasEntre(p.d, today()) < 455)
+		.map((p) => p.valor);
+	if (ahora.length < 3 || antes.length < 3) return null;
+	const a = mediana(ahora);
+	const b = mediana(antes);
+	return { ahora: round(a, 2), antes: round(b, 2), variacion: round(((a - b) / b) * 100, 1), salidas: ahora.length };
+}
+
+/** Todo lo que la pagina necesita, ya calculado: el navegador solo dibuja. */
+function resumenPanel(actividades, dias, estado) {
+	const fc = referenciasFC(actividades, dias, estado);
+	const { ftp, estimado } = referenciaFTP(actividades, estado);
+	const curva = curvaDeForma(actividades, fc, ftp);
+	const hoy = curva.at(-1) || { ctl: 0, atl: 0, tsb: 0 };
+	const mejor = curva.reduce((mx, p) => (p.ctl > (mx?.ctl ?? -1) ? p : mx), null);
+	const hace = (n) => curva[Math.max(0, curva.length - 1 - n)] || curva[0] || { ctl: 0 };
+	const bici = actividades.filter((a) => DEPORTES_BICI.has(a.type));
+	const ef = eficiencia(actividades);
+
+	return {
+		ajustes: { hr_rest: fc.rest, hr_max: fc.max, hr_auto: fc.restAuto || fc.maxAuto, ftp, ftp_estimado: estimado },
+		hoy,
+		mejor: mejor && { ctl: mejor.ctl, d: mejor.d },
+		hace30: hace(30).ctl,
+		hace90: hace(90).ctl,
+		hace365: hace(365).ctl,
+		curva,
+		semanas: semanas(actividades, fc, ftp),
+		eficiencia: ef,
+		progreso: progresoEficiencia(ef),
+		dias,
+		tiene_potencia: actividades.some((a) => a.avg_power || a.norm_power),
+		tiene_cadencia: actividades.some((a) => a.avg_cadence),
+		fuentes: [...new Set(actividades.map((a) => cargaDe(a, fc, ftp).fuente))],
+		total: {
+			actividades: actividades.length,
+			desde: actividades[0]?.start_date ?? null,
+			horas: Math.round(actividades.reduce((s, a) => s + (a.duration_s || 0), 0) / 3600),
+			km: Math.round(bici.reduce((s, a) => s + (a.distance_m || 0), 0) / 1000),
+			desnivel: Math.round(bici.reduce((s, a) => s + (a.elevation_gain_m || 0), 0)),
+		},
+		estado: { ultima: estado?.last_sync ?? null, completo: Boolean(estado?.done) },
+	};
+}
+
+// ──────────────────── Panel: sesion y endpoints ────────────────────
+
+const PANEL_TTL = 1000 * 60 * 60 * 24 * 30;
+
+const cookieDeSesion = (valor, segundos) =>
+	`panel=${valor}; Path=/panel; HttpOnly; Secure; SameSite=Lax; Max-Age=${segundos}`;
+
+async function usuarioDelPanel(request, env) {
+	const cookie = request.headers.get("Cookie") || "";
+	const valor = cookie.split(/;\s*/).find((c) => c.startsWith("panel="))?.slice("panel=".length);
+	if (!valor) return null;
+	const payload = await readBlob(env, decodeURIComponent(valor));
+	return payload?.t === "panel" ? payload.sub : null;
+}
+
+const redirigeAlPanel = async (env, userId) =>
+	new Response(null, {
+		status: 302,
+		headers: {
+			Location: "/panel",
+			"Set-Cookie": cookieDeSesion(
+				encodeURIComponent(await signBlob(env, { t: "panel", sub: userId, exp: Date.now() + PANEL_TTL })),
+				PANEL_TTL / 1000,
+			),
+		},
+	});
+
+async function handlePanelEntrar(request, env) {
+	const form = new URLSearchParams(await request.text());
+	try {
+		const pendingId = form.get("mfa_pending");
+		if (pendingId) {
+			const pending = await env.GARMIN.get(mfaKey(pendingId), "json");
+			if (!pending) return new Response(panelLogin("La verificacion ha caducado. Empieza de nuevo."), { headers: HTML });
+			const ticket = await ssoVerifyMfa(form.get("code") || "", pending.method, pending.cookie, pending.flowName);
+			await env.GARMIN.put(userKey(pending.userId), JSON.stringify(await exchangeTicket(ticket, pending.flowName)));
+			await env.GARMIN.delete(mfaKey(pendingId));
+			return redirigeAlPanel(env, pending.userId);
+		}
+
+		const email = (form.get("email") || "").trim();
+		const password = form.get("password") || "";
+		if (!email || !password) return new Response(panelLogin("Rellena email y contrasena."), { headers: HTML });
+
+		const userId = await userIdFor(email);
+		const result = await ssoLogin(email, password);
+
+		if (result.mfaRequired) {
+			const id = randomToken();
+			await env.GARMIN.put(
+				mfaKey(id),
+				JSON.stringify({ method: result.mfaMethod, cookie: result.cookie, userId, flowName: result.flowName }),
+				{ expirationTtl: MFA_TTL },
+			);
+			return new Response(panelMfa(id, result.mfaMethod), { headers: HTML });
+		}
+
+		await env.GARMIN.put(userKey(userId), JSON.stringify(await exchangeTicket(result.ticket, result.flowName)));
+		return redirigeAlPanel(env, userId);
+	} catch (err) {
+		const mensaje = err instanceof HttpError ? err.message : "No se pudo entrar.";
+		return new Response(panelLogin(mensaje), { status: 400, headers: HTML });
+	}
+}
+
+async function handlePanel(request, env, ctx) {
+	const { pathname } = new URL(request.url);
+
+	if (pathname === "/panel/entrar" && request.method === "POST") return handlePanelEntrar(request, env);
+
+	if (pathname === "/panel/salir")
+		return new Response(null, { status: 302, headers: { Location: "/panel", "Set-Cookie": cookieDeSesion("", 0) } });
+
+	const userId = await usuarioDelPanel(request, env);
+	if (!userId) {
+		if (pathname !== "/panel") return json({ error: "unauthorized" }, 401);
+		return new Response(panelLogin(), { headers: HTML });
+	}
+
+	if (pathname === "/panel") return new Response(PANEL_HTML, { headers: HTML });
+
+	if (!(await prepararEsquema(env))) return json({ error: "Falta la base de datos D1." }, 500);
+
+	if (pathname === "/panel/sync" && request.method === "POST") {
+		const estado = await leerEstado(env, userId);
+		// La primera carga trae mucho de golpe; despues basta con mirar si hay
+		// algo nuevo, que es una sola pagina.
+		const avance = await sincronizar(env, userId, estado.done ? { paginas: 1, dias: 7 } : { paginas: 5, dias: 15 });
+		return json(avance);
+	}
+
+	if (pathname === "/panel/ajustes" && request.method === "POST") {
+		const cuerpo = await request.json();
+		const numero = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : null);
+		const estado = await leerEstado(env, userId);
+		await guardarEstado(env, {
+			...estado,
+			user_id: userId,
+			hr_rest: numero(cuerpo.hr_rest),
+			hr_max: numero(cuerpo.hr_max),
+			ftp: numero(cuerpo.ftp),
+		});
+		return json({ ok: true });
+	}
+
+	if (pathname === "/panel/datos") {
+		const [actividades, dias, estado] = await Promise.all([
+			leerTabla(env, "activities", userId, "start_date"),
+			leerTabla(env, "days", userId, "date"),
+			leerEstado(env, userId),
+		]);
+		// Si aun no hay nada, se arranca la primera carga sin hacer esperar a
+		// la pagina: ella vuelve a preguntar hasta que aparezcan datos.
+		if (!actividades.length) ctx?.waitUntil?.(sincronizar(env, userId, { paginas: 5, dias: 15 }).catch(() => {}));
+		return json(resumenPanel(actividades, dias, estado));
+	}
+
+	return json({ error: "not_found" }, 404);
+}
+
+/**
+ * Descarga diaria. Recorre los usuarios conectados y sincroniza a cada uno;
+ * un fallo en uno no puede dejar sin datos a los demas.
+ */
+async function sincronizarTodos(env) {
+	if (!(await prepararEsquema(env))) return;
+	let cursor;
+	do {
+		const pagina = await env.GARMIN.list({ prefix: "user:", cursor });
+		for (const clave of pagina.keys) {
+			const userId = clave.name.slice("user:".length);
+			try {
+				const estado = await leerEstado(env, userId);
+				await sincronizar(env, userId, estado.done ? { paginas: 1, dias: 10 } : { paginas: 6, dias: 20 });
+			} catch {
+				// Un usuario con la sesion caducada no puede parar al resto.
+			}
+		}
+		cursor = pagina.list_complete ? null : pagina.cursor;
+	} while (cursor);
+}
+
+// ─────────────────── Panel: pantallas de acceso ───────────────────
+
+const panelLogin = (error) =>
+	page(
+		"Tu progreso",
+		`<h1>Tu progreso</h1>
+<p>Entra con tu cuenta de Garmin para ver tu panel de entrenamiento.</p>
+${error ? `<div class="err">${escapeHtml(error)}</div>` : ""}
+<form method="post" action="/panel/entrar">
+  <label for="email">Email de Garmin</label>
+  <input id="email" name="email" type="email" autocomplete="username" required autofocus>
+  <label for="password">Contrasena</label>
+  <input id="password" name="password" type="password" autocomplete="current-password" required>
+  <button type="submit">Entrar</button>
+</form>
+<p class="note">Para dibujar tu historico, el panel guarda en este servidor tus
+actividades y tus datos diarios de Garmin. Ni tu contrasena ni tu email se
+almacenan. Si solo quieres usar el conector de Claude, no hace falta que entres aqui.</p>`,
+	);
+
+const panelMfa = (pendingId, method) =>
+	page(
+		"Verificacion",
+		`<h1>Verificacion en dos pasos</h1>
+<p>Garmin te ha enviado un codigo por ${escapeHtml(method)}.</p>
+<form method="post" action="/panel/entrar">
+  <input type="hidden" name="mfa_pending" value="${escapeHtml(pendingId)}">
+  <label for="code">Codigo</label>
+  <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" required autofocus>
+  <button type="submit">Verificar</button>
+</form>`,
+	);
+
+const PANEL_HTML = `<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tu progreso</title>
+<style>
+:root{
+  color-scheme: light dark;
+  --plano:#f9f9f7; --superficie:#fcfcfb; --tinta:#0b0b0b; --tinta2:#52514e; --apagado:#898781;
+  --rejilla:#e1e0d9; --eje:#c3c2b7; --borde:rgba(11,11,11,.10);
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --neutro:#b9b7ae;
+  --bien:#0ca30c; --aviso:#fab219; --serio:#ec835a; --critico:#d03b3b;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --plano:#0d0d0d; --superficie:#1a1a19; --tinta:#fff; --tinta2:#c3c2b7; --apagado:#898781;
+  --rejilla:#2c2c2a; --eje:#383835; --borde:rgba(255,255,255,.10);
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --neutro:#6b6a63;
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--plano);color:var(--tinta);
+     font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:15px;line-height:1.5}
+.envoltorio{max-width:940px;margin:0 auto;padding:24px 16px 64px}
+header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:24px;flex-wrap:wrap}
+h1{font-size:20px;margin:0;font-weight:650}
+h2{font-size:15px;margin:0 0 2px;font-weight:600}
+a{color:var(--s1)}
+.sub{color:var(--tinta2);font-size:13px;margin:0}
+.apagado{color:var(--apagado);font-size:12px}
+.tarjeta{background:var(--superficie);border:1px solid var(--borde);border-radius:14px;
+         padding:18px;margin-bottom:16px}
+.heroe{display:flex;gap:28px;flex-wrap:wrap;align-items:flex-end}
+.cifra{font-size:56px;font-weight:650;line-height:1;letter-spacing:-.02em}
+.mini{font-size:24px;font-weight:600;line-height:1.1}
+.pastillas{display:flex;gap:20px;flex-wrap:wrap;margin-top:4px}
+.delta{font-size:13px;font-weight:600}
+.arriba{color:var(--bien)} .abajo{color:var(--critico)}
+.leyenda{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--tinta2);margin:6px 0 2px}
+.llave{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.rangos{display:flex;gap:6px;margin-left:auto}
+.rangos button{font:inherit;font-size:12px;padding:4px 10px;border-radius:999px;cursor:pointer;
+  border:1px solid var(--borde);background:transparent;color:var(--tinta2)}
+.rangos button[aria-pressed="true"]{background:var(--tinta);color:var(--superficie);border-color:transparent}
+svg{display:block;width:100%;overflow:visible}
+.pista{position:fixed;pointer-events:none;background:var(--superficie);border:1px solid var(--borde);
+  border-radius:10px;padding:8px 10px;font-size:12px;box-shadow:0 6px 24px rgba(0,0,0,.14);
+  opacity:0;transition:opacity .1s;z-index:9;max-width:230px}
+table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}
+th,td{text-align:right;padding:5px 8px;border-bottom:1px solid var(--rejilla)}
+th:first-child,td:first-child{text-align:left}
+details{margin-top:10px} summary{cursor:pointer;font-size:13px;color:var(--tinta2)}
+.ajustes{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-top:10px}
+.ajustes label{font-size:12px;color:var(--tinta2);display:block}
+.ajustes input{width:92px;font:inherit;padding:8px;border-radius:9px;border:1px solid var(--borde);
+  background:var(--plano);color:inherit}
+.ajustes button{font:inherit;padding:9px 16px;border:0;border-radius:9px;background:var(--tinta);
+  color:var(--superficie);font-weight:600;cursor:pointer}
+.aviso{background:color-mix(in srgb,var(--aviso) 14%,var(--superficie));border-radius:10px;
+  padding:10px 12px;font-size:13px;color:var(--tinta2)}
+.cargando{text-align:center;padding:48px 0;color:var(--tinta2)}
+</style></head><body>
+<div class="envoltorio">
+<header>
+  <div><h1>Tu progreso</h1><p class="sub" id="periodo">Cargando...</p></div>
+  <p class="apagado"><span id="sincro"></span> · <a href="/panel/salir">Salir</a></p>
+</header>
+<div id="cuerpo"><p class="cargando">Trayendo tus datos de Garmin. La primera vez tarda un poco.</p></div>
+</div>
+<div class="pista" id="pista"></div>
+<script>
+var NS = 'http://www.w3.org/2000/svg';
+var pista = document.getElementById('pista');
+var D = null, rango = 0;
+
+function E(t, a, p) {
+  var e = document.createElementNS(NS, t);
+  for (var k in a) e.setAttribute(k, a[k]);
+  if (p) p.appendChild(e);
+  return e;
+}
+function H(t, a, p) {
+  var e = document.createElement(t);
+  for (var k in a) {
+    if (k === 'html') e.innerHTML = a[k];
+    else if (k === 'text') e.textContent = a[k];
+    else e.setAttribute(k, a[k]);
+  }
+  if (p) p.appendChild(e);
+  return e;
+}
+function color(n) { return getComputedStyle(document.documentElement).getPropertyValue('--' + n).trim(); }
+function mostrarPista(ev, html) {
+  pista.innerHTML = html;
+  pista.style.opacity = 1;
+  pista.style.left = Math.min(ev.clientX + 14, innerWidth - 240) + 'px';
+  pista.style.top = Math.max(8, ev.clientY - 12) + 'px';
+}
+function ocultarPista() { pista.style.opacity = 0; }
+
+var MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+function fechaCorta(d) { return Number(d.slice(8, 10)) + ' ' + MESES[Number(d.slice(5, 7)) - 1]; }
+function fechaMes(d) { return MESES[Number(d.slice(5, 7)) - 1] + ' ' + d.slice(2, 4); }
+function num(v, dec) { return v == null ? '-' : Number(v).toFixed(dec == null ? 0 : dec); }
+
+// ─── Dibujo ───
+
+function lienzo(host, alto) {
+  host.innerHTML = '';
+  var w = Math.max(280, host.clientWidth);
+  var s = E('svg', { viewBox: '0 0 ' + w + ' ' + alto, height: alto }, host);
+  return { s: s, w: w, h: alto, iz: 42, de: 14, ar: 14, ab: 26 };
+}
+function ejeY(g, min, max, fmt) {
+  for (var i = 0; i <= 4; i++) {
+    var v = min + ((max - min) * i) / 4;
+    var y = g.h - g.ab - ((v - min) / (max - min || 1)) * (g.h - g.ab - g.ar);
+    E('line', { x1: g.iz, x2: g.w - g.de, y1: y, y2: y, stroke: color('rejilla'), 'stroke-width': 1 }, g.s);
+    var t = E('text', { x: g.iz - 8, y: y + 4, 'text-anchor': 'end', fill: color('apagado'),
+      'font-size': 11, 'font-variant-numeric': 'tabular-nums' }, g.s);
+    t.textContent = fmt ? fmt(v) : Math.round(v);
+  }
+}
+function ejeX(g, etiquetas, px) {
+  var caben = Math.max(2, Math.floor((g.w - g.iz - g.de) / 86));
+  var paso = Math.max(1, Math.ceil(etiquetas.length / caben));
+  for (var i = 0; i < etiquetas.length; i += paso) {
+    var t = E('text', { x: px(i), y: g.h - 6, 'text-anchor': 'middle', fill: color('apagado'), 'font-size': 11 }, g.s);
+    t.textContent = etiquetas[i];
+  }
+}
+
+function grafLineas(host, puntos, series, opc) {
+  opc = opc || {};
+  if (!puntos.length) return;
+  var g = lienzo(host, opc.alto || 240);
+  var vals = [];
+  series.forEach(function (se) { puntos.forEach(function (p) { if (p[se.k] != null) vals.push(p[se.k]); }); });
+  var max = Math.max.apply(null, vals), min = opc.cero !== false ? 0 : Math.min.apply(null, vals);
+  if (max === min) max = min + 1;
+  var px = function (i) { return g.iz + (i / Math.max(1, puntos.length - 1)) * (g.w - g.iz - g.de); };
+  var py = function (v) { return g.h - g.ab - ((v - min) / (max - min)) * (g.h - g.ab - g.ar); };
+
+  ejeY(g, min, max);
+  ejeX(g, puntos.map(function (p) { return opc.mes ? fechaMes(p.d) : fechaCorta(p.d); }), px);
+
+  // Se dibuja de la ultima a la primera para que la serie principal quede
+  // encima: la fatiga pica mucho mas alto y si se pinta la ultima tapa justo
+  // lo que se viene a mirar.
+  series.slice().reverse().forEach(function (se) {
+    var d = puntos.map(function (p, i) { return (i ? 'L' : 'M') + px(i).toFixed(1) + ' ' + py(p[se.k] || 0).toFixed(1); }).join(' ');
+    if (se.relleno)
+      E('path', { d: d + ' L' + px(puntos.length - 1) + ' ' + py(min) + ' L' + px(0) + ' ' + py(min) + ' Z',
+        fill: color(se.c), 'fill-opacity': .1, stroke: 'none' }, g.s);
+    E('path', { d: d, fill: 'none', stroke: color(se.c), 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }, g.s);
+    var ult = puntos[puntos.length - 1][se.k];
+    if (ult != null) {
+      E('circle', { cx: px(puntos.length - 1), cy: py(ult), r: 4.5, fill: color(se.c),
+        stroke: color('superficie'), 'stroke-width': 2 }, g.s);
+    }
+  });
+
+  var cruz = E('line', { y1: g.ar, y2: g.h - g.ab, stroke: color('eje'), 'stroke-width': 1, opacity: 0 }, g.s);
+  var capa = E('rect', { x: g.iz, y: g.ar, width: g.w - g.iz - g.de, height: g.h - g.ab - g.ar, fill: 'transparent' }, g.s);
+  capa.addEventListener('mousemove', function (ev) {
+    var caja = g.s.getBoundingClientRect();
+    var rel = ((ev.clientX - caja.left) / caja.width) * g.w;
+    var i = Math.round(((rel - g.iz) / (g.w - g.iz - g.de)) * (puntos.length - 1));
+    i = Math.max(0, Math.min(puntos.length - 1, i));
+    cruz.setAttribute('x1', px(i)); cruz.setAttribute('x2', px(i)); cruz.setAttribute('opacity', 1);
+    var html = '<strong>' + fechaCorta(puntos[i].d) + ' ' + puntos[i].d.slice(0, 4) + '</strong>';
+    series.forEach(function (se) {
+      html += '<br><span class="llave" style="background:' + color(se.c) + '"></span>' +
+        se.n + ': ' + num(puntos[i][se.k], se.dec == null ? 0 : se.dec);
+    });
+    if (opc.extra) html += opc.extra(puntos[i]);
+    mostrarPista(ev, html);
+  });
+  capa.addEventListener('mouseleave', function () { cruz.setAttribute('opacity', 0); ocultarPista(); });
+}
+
+function grafDivergente(host, puntos, clave) {
+  if (!puntos.length) return;
+  var g = lienzo(host, 150);
+  var vals = puntos.map(function (p) { return p[clave] || 0; });
+  var tope = Math.max(10, Math.max.apply(null, vals.map(Math.abs)));
+  var px = function (i) { return g.iz + (i / Math.max(1, puntos.length - 1)) * (g.w - g.iz - g.de); };
+  var py = function (v) { return g.ar + ((tope - v) / (2 * tope)) * (g.h - g.ab - g.ar); };
+
+  ejeY(g, -tope, tope);
+  ejeX(g, puntos.map(function (p) { return fechaMes(p.d); }), px);
+
+  var linea = puntos.map(function (p, i) { return (i ? 'L' : 'M') + px(i).toFixed(1) + ' ' + py(p[clave] || 0).toFixed(1); }).join(' ');
+  var area = linea + ' L' + px(puntos.length - 1) + ' ' + py(0) + ' L' + px(0) + ' ' + py(0) + ' Z';
+  var id = 'c' + Math.random().toString(36).slice(2);
+  var defs = E('defs', {}, g.s);
+  var c1 = E('clipPath', { id: id + 'a' }, defs);
+  E('rect', { x: 0, y: 0, width: g.w, height: py(0) }, c1);
+  var c2 = E('clipPath', { id: id + 'b' }, defs);
+  E('rect', { x: 0, y: py(0), width: g.w, height: g.h - py(0) }, c2);
+  E('path', { d: area, fill: color('s1'), 'fill-opacity': .22, 'clip-path': 'url(#' + id + 'a)' }, g.s);
+  E('path', { d: area, fill: color('critico'), 'fill-opacity': .22, 'clip-path': 'url(#' + id + 'b)' }, g.s);
+  E('line', { x1: g.iz, x2: g.w - g.de, y1: py(0), y2: py(0), stroke: color('eje'), 'stroke-width': 1 }, g.s);
+  E('path', { d: linea, fill: 'none', stroke: color('apagado'), 'stroke-width': 1.2 }, g.s);
+
+  var capa = E('rect', { x: g.iz, y: g.ar, width: g.w - g.iz - g.de, height: g.h - g.ab - g.ar, fill: 'transparent' }, g.s);
+  capa.addEventListener('mousemove', function (ev) {
+    var caja = g.s.getBoundingClientRect();
+    var rel = ((ev.clientX - caja.left) / caja.width) * g.w;
+    var i = Math.max(0, Math.min(puntos.length - 1, Math.round(((rel - g.iz) / (g.w - g.iz - g.de)) * (puntos.length - 1))));
+    mostrarPista(ev, '<strong>' + fechaCorta(puntos[i].d) + ' ' + puntos[i].d.slice(0, 4) + '</strong><br>Frescura: ' +
+      num(puntos[i][clave], 1) + '<br>' + lecturaFrescura(puntos[i][clave]));
+  });
+  capa.addEventListener('mouseleave', ocultarPista);
+}
+
+function grafApilado(host, filas, claves, nombres, colores) {
+  if (!filas.length) return;
+  var g = lienzo(host, 200);
+  var totales = filas.map(function (f) {
+    return claves.reduce(function (s, k) { return s + (f.horas[k] || 0); }, 0);
+  });
+  var max = Math.max(1, Math.max.apply(null, totales));
+  var hueco = (g.w - g.iz - g.de) / filas.length;
+  var ancho = Math.min(24, Math.max(2, hueco - 2));
+  ejeY(g, 0, max, function (v) { return v.toFixed(0) + 'h'; });
+  ejeX(g, filas.map(function (f) { return fechaMes(f.semana); }), function (i) { return g.iz + hueco * (i + .5); });
+
+  filas.forEach(function (f, i) {
+    var y = g.h - g.ab;
+    claves.forEach(function (k, j) {
+      var v = f.horas[k] || 0;
+      if (!v) return;
+      var alto = (v / max) * (g.h - g.ab - g.ar);
+      y -= alto;
+      var r = E('rect', { x: g.iz + hueco * i + (hueco - ancho) / 2, y: y, width: ancho,
+        height: Math.max(1, alto - 2), fill: colores[j], rx: 2 }, g.s);
+      r.addEventListener('mousemove', function (ev) {
+        var html = '<strong>Semana del ' + fechaCorta(f.semana) + '</strong>';
+        claves.forEach(function (k2, j2) {
+          if (f.horas[k2]) html += '<br><span class="llave" style="background:' + colores[j2] + '"></span>' +
+            nombres[j2] + ': ' + f.horas[k2].toFixed(1) + ' h';
+        });
+        html += '<br>' + f.km + ' km · ' + f.desnivel + ' m · carga ' + f.carga;
+        mostrarPista(ev, html);
+      });
+      r.addEventListener('mouseleave', ocultarPista);
+    });
+  });
+}
+
+function grafDispersion(host, puntos, unidad) {
+  if (!puntos.length) return;
+  var g = lienzo(host, 220);
+  var vals = puntos.map(function (p) { return p.valor; });
+  var min = Math.min.apply(null, vals) * .95, max = Math.max.apply(null, vals) * 1.05;
+  var t0 = Date.parse(puntos[0].d), t1 = Date.parse(puntos[puntos.length - 1].d) || t0 + 1;
+  var px = function (d) { return g.iz + ((Date.parse(d) - t0) / Math.max(1, t1 - t0)) * (g.w - g.iz - g.de); };
+  var py = function (v) { return g.h - g.ab - ((v - min) / (max - min || 1)) * (g.h - g.ab - g.ar); };
+  ejeY(g, min, max, function (v) { return v.toFixed(1); });
+  ejeX(g, puntos.map(function (p) { return fechaMes(p.d); }), function (i) { return px(puntos[i].d); });
+
+  // Mediana movil: una salida suelta depende del viento y del desnivel; lo
+  // que se lee es la tendencia.
+  if (puntos.length >= 9) {
+    var suave = puntos.map(function (_, i) {
+      var trozo = puntos.slice(Math.max(0, i - 4), i + 5).map(function (q) { return q.valor; }).sort(function (a, b) { return a - b; });
+      return trozo[Math.floor(trozo.length / 2)];
+    });
+    E('path', { d: puntos.map(function (p, i) { return (i ? 'L' : 'M') + px(p.d).toFixed(1) + ' ' + py(suave[i]).toFixed(1); }).join(' '),
+      fill: 'none', stroke: color('s3'), 'stroke-width': 2, 'stroke-linejoin': 'round' }, g.s);
+  }
+  puntos.forEach(function (p) {
+    var c = E('circle', { cx: px(p.d), cy: py(p.valor), r: 4.5, fill: color('s1'),
+      stroke: color('superficie'), 'stroke-width': 2 }, g.s);
+    c.addEventListener('mousemove', function (ev) {
+      mostrarPista(ev, '<strong>' + fechaCorta(p.d) + ' ' + p.d.slice(0, 4) + '</strong><br>' +
+        p.valor.toFixed(2) + ' ' + unidad + '<br>' + p.km + ' km · ' + p.desnivel + ' m · ' + p.fc + ' ppm');
+    });
+    c.addEventListener('mouseleave', ocultarPista);
+  });
+}
+
+// ─── Lectura en palabras ───
+
+function lecturaFrescura(v) {
+  if (v == null) return '';
+  if (v > 15) return 'Muy fresco: descansado, y si dura, desentrenando.';
+  if (v > 5) return 'Fresco: buen dia para apretar.';
+  if (v > -10) return 'En equilibrio: carga sostenible.';
+  if (v > -25) return 'Cargado: normal en una semana fuerte.';
+  return 'Muy cargado: toca aflojar.';
+}
+function delta(actual, antes, etiqueta) {
+  if (!antes) return '';
+  var dif = actual - antes;
+  var clase = dif >= 0 ? 'arriba' : 'abajo';
+  return '<span style="white-space:nowrap"><span class="delta ' + clase + '">' +
+    (dif >= 0 ? '+' : '') + dif.toFixed(1) + '</span> <span class="apagado">vs ' +
+    etiqueta + '</span></span>';
+}
+
+var NOMBRES = { cycling: 'Bici', road_biking: 'Bici (carretera)', gravel_cycling: 'Gravel',
+  mountain_biking: 'BTT', running: 'Correr', walking: 'Caminar', hiking: 'Montaña',
+  strength_training: 'Fuerza', paddelball: 'Padel', indoor_cycling: 'Rodillo', otros: 'Otros' };
+function nombreDeporte(k) { return NOMBRES[k] || k; }
+
+// ─── Montaje ───
+
+function recorta(curva) {
+  return rango ? curva.slice(Math.max(0, curva.length - rango)) : curva;
+}
+
+function pintar() {
+  var c = document.getElementById('cuerpo');
+  c.innerHTML = '';
+  var t = D.total, hoy = D.hoy;
+
+  document.getElementById('periodo').textContent =
+    (t.desde ? 'Desde ' + fechaCorta(t.desde) + ' de ' + t.desde.slice(0, 4) + ' · ' : '') +
+    t.actividades + ' actividades · ' + t.horas + ' h · ' + t.km.toLocaleString('es') + ' km · ' +
+    t.desnivel.toLocaleString('es') + ' m de desnivel';
+  document.getElementById('sincro').textContent = D.estado.ultima
+    ? 'Actualizado ' + new Date(D.estado.ultima).toLocaleString('es', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+    : '';
+
+  // Heroe: la forma fisica de hoy y con que se compara.
+  var heroe = H('div', { class: 'tarjeta' }, c);
+  H('h2', { text: 'Forma fisica' }, heroe);
+  H('p', { class: 'sub', text: 'Cuanto entrenamiento llevas acumulado. Sube cuando entrenas mas de lo que venias haciendo.' }, heroe);
+  var fila = H('div', { class: 'heroe' }, heroe);
+  var izq = H('div', {}, fila);
+  H('div', { class: 'cifra', text: num(hoy.ctl, 1) }, izq);
+  H('div', { class: 'pastillas', html:
+    delta(hoy.ctl, D.hace30, '30 dias') + delta(hoy.ctl, D.hace90, '90 dias') +
+    (D.hace365 ? delta(hoy.ctl, D.hace365, 'un año') : '') }, izq);
+  if (D.mejor && D.mejor.ctl)
+    H('div', { class: 'apagado', text: 'El ' + Math.round((hoy.ctl / D.mejor.ctl) * 100) +
+      '% de tu maximo historico.' }, izq);
+  var der = H('div', {}, fila);
+  H('div', { class: 'mini', text: num(hoy.tsb, 1) }, der);
+  H('div', { class: 'apagado', text: 'Frescura hoy. ' + lecturaFrescura(hoy.tsb) }, der);
+  if (D.mejor)
+    H('div', { class: 'apagado', text: 'Tu maximo fue ' + num(D.mejor.ctl, 1) +
+      ' el ' + fechaCorta(D.mejor.d) + ' de ' + D.mejor.d.slice(0, 4) + '.' }, der);
+
+  // Curva principal
+  var tf = H('div', { class: 'tarjeta' }, c);
+  var cab = H('div', { style: 'display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap' }, tf);
+  var tit = H('div', {}, cab);
+  H('h2', { text: 'Condicion fisica desde que empezaste' }, tit);
+  H('p', { class: 'sub', text: 'Azul, lo acumulado. Naranja, el cansancio reciente. Cuando el azul sube sostenidamente, estas mejorando.' }, tit);
+  var rangos = H('div', { class: 'rangos' }, cab);
+  [['Todo', 0], ['1 año', 365], ['6 meses', 183], ['3 meses', 92]].forEach(function (op) {
+    var b = H('button', { text: op[0], type: 'button' }, rangos);
+    b.setAttribute('aria-pressed', rango === op[1] ? 'true' : 'false');
+    b.onclick = function () { rango = op[1]; pintar(); };
+  });
+  H('div', { class: 'leyenda', html:
+    '<span><span class="llave" style="background:var(--s1)"></span>Forma fisica</span>' +
+    '<span><span class="llave" style="background:var(--s2)"></span>Fatiga</span>' }, tf);
+  var lienzoForma = H('div', {}, tf);
+  grafLineas(lienzoForma, recorta(D.curva),
+    [{ k: 'ctl', c: 's1', n: 'Forma fisica', relleno: true, dec: 1 }, { k: 'atl', c: 's2', n: 'Fatiga', dec: 1 }],
+    { alto: 260, mes: true, extra: function (p) { return p.carga ? '<br><span class="apagado">Carga del dia: ' + p.carga + '</span>' : ''; } });
+
+  var tabla = H('details', {}, tf);
+  H('summary', { text: 'Ver los numeros' }, tabla);
+  var meses = {};
+  D.curva.forEach(function (p) { meses[p.d.slice(0, 7)] = p; });
+  var filas = Object.keys(meses).sort().slice(-14).map(function (m) { return meses[m]; });
+  H('table', { html: '<tr><th>Mes</th><th>Forma</th><th>Fatiga</th><th>Frescura</th></tr>' +
+    filas.map(function (p) {
+      return '<tr><td>' + fechaMes(p.d) + '</td><td>' + num(p.ctl, 1) + '</td><td>' +
+        num(p.atl, 1) + '</td><td>' + num(p.tsb, 1) + '</td></tr>';
+    }).join('') }, tabla);
+
+  // Frescura
+  var tfr = H('div', { class: 'tarjeta' }, c);
+  H('h2', { text: 'Frescura' }, tfr);
+  H('p', { class: 'sub', text: 'Por encima de cero llegas descansado; por debajo, con fatiga acumulada. Las mejores marcas suelen salir volviendo a cero desde abajo.' }, tfr);
+  grafDivergente(H('div', {}, tfr), recorta(D.curva), 'tsb');
+
+  // Semanas
+  var ts = H('div', { class: 'tarjeta' }, c);
+  H('h2', { text: 'Horas por semana' }, ts);
+  H('p', { class: 'sub', text: 'Todo lo que haces suma fatiga, no solo la bici.' }, ts);
+  var claves = D.semanas.deportes, nombres = claves.map(nombreDeporte);
+  var cols = [color('s1'), color('s2'), color('s3'), color('neutro'), color('neutro')];
+  H('div', { class: 'leyenda', html: claves.map(function (k, j) {
+    return '<span><span class="llave" style="background:' + cols[j] + '"></span>' + nombres[j] + '</span>';
+  }).join('') }, ts);
+  var semanas = D.semanas.filas;
+  grafApilado(H('div', {}, ts), rango ? semanas.slice(-Math.ceil(rango / 7)) : semanas, claves, nombres, cols);
+
+  // Eficiencia
+  if (D.eficiencia.length >= 3) {
+    var te = H('div', { class: 'tarjeta' }, c);
+    H('h2', { text: 'Eficiencia: metros por pulsacion' }, te);
+    H('p', { class: 'sub', text: 'Cuanto avanzas por cada latido, en salidas de bici de mas de 45 minutos. Sin potenciometro, es la mejor señal de que estas mejorando: mas metros con el mismo pulso. El viento y el desnivel mueven cada punto, asi que mira la linea, no el dia suelto.' }, te);
+    grafDispersion(H('div', {}, te), D.eficiencia, 'm/latido');
+  }
+
+  // Potencia y cadencia: el sitio ya esta hecho.
+  var tp = H('div', { class: 'tarjeta' }, c);
+  H('h2', { text: 'Potencia y cadencia' }, tp);
+  if (D.tiene_potencia || D.tiene_cadencia) {
+    if (D.tiene_potencia) {
+      H('p', { class: 'sub', text: 'Vatios por pulsacion en cada salida: sube cuando mejoras.' }, tp);
+      grafDispersion(H('div', {}, tp), D.eficiencia.filter(function (p) { return p.vatios_por_pulso; })
+        .map(function (p) { return { d: p.d, valor: p.vatios_por_pulso, km: p.km, desnivel: p.desnivel, fc: p.fc }; }), 'W/latido');
+    }
+    if (D.tiene_cadencia) H('p', { class: 'sub', text: 'Cadencia registrada: ya entra en la base de datos.' }, tp);
+  } else {
+    H('p', { class: 'aviso', text: 'Todavia no hay potencia ni cadencia en tus salidas. El panel ya las guarda y las calcula: el dia que conectes un potenciometro, la carga pasa a medirse con vatios en vez de con el pulso y estos graficos aparecen solos, sin tocar nada.' }, tp);
+  }
+
+  // Ajustes
+  var ta = H('div', { class: 'tarjeta' }, c);
+  H('h2', { text: 'Ajustes' }, ta);
+  H('p', { class: 'sub', html: 'La carga se calcula ' +
+    (D.ajustes.ftp && D.fuentes.indexOf('potencia') >= 0 ? 'con potencia' : 'con tu frecuencia cardiaca') +
+    '. Estos valores salen de tus propios datos' + (D.ajustes.hr_auto ? ' automaticamente' : '') +
+    '; corrigelos si no cuadran y la curva se recalcula entera.' }, ta);
+  var f = H('div', { class: 'ajustes' }, ta);
+  [['hr_rest', 'FC en reposo'], ['hr_max', 'FC maxima'], ['ftp', 'FTP (vatios)']].forEach(function (campo) {
+    var caja = H('div', {}, f);
+    H('label', { text: campo[1], for: campo[0] }, caja);
+    var inp = H('input', { id: campo[0], type: 'number', inputmode: 'numeric' }, caja);
+    inp.value = D.ajustes[campo[0]] || '';
+  });
+  var boton = H('button', { text: 'Guardar', type: 'button' }, f);
+  boton.onclick = function () {
+    boton.textContent = 'Guardando...';
+    fetch('/panel/ajustes', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hr_rest: document.getElementById('hr_rest').value,
+        hr_max: document.getElementById('hr_max').value, ftp: document.getElementById('ftp').value }) })
+      .then(cargar);
+  };
+  if (D.ajustes.ftp_estimado)
+    H('p', { class: 'apagado', text: 'El FTP de ' + D.ajustes.ftp + ' W es una estimacion a partir de tus salidas largas. Ponlo a mano si lo conoces.' }, ta);
+
+  // Veredicto en una frase. La forma fisica mide volumen; lo que dice si uno
+  // va mejorando de verdad es avanzar mas por latido que el año pasado.
+  if (D.progreso) {
+    var mejora = D.progreso.variacion;
+    var veredicto = H('p', { class: 'aviso', style: 'margin-top:14px' }, heroe);
+    veredicto.innerHTML = mejora >= 1
+      ? 'Vas mejor que hace un año: rindes un <strong>' + mejora.toFixed(1) +
+        '% mas por latido</strong> (' + D.progreso.ahora.toFixed(2) + ' frente a ' +
+        D.progreso.antes.toFixed(2) + ' metros). Misma velocidad, menos pulsaciones.'
+      : mejora <= -1
+        ? 'Ahora mismo rindes un <strong>' + Math.abs(mejora).toFixed(1) +
+          '% menos por latido</strong> que hace un año (' + D.progreso.ahora.toFixed(2) +
+          ' frente a ' + D.progreso.antes.toFixed(2) + ' metros).'
+        : 'Rindes practicamente igual que hace un año: ' + D.progreso.ahora.toFixed(2) +
+          ' metros por latido frente a ' + D.progreso.antes.toFixed(2) + '.';
+  }
+
+  var pie = H('p', { class: 'apagado', style: 'margin-top:24px' }, c);
+  pie.innerHTML = 'Tus datos de Garmin se guardan en este servidor para poder dibujar el historico. ' +
+    (D.estado.completo ? '' : 'Todavia se esta trayendo tu historico completo. ') +
+    '<a href="#" id="forzar">Actualizar ahora</a>';
+  document.getElementById('forzar').onclick = function (ev) {
+    ev.preventDefault();
+    this.textContent = 'Actualizando...';
+    fetch('/panel/sync', { method: 'POST' }).then(cargar);
+  };
+}
+
+var intentos = 0;
+function cargar() {
+  return fetch('/panel/datos').then(function (r) { return r.json(); }).then(function (d) {
+    D = d;
+    if (!d.total || !d.total.actividades) {
+      intentos++;
+      if (intentos < 40) return setTimeout(cargar, 4000);
+      document.getElementById('cuerpo').innerHTML =
+        '<p class="cargando">No se han podido traer tus datos. Puede que Garmin este limitando las peticiones; vuelve en unos minutos.</p>';
+      return;
+    }
+    pintar();
+    if (!d.estado.completo) { intentos = 0; setTimeout(function () { fetch('/panel/sync', { method: 'POST' }).then(cargar); }, 1500); }
+  });
+}
+
+var temporizador;
+addEventListener('resize', function () { clearTimeout(temporizador); temporizador = setTimeout(function () { if (D) pintar(); }, 200); });
+cargar();
+</script></body></html>
+`;
 
 // ──────────────────────────────── Router ────────────────────────────────
 
@@ -1653,6 +2778,8 @@ export default {
 				});
 			}
 
+			if (pathname === "/panel" || pathname.startsWith("/panel/")) return handlePanel(request, env, ctx);
+
 			if (pathname === "/mcp") {
 				const userId = await userForRequest(request, env);
 				if (!userId)
@@ -1704,5 +2831,11 @@ esta URL como conector personalizado en Claude:</p>
 
 		if (env.LOGS) ctx?.waitUntil?.(record(env, request, response.status, note));
 		return response;
+	},
+
+	// Descarga diaria. Es lo que hace que el panel tenga historico sin que
+	// nadie tenga que abrirlo.
+	async scheduled(event, env, ctx) {
+		ctx.waitUntil(sincronizarTodos(env).catch(() => {}));
 	},
 };

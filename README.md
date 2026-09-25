@@ -43,6 +43,35 @@ listado no es estable, asi que `garmin_courses` prueba las conocidas en
 orden y devuelve cual ha contestado. Si un dia dejan de funcionar todas, el
 error enumera lo que se intento.
 
+## Panel de progreso
+
+`/panel` es una pagina con el historico de entrenamiento: condicion fisica
+desde el primer dia, frescura, horas por semana y eficiencia. Se entra con la
+cuenta de Garmin, igual que el conector.
+
+### Que se guarda ahora
+
+**Esto cambia lo de arriba.** Sin historico no hay curva de forma, asi que el
+panel guarda en D1 las actividades y los datos diarios de cada usuario
+conectado. Sigue sin guardarse ni la contrasena ni el email. Queda dicho en la
+pantalla de login, porque el servidor lo hospeda una persona y quien conecta su
+cuenta tiene derecho a saberlo antes de entrar.
+
+Un `scheduled` diario (ver `[triggers]` en `wrangler.toml`) recorre a todos los
+usuarios y actualiza lo que falte. La primera carga trae el historico completo
+en varias pasadas acotadas: Garmin responde 429 si se le pide todo de golpe.
+
+### Como se mide la forma
+
+El modelo estandar (CTL/ATL/TSB) se apoya en el TSS, que se calcula con
+potencia. Sin potenciometro se sustituye por TRIMP de Banister sobre la
+frecuencia cardiaca, escalado para que una hora a umbral valga 100 igual que un
+TSS. La FC de reposo y la maxima salen de los propios datos y se pueden
+corregir a mano en el panel.
+
+El esquema guarda potencia y cadencia desde el primer dia. En cuanto una
+actividad las traiga, la carga pasa a calcularse con vatios sin tocar nada.
+
 ## Puesta en marcha
 
 ### Secretos de GitHub

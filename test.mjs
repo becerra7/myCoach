@@ -11,6 +11,63 @@ globalThis.setTimeout = (fn) => { fn(); return 0; };
  * propagado: se escribe, pero las lecturas no lo ven. Es el escenario que
  * rompia la conexion de otra persona desde otro pais.
  */
+
+/**
+ * D1 de mentira. Entiende solo las sentencias que usa el worker, que son
+ * pocas a proposito: toda la agregacion se hace en JS para que la base
+ * aguante en el plan gratuito y para poder probarla sin un SQLite de verdad.
+ */
+function makeD1() {
+	const tablas = new Map();
+	const tabla = (n) => {
+		if (!tablas.has(n)) tablas.set(n, new Map());
+		return tablas.get(n);
+	};
+	const clavePrimaria = { activities: ["user_id", "activity_id"], days: ["user_id", "date"], sync_state: ["user_id"] };
+
+	const ejecutar = (sql, args) => {
+		const limpio = sql.replace(/\s+/g, " ").trim();
+		if (/^CREATE/i.test(limpio)) return { results: [] };
+
+		const ins = limpio.match(/^INSERT(?: OR REPLACE)? INTO (\w+) \(([^)]+)\)/i);
+		if (ins) {
+			const [, nombre, columnas] = ins;
+			const cols = columnas.split(",").map((c) => c.trim());
+			const fila = Object.fromEntries(cols.map((c, i) => [c, args[i] ?? null]));
+			const pk = clavePrimaria[nombre];
+			tabla(nombre).set(pk ? pk.map((c) => fila[c]).join("|") : String(tabla(nombre).size), fila);
+			return { results: [] };
+		}
+
+		const sel = limpio.match(/FROM (\w+)/i);
+		const filas = [...tabla(sel[1]).values()].filter((f) => f.user_id === args[0]);
+
+		if (/MIN\(start_date\)/.test(limpio)) {
+			const fechas = filas.map((f) => f.start_date).sort();
+			return { results: [{ oldest: fechas[0] ?? null, newest: fechas.at(-1) ?? null, n: filas.length }] };
+		}
+		if (/AND date >= \?/.test(limpio))
+			return { results: filas.filter((f) => f.date >= args[1]).map((f) => ({ date: f.date })) };
+
+		const orden = limpio.match(/ORDER BY (\w+)/i)?.[1];
+		if (orden) filas.sort((a, b) => String(a[orden]).localeCompare(String(b[orden])));
+		return { results: filas };
+	};
+
+	const prepare = (sql) => ({
+		bind: (...args) => ({
+			async run() { return ejecutar(sql, args); },
+			async all() { return ejecutar(sql, args); },
+			async first() { return ejecutar(sql, args).results[0] ?? null; },
+		}),
+		async run() { return ejecutar(sql, []); },
+		async all() { return ejecutar(sql, []); },
+		async first() { return ejecutar(sql, []).results[0] ?? null; },
+	});
+
+	return { prepare, async batch(lote) { for (const q of lote) await q.run(); }, _tablas: tablas };
+}
+
 function makeEnv(seed = {}, { isolated = false } = {}) {
 	const store = new Map(Object.entries(seed));
 	const visible = isolated ? new Map(Object.entries(seed)) : store;
@@ -24,7 +81,11 @@ function makeEnv(seed = {}, { isolated = false } = {}) {
 			},
 			async put(k, v) { store.set(k, v); },
 			async delete(k) { store.delete(k); visible.delete(k); },
+			async list({ prefix = "" } = {}) {
+				return { keys: [...visible.keys()].filter((k) => k.startsWith(prefix)).map((name) => ({ name })), list_complete: true };
+			},
 		},
+		LOGS: makeD1(),
 		_store: store,
 	};
 }
@@ -750,6 +811,171 @@ const rpc = async (env, token, message) => {
 	check("tras renovar, devuelve datos", JSON.parse(r.body.result.content[0].text).last_night_avg === 77);
 	check("el token renovado se persiste",
 		JSON.parse(env._store.get(`user:${userId}`)).di_token === "nuevo");
+}
+
+// ── 10. Panel de progreso ──
+{
+	const HOY = new Date();
+	const haceDias = (n) => new Date(HOY.getTime() - n * 86400000).toISOString().slice(0, 10);
+
+	// 40 salidas, una cada tres dias, todas iguales: la forma tiene que subir
+	// y luego estabilizarse, que es lo que hace una carga constante.
+	const actividades = Array.from({ length: 40 }, (_, i) => ({
+		activityId: 1000 + i,
+		activityName: "Salida " + i,
+		activityType: { typeKey: i % 5 === 0 ? "running" : "road_biking" },
+		startTimeLocal: haceDias(120 - i * 3) + " 09:00:00",
+		duration: 5400,
+		movingDuration: 5400,
+		distance: 45000,
+		elevationGain: 500,
+		averageHR: 145,
+		maxHR: 178,
+		averageSpeed: 8.3,
+		calories: 1200,
+	}));
+
+	mockGarmin({ "ana@x.com": { password: "a", data: { displayName: "ana", hrv: 50 } } });
+	const env = makeEnv();
+
+	const realFetch = globalThis.fetch;
+	let listados = 0;
+
+	// Envuelve el mock de Garmin que este puesto: responde a lo que pide el
+	// panel y deja pasar el resto (login, perfil...).
+	const conPanel = (lista) => {
+		const abajo = globalThis.fetch;
+		globalThis.fetch = async (url, init) => {
+			const u = new URL(url);
+			if (u.pathname.includes("/activitylist-service/")) {
+				listados++;
+				const desde = Number(u.searchParams.get("start"));
+				return new Response(JSON.stringify(lista.slice(desde, desde + 100)));
+			}
+			if (u.pathname.includes("/usersummary-service/"))
+				return new Response(JSON.stringify({ restingHeartRate: 48, totalSteps: 9000, bodyBatteryHighestValue: 90 }));
+			if (u.pathname.includes("/wellness-service/") || u.pathname.includes("/hrv-service/"))
+				return new Response(JSON.stringify({}), { status: 404 });
+			return abajo(url, init);
+		};
+	};
+	conPanel(actividades);
+
+	// Sin cookie no se ve nada
+	const anon = await get(env, "/panel");
+	check("el panel pide login si no hay sesion", anon.status === 200 && (await anon.text()).includes("Entra con tu cuenta"));
+	check("los datos del panel exigen sesion", (await get(env, "/panel/datos")).status === 401);
+
+	// Entrar
+	const entrada = await postForm(env, "/panel/entrar", { email: "ana@x.com", password: "a" });
+	const galleta = (entrada.headers.get("Set-Cookie") || "").split(";")[0];
+	check("entrar deja una sesion", entrada.status === 302 && galleta.startsWith("panel="));
+	check("la cookie de sesion no viaja a terceros",
+		(entrada.headers.get("Set-Cookie") || "").includes("HttpOnly") &&
+		(entrada.headers.get("Set-Cookie") || "").includes("SameSite=Lax"));
+	const conSesion = { Cookie: galleta };
+
+	// Una cookie inventada no vale
+	check("una cookie falsa no entra",
+		(await get(env, "/panel/datos", { Cookie: "panel=falsa.firma" })).status === 401);
+
+	// Sincronizar
+	const sync = await worker.fetch(new Request(`${ORIGIN}/panel/sync`, { method: "POST", headers: conSesion }), env);
+	const avance = await sync.json();
+	check("la sincronizacion trae las actividades", avance.traidas === 40, `(${avance.traidas})`);
+	check("sabe que ya lo tiene todo", avance.completo === true);
+
+	const datos = await (await get(env, "/panel/datos", conSesion)).json();
+	check("guarda todas las actividades", datos.total.actividades === 40);
+	check("cuenta solo los km de bici", datos.total.km === 32 * 45, `(${datos.total.km})`);
+
+	// La curva
+	const curva = datos.curva;
+	check("la curva cubre desde la primera salida", curva[0].d === haceDias(120));
+	check("la forma sube con el entrenamiento", curva.at(-1).ctl > curva[10].ctl,
+		`(${curva[10].ctl} -> ${curva.at(-1).ctl})`);
+	check("la forma se estabiliza con carga constante",
+		Math.abs(curva.at(-1).ctl - curva[Math.floor(curva.length * 0.7)].ctl) < curva.at(-1).ctl * 0.3);
+	// La frescura usa los valores de ayer: un entreno duro hoy no puede bajar
+	// la forma antes de haberlo asimilado.
+	check("la frescura es forma menos fatiga del dia anterior",
+		Math.abs(curva[20].tsb - (curva[19].ctl - curva[19].atl)) < 0.05);
+	check("hay carga en los dias de entreno", curva.some((p) => p.carga > 0));
+	check("la carga sale del pulso", datos.fuentes.includes("pulso"));
+
+	// Referencias sacadas de los propios datos
+	check("deduce la FC maxima de las salidas", datos.ajustes.hr_max === 178);
+	check("deduce la FC de reposo de los dias", datos.ajustes.hr_rest === 48);
+
+	// Semanas y eficiencia
+	check("agrupa por semanas", datos.semanas.filas.length > 5);
+	check("separa los deportes", datos.semanas.deportes.includes("road_biking") && datos.semanas.deportes.includes("running"));
+	check("calcula metros por pulsacion", datos.eficiencia.length === 32 &&
+		Math.abs(datos.eficiencia[0].valor - 45000 / (145 * 90)) < 0.01);
+	check("dice que aun no hay potencia", datos.tiene_potencia === false);
+
+	// Sincronizar otra vez no duplica ni vuelve a pedir el historico entero
+	const antes = listados;
+	await worker.fetch(new Request(`${ORIGIN}/panel/sync`, { method: "POST", headers: conSesion }), env);
+	const otraVez = await (await get(env, "/panel/datos", conSesion)).json();
+	check("no duplica al resincronizar", otraVez.total.actividades === 40);
+	check("ya no vuelve a pedir el historico entero", listados - antes === 1, `(${listados - antes} paginas)`);
+
+	// Una salida nueva entra por delante de la lista: si se siguiera usando el
+	// desplazamiento guardado, se la saltaria para siempre.
+	actividades.unshift({ ...actividades[0], activityId: 9999, activityName: "Recien hecha",
+		startTimeLocal: haceDias(0) + " 09:00:00" });
+	await worker.fetch(new Request(`${ORIGIN}/panel/sync`, { method: "POST", headers: conSesion }), env);
+	const conNueva = await (await get(env, "/panel/datos", conSesion)).json();
+	check("recoge una salida nueva sin rehacer el historico", conNueva.total.actividades === 41,
+		`(${conNueva.total.actividades})`);
+
+	// Ajustes a mano: cambian la curva entera
+	await worker.fetch(new Request(`${ORIGIN}/panel/ajustes`, {
+		method: "POST", headers: { ...conSesion, "Content-Type": "application/json" },
+		body: JSON.stringify({ hr_rest: 40, hr_max: 200, ftp: "" }),
+	}), env);
+	const ajustada = await (await get(env, "/panel/datos", conSesion)).json();
+	check("los ajustes a mano mandan", ajustada.ajustes.hr_max === 200 && ajustada.ajustes.hr_rest === 40);
+	check("cambiar las referencias recalcula la forma", ajustada.hoy.ctl !== datos.hoy.ctl);
+
+	// Potencia: cuando aparezca, manda sobre el pulso
+	actividades.forEach((a) => { a.avgPower = 200; a.normPower = 215; a.averageBikingCadenceInRevPerMinute = 88; });
+	const env2 = makeEnv();
+	mockGarmin({ "ana@x.com": { password: "a", data: { displayName: "ana", hrv: 50 } } });
+	conPanel(actividades);
+	const entrada2 = await postForm(env2, "/panel/entrar", { email: "ana@x.com", password: "a" });
+	const sesion2 = { Cookie: (entrada2.headers.get("Set-Cookie") || "").split(";")[0] };
+	await worker.fetch(new Request(`${ORIGIN}/panel/sync`, { method: "POST", headers: sesion2 }), env2);
+	const conPotencia = await (await get(env2, "/panel/datos", sesion2)).json();
+	check("detecta la potencia en cuanto llega", conPotencia.tiene_potencia === true);
+	check("detecta la cadencia en cuanto llega", conPotencia.tiene_cadencia === true);
+	check("con potencia, la carga deja de salir del pulso",
+		conPotencia.fuentes.includes("potencia") && !conPotencia.fuentes.includes("pulso"));
+	check("estima un FTP si no se le da", conPotencia.ajustes.ftp > 0 && conPotencia.ajustes.ftp_estimado === true);
+	check("guarda los vatios por pulsacion", conPotencia.eficiencia[0].vatios_por_pulso > 0);
+
+	// Aislamiento entre usuarios
+	mockGarmin({ "bob@x.com": { password: "b", data: { displayName: "bob", hrv: 9 } } });
+	conPanel([]);
+	const entradaBob = await postForm(env, "/panel/entrar", { email: "bob@x.com", password: "b" });
+	const sesionBob = { Cookie: (entradaBob.headers.get("Set-Cookie") || "").split(";")[0] };
+	const deBob = await (await get(env, "/panel/datos", sesionBob)).json();
+	check("bob no ve las salidas de ana", deBob.total.actividades === 0);
+
+	// El cron recorre a todo el mundo sin que nadie abra el panel
+	const env3 = makeEnv();
+	mockGarmin({ "ana@x.com": { password: "a", data: { displayName: "ana", hrv: 50 } } });
+	conPanel(actividades.slice(0, 5));
+	const e3 = await postForm(env3, "/panel/entrar", { email: "ana@x.com", password: "a" });
+	const esperas = [];
+	await worker.scheduled({}, env3, { waitUntil: (p) => esperas.push(p) });
+	await Promise.all(esperas);
+	const trasCron = await (await get(env3, "/panel/datos",
+		{ Cookie: (e3.headers.get("Set-Cookie") || "").split(";")[0] })).json();
+	check("el cron sincroniza sin que nadie abra el panel", trasCron.total.actividades === 5);
+
+	globalThis.fetch = realFetch;
 }
 
 /** Firma un token como lo hace el worker, para poder fabricar uno en un test. */
