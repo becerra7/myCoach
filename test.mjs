@@ -861,6 +861,20 @@ const rpc = async (env, token, message) => {
 	check("calcula la edad y lee el umbral de lactato", pg.persona.edad === 36 && pg.persona.umbral_lactato_ppm === 171 && pg.persona.peso_kg === 72);
 }
 
+// ── 8b quinquies. Polilínea del recorrido ──
+{
+	mockGarmin({ "ana@x.com": { password: "a", data: { displayName: "ana", hrv: 50 } } });
+	const env = makeEnv();
+	const { tokens } = await connect(env, "ana@x.com", "a");
+	// Ejemplo de la documentación de Google: (38.5,-120.2) (40.7,-120.95) (43.252,-126.453)
+	globalThis.fetch = async () => new Response(JSON.stringify({ geoPolylineDTO: { polyline: [
+		{ lat: 38.5, lon: -120.2 }, { lat: 40.7, lon: -120.95 }, { lat: 43.252, lon: -126.453 }] } }));
+	const res = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 13, method: "tools/call",
+		params: { name: "garmin_activity_route", arguments: { activity_id: "9", puntos: 5 } } });
+	const out = JSON.parse(res.body.result.content[0].text);
+	check("codifica el recorrido como polilínea de Google", out.polilinea === "_p~iF~ps|U_ulLnnqC_mqNvxq`@", `(${out.polilinea})`);
+}
+
 // ── 8c. El caso de Paula: el KV no ha propagado ──
 {
 	mockGarmin({ "paula@x.com": { password: "p", data: { displayName: "paula", hrv: 61 } } });

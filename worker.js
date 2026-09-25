@@ -836,6 +836,28 @@ function perfilGarmin({ vo2, endurance, hill, estado, ajustes, fecha }) {
 	};
 }
 
+/** Polilínea codificada de Google (precisión 1e-5) a partir de puntos {lat, lon}. */
+function codificarPolilinea(puntos) {
+	let out = "";
+	let plat = 0;
+	let plon = 0;
+	const cod = (v) => {
+		v = v < 0 ? ~(v << 1) : v << 1;
+		let s = "";
+		while (v >= 0x20) { s += String.fromCharCode((0x20 | (v & 0x1f)) + 63); v >>= 5; }
+		return s + String.fromCharCode(v + 63);
+	};
+	for (const p of puntos) {
+		if (typeof p?.lat !== "number" || typeof p?.lon !== "number") continue;
+		const lat = Math.round(p.lat * 1e5);
+		const lon = Math.round(p.lon * 1e5);
+		out += cod(lat - plat) + cod(lon - plon);
+		plat = lat;
+		plon = lon;
+	}
+	return out;
+}
+
 const TOOLS = {
 	garmin_status: {
 		title: "Estado de la conexion con Garmin",
@@ -1099,6 +1121,10 @@ const TOOLS = {
 			return {
 				activity_id,
 				waypoints,
+				// El mismo recorrido con más puntos y comprimido (polilínea de Google,
+				// precisión 1e-5): cabe el trazado de muchas salidas en poco texto,
+				// que es lo que hace falta para mapas de lo recorrido.
+				polilinea: codificarPolilinea(linea.filter((_, i) => i % Math.max(1, Math.floor(linea.length / 120)) === 0 || i === linea.length - 1)),
 				distancia_km: round((data?.summaryDTO?.distance ?? 0) / 1000),
 				desnivel_m: round(data?.summaryDTO?.elevationGain, 0),
 				nota: "Puntos del recorrido real. Paselos a garmin_plan_route para repetirlo, o quite y anada alguno para variarlo.",
