@@ -587,7 +587,7 @@ function seriesDeActividad(details) {
 	const iFc = indice("directHeartRate");
 	const iAlt = indice("directElevation", "directCorrectedElevation");
 	const iDist = indice("sumDistance");
-	const iDur = indice("sumDuration", "sumMovingDuration", "sumElapsedDuration");
+	const iDur = indice("sumMovingDuration", "sumDuration", "sumElapsedDuration");
 	const iTs = indice("directTimestamp");
 	const filas = (details?.activityDetailMetrics || []).map((m) => m.metrics || []);
 	if (!filas.length || iDist < 0) return [];
@@ -702,26 +702,24 @@ function fcMaxSostenida(puntos, minutos) {
 
 /**
  * Desacople aeróbico (Friel): cuánto cae la relación velocidad/pulso de la
- * primera mitad a la segunda. Por debajo del 5 % indica buena resistencia; el
- * terreno lo altera, así que solo se calcula en salidas de 90 minutos o más.
+ * primera mitad a la segunda. Solo sirve con el terreno igualado: con un
+ * puerto en una mitad y la bajada en la otra salían cifras absurdas (−87 %).
+ * Por eso se mide únicamente sobre tramos llanos de 1 km, repartidos entre
+ * las dos mitades de la salida, y se exigen al menos 5 en cada una.
  */
 function desacople(puntos) {
-	const p = puntos.filter((x) => x.fc && x.t != null);
-	if (p.length < 20 || p.at(-1).t - p[0].t < 90 * 60) return null;
-	const mitad = p[0].t + (p.at(-1).t - p[0].t) / 2;
-	const tramo = (a) => {
-		if (a.length < 2) return null;
-		const v = (a.at(-1).d - a[0].d) / (a.at(-1).t - a[0].t);
-		const fc = MEDIA(a.map((x) => x.fc));
-		return v / fc;
-	};
-	const ef1 = tramo(p.filter((x) => x.t <= mitad));
-	const ef2 = tramo(p.filter((x) => x.t > mitad));
-	return ef1 && ef2 ? round(((ef1 - ef2) / ef1) * 100, 1) : null;
+	const tramos = tramosLlanos(puntos).filter((x) => x.fc);
+	if (tramos.length < 10) return null;
+	const mitad = (tramos[0].t + tramos.at(-1).t) / 2;
+	const ef = (a) => MEDIA(a.map((x) => x.v / x.fc));
+	const a = tramos.filter((x) => x.t <= mitad);
+	const b = tramos.filter((x) => x.t > mitad);
+	if (a.length < 5 || b.length < 5) return null;
+	return round(((ef(a) - ef(b)) / ef(a)) * 100, 1);
 }
 
-/** Velocidad en llano: tramos de 1 km con menos del 1,5 % de pendiente media. */
-function velocidadLlano(puntos) {
+/** Tramos de 1 km con menos del 1,5 % de pendiente media, con su velocidad y pulso. */
+function tramosLlanos(puntos) {
 	const e = suavizarAltitud(puntos);
 	const p = puntos.map((x, i) => ({ ...x, es: e[i] })).filter((x) => x.es != null && x.t != null);
 	const tramos = [];
@@ -731,17 +729,41 @@ function velocidadLlano(puntos) {
 			const pend = Math.abs(p[i].es - p[a].es) / (p[i].d - p[a].d);
 			if (pend < 0.015 && p[i].t > p[a].t) {
 				const fcs = p.slice(a, i + 1).map((x) => x.fc).filter(Boolean);
-				tramos.push({ v: ((p[i].d - p[a].d) / (p[i].t - p[a].t)) * 3.6, fc: fcs.length ? MEDIA(fcs) : null });
+				tramos.push({ t: p[a].t, v: ((p[i].d - p[a].d) / (p[i].t - p[a].t)) * 3.6, fc: fcs.length ? MEDIA(fcs) : null });
 			}
 			a = i;
 		}
 	}
+	return tramos;
+}
+
+/** Velocidad en llano y pulso con que se consigue. */
+function velocidadLlano(puntos) {
+	const tramos = tramosLlanos(puntos);
 	if (tramos.length < 3) return null;
 	return {
 		km: tramos.length,
 		vel_media_kmh: round(MEDIA(tramos.map((x) => x.v)), 1),
 		fc_media: tramos.some((x) => x.fc) ? Math.round(MEDIA(tramos.map((x) => x.fc).filter(Boolean))) : null,
 	};
+}
+
+/**
+ * Minutos por tramo de 5 ppm. Garmin usa zonas distintas según el tipo de
+ * actividad y el aparato (la zona 2 empezaba en 122 ppm en una salida y en
+ * 146 en otra), así que para contar días suaves e intensos con un único
+ * criterio hace falta el pulso en bruto. Cada muestra cuenta como mucho 30 s
+ * para que una parada con el reloj en marcha no infle nada.
+ */
+function histogramaFc(puntos) {
+	const p = puntos.filter((x) => x.fc && x.t != null);
+	const cubos = {};
+	for (let i = 1; i < p.length; i++) {
+		const dt = Math.min(30, Math.max(0, p[i].t - p[i - 1].t));
+		const c = Math.floor(p[i].fc / 5) * 5;
+		cubos[c] = (cubos[c] || 0) + dt;
+	}
+	return Object.fromEntries(Object.entries(cubos).filter(([, sg]) => sg >= 30).map(([c, sg]) => [c, round(sg / 60, 1)]));
 }
 
 function analizarActividad(details) {
@@ -752,6 +774,7 @@ function analizarActividad(details) {
 		subidas: detectarSubidas(puntos).slice(0, 8),
 		llano: velocidadLlano(puntos),
 		desacople_pct: desacople(puntos),
+		histograma_fc_min: histogramaFc(puntos),
 		fc_max_sostenida: { min5: fcMaxSostenida(puntos, 5), min20: fcMaxSostenida(puntos, 20), min60: fcMaxSostenida(puntos, 60) },
 		nota: "W/kg estimado con la fórmula de Ferrari (VAM / (200 + 10 · pendiente)): orientativo, sin potenciómetro.",
 	};
@@ -761,6 +784,57 @@ function analizarActividad(details) {
 const muestraCruda = (x, n = 700) => {
 	try { return JSON.stringify(x).slice(0, n); } catch { return null; }
 };
+
+/** Primer valor de un mapa por dispositivo ({deviceId: {...}}): suele haber uno. */
+const primeroDelMapa = (m) => (m && typeof m === "object" ? Object.values(m)[0] ?? null : null);
+
+/**
+ * Las escalas que Garmin ya calcula, con sus propios umbrales: son las
+ * referencias más sólidas que hay para comparar a alguien con la élite sin
+ * potenciómetro, porque las mide el reloj y no las estimamos nosotros.
+ */
+function perfilGarmin({ vo2, endurance, hill, estado, ajustes, fecha }) {
+	const ud = ajustes?.userData || {};
+	const nacimiento = ud.birthDate ? new Date(ud.birthDate) : null;
+	const edad = nacimiento ? Math.floor((Date.parse(fecha) - nacimiento.getTime()) / (365.25 * 86400000)) : null;
+	const vo2Reciente = estado?.mostRecentVO2Max?.generic || vo2?.generic || null;
+	const balance = primeroDelMapa(estado?.mostRecentTrainingLoadBalance?.metricsTrainingLoadBalanceDTOMap);
+	const statusDev = primeroDelMapa(estado?.mostRecentTrainingStatus?.latestTrainingStatusData);
+	const niveles = endurance?.overallScore != null ? [
+		["Principiante", endurance.gaugeLowerLimit], ["Intermedio", endurance.classificationLowerLimitIntermediate],
+		["Entrenado", endurance.classificationLowerLimitTrained], ["Muy entrenado", endurance.classificationLowerLimitWellTrained],
+		["Experto", endurance.classificationLowerLimitExpert], ["Superior", endurance.classificationLowerLimitSuperior],
+		["Élite", endurance.classificationLowerLimitElite],
+	].filter(([, v]) => typeof v === "number") : [];
+	const nivelActual = niveles.filter(([, v]) => endurance.overallScore >= v).at(-1)?.[0] ?? null;
+	const siguiente = niveles.find(([, v]) => v > endurance?.overallScore) ?? null;
+	return {
+		persona: { edad, sexo: ud.gender ?? null, peso_kg: ud.weight ? round(ud.weight / 1000, 1) : null,
+			umbral_lactato_ppm: ud.lactateThresholdHeartRate ?? null },
+		vo2max: vo2Reciente?.vo2MaxPreciseValue ?? vo2Reciente?.vo2MaxValue ?? hill?.vo2MaxPreciseValue ?? null,
+		vo2max_fecha: vo2Reciente?.calendarDate ?? null,
+		vo2max_ciclismo: estado?.mostRecentVO2Max?.cycling?.vo2MaxPreciseValue ?? null,
+		endurance: endurance?.overallScore != null ? {
+			puntos: endurance.overallScore, nivel: nivelActual,
+			siguiente: siguiente ? { nivel: siguiente[0], desde: siguiente[1] } : null,
+			escala: Object.fromEntries(niveles), maximo_escala: endurance.gaugeUpperLimit ?? null,
+		} : null,
+		hill_score: hill?.overallScore ?? null,
+		balance_carga_mes: balance ? {
+			aerobica_baja: { carga: Math.round(balance.monthlyLoadAerobicLow), objetivo: [balance.monthlyLoadAerobicLowTargetMin, balance.monthlyLoadAerobicLowTargetMax] },
+			aerobica_alta: { carga: Math.round(balance.monthlyLoadAerobicHigh), objetivo: [balance.monthlyLoadAerobicHighTargetMin, balance.monthlyLoadAerobicHighTargetMax] },
+			anaerobica: { carga: Math.round(balance.monthlyLoadAnaerobic), objetivo: [balance.monthlyLoadAnaerobicTargetMin, balance.monthlyLoadAnaerobicTargetMax] },
+			veredicto_garmin: balance.trainingBalanceFeedbackPhrase ?? null,
+		} : null,
+		estado_entreno: statusDev ? {
+			estado: statusDev.trainingStatus ?? null,
+			frase: statusDev.trainingStatusFeedbackPhrase ?? null,
+			carga_aguda: statusDev.acuteTrainingLoadDTO?.dailyTrainingLoadAcute ?? null,
+			carga_cronica: statusDev.acuteTrainingLoadDTO?.dailyTrainingLoadChronic ?? null,
+			ratio: statusDev.acuteTrainingLoadDTO?.dailyAcuteChronicWorkloadRatio ?? null,
+		} : null,
+	};
+}
 
 const TOOLS = {
 	garmin_status: {
@@ -878,6 +952,7 @@ const TOOLS = {
 					km: round((a.distance ?? 0) / 1000, 1),
 					min: Math.round((a.duration ?? 0) / 60),
 					fc: a.averageHR ?? null,
+					te: a.trainingEffectLabel ?? null,
 					n: a.activityName,
 				}));
 			return list.map((a) => ({
@@ -892,6 +967,7 @@ const TOOLS = {
 				max_hr: a.maxHR ?? null,
 				aerobic_training_effect: a.aerobicTrainingEffect ?? null,
 				anaerobic_training_effect: a.anaerobicTrainingEffect ?? null,
+				tipo_sesion_garmin: a.trainingEffectLabel ?? null,
 			}));
 		},
 	},
@@ -932,6 +1008,7 @@ const TOOLS = {
 				avg_power: s.averagePower ?? null,
 				training_effect: s.trainingEffect ?? null,
 				anaerobic_training_effect: s.anaerobicTrainingEffect ?? null,
+				tipo_sesion_garmin: s.trainingEffectLabel ?? a?.trainingEffectLabel ?? null,
 				zonas_fc: Array.isArray(zonas)
 					? zonas.map((z) => ({ zona: z.zoneNumber, desde_ppm: z.zoneLowBoundary, minutos: round((z.secsInZone ?? 0) / 60, 1) }))
 					: null,
@@ -1311,12 +1388,13 @@ const TOOLS = {
 		},
 		run: async (env, userId, { date }) => {
 			const d = date || today();
-			const [data, maxmet, endurance, hill, estado] = await Promise.all([
+			const [data, maxmet, endurance, hill, estado, ajustes] = await Promise.all([
 				apiGet(env, userId, `/metrics-service/metrics/trainingreadiness/${d}`),
 				apiGet(env, userId, `/metrics-service/metrics/maxmet/daily/${d}/${d}`).catch((e) => ({ error: e.message })),
 				apiGet(env, userId, "/metrics-service/metrics/endurancescore", { calendarDate: d }).catch((e) => ({ error: e.message })),
 				apiGet(env, userId, "/metrics-service/metrics/hillscore", { calendarDate: d }).catch((e) => ({ error: e.message })),
 				apiGet(env, userId, `/metrics-service/metrics/trainingstatus/aggregated/${d}`).catch((e) => ({ error: e.message })),
+				apiGet(env, userId, "/userprofile-service/userprofile/user-settings").catch((e) => ({ error: e.message })),
 			]);
 			const r = Array.isArray(data) ? data[0] : data;
 			const vo2 = Array.isArray(maxmet) ? maxmet[0] : maxmet;
@@ -1328,21 +1406,8 @@ const TOOLS = {
 				hrv_factor: r?.hrvFactorPercent ?? null,
 				recovery_time_hours: r?.recoveryTime ? round(r.recoveryTime / 60, 1) : null,
 				acute_load: r?.acuteLoad ?? null,
-				// Lo que Garmin ya puntúa por su cuenta. Se añade la muestra cruda
-				// porque la forma de estas respuestas no está documentada: en cuanto
-				// se conozca, se queda solo lo interpretado.
-				perfil_garmin: {
-					vo2max_general: vo2?.generic?.vo2MaxPreciseValue ?? vo2?.generic?.vo2MaxValue ?? null,
-					vo2max_ciclismo: vo2?.cycling?.vo2MaxPreciseValue ?? vo2?.cycling?.vo2MaxValue ?? null,
-					endurance_score: endurance?.overallScore ?? null,
-					hill_score: hill?.overallScore ?? null,
-					crudo: {
-						maxmet: muestraCruda(maxmet, 500),
-						endurance: muestraCruda(endurance, 600),
-						hill: muestraCruda(hill, 600),
-						estado: muestraCruda(estado, 1500),
-					},
-				},
+				// Lo que Garmin ya puntúa por su cuenta, interpretado.
+				perfil_garmin: perfilGarmin({ vo2, endurance, hill, estado, ajustes, fecha: d }),
 			};
 		},
 	},

@@ -814,6 +814,9 @@ const rpc = async (env, token, message) => {
 	check("en llano no ve subidas", plana.analisis?.subidas?.length === 0);
 	check("pulso máximo sostenido 5 min", r.analisis?.fc_max_sostenida?.min5 === 160, `(${r.analisis?.fc_max_sostenida?.min5})`);
 	check("devuelve las zonas de Garmin", r.zonas_fc?.[1]?.minutos === 50);
+	// 5 km a 30 km/h a 130 ppm son 10 minutos en el cubo de 130.
+	check("histograma de pulso por cubos de 5 ppm", Math.abs(r.analisis?.histograma_fc_min?.["130"] - 10) < 1,
+		`(${JSON.stringify(r.analisis?.histograma_fc_min)})`);
 
 	// Si las series fallan, el detalle básico sale igual.
 	globalThis.fetch = async (url) => {
@@ -823,6 +826,39 @@ const rpc = async (env, token, message) => {
 	};
 	const basico = await call("garmin_activity_detail", { activity_id: "2" });
 	check("sin series, el detalle sigue saliendo", basico.name === "Sin series" && basico.analisis === null);
+}
+
+// ── 8b quater. Perfil de forma según Garmin ──
+{
+	mockGarmin({ "ana@x.com": { password: "a", data: { displayName: "ana", hrv: 50 } } });
+	const env = makeEnv();
+	const { tokens } = await connect(env, "ana@x.com", "a");
+	// Formas reales de las respuestas de Garmin (recortadas).
+	globalThis.fetch = async (url) => {
+		const u = new URL(url);
+		const r = (x) => new Response(JSON.stringify(x));
+		if (u.pathname.includes("trainingreadiness")) return r([{ score: 39, level: "LOW" }]);
+		if (u.pathname.includes("maxmet")) return r([]);
+		if (u.pathname.endsWith("/endurancescore")) return r({ overallScore: 6319, gaugeLowerLimit: 3570,
+			classificationLowerLimitIntermediate: 5100, classificationLowerLimitTrained: 5800, classificationLowerLimitWellTrained: 6600,
+			classificationLowerLimitExpert: 7300, classificationLowerLimitSuperior: 8100, classificationLowerLimitElite: 8800, gaugeUpperLimit: 10560 });
+		if (u.pathname.endsWith("/hillscore")) return r({ overallScore: null, vo2MaxPreciseValue: 52.6 });
+		if (u.pathname.includes("trainingstatus")) return r({ mostRecentVO2Max: { generic: { calendarDate: "2026-09-20", vo2MaxPreciseValue: 52.6 }, cycling: null },
+			mostRecentTrainingLoadBalance: { metricsTrainingLoadBalanceDTOMap: { "360": { monthlyLoadAerobicLow: 553.8, monthlyLoadAerobicHigh: 989.4,
+				monthlyLoadAnaerobic: 795.5, monthlyLoadAerobicLowTargetMin: 253, monthlyLoadAerobicLowTargetMax: 580, monthlyLoadAerobicHighTargetMin: 347,
+				monthlyLoadAerobicHighTargetMax: 674, monthlyLoadAnaerobicTargetMin: 109, monthlyLoadAnaerobicTargetMax: 327, trainingBalanceFeedbackPhrase: "ABOVE_TARGETS" } } } });
+		if (u.pathname.includes("user-settings")) return r({ userData: { gender: "MALE", weight: 72000, birthDate: "1990-05-01", lactateThresholdHeartRate: 171 } });
+		return new Response("{}", { status: 404 });
+	};
+	const res = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 12, method: "tools/call",
+		params: { name: "garmin_training_readiness", arguments: { date: "2026-09-25" } } });
+	const pg = JSON.parse(res.body.result.content[0].text).perfil_garmin;
+	check("lee el VO2máx aunque maxmet venga vacío", pg.vo2max === 52.6);
+	check("sitúa el Endurance Score en su nivel", pg.endurance?.nivel === "Entrenado", `(${pg.endurance?.nivel})`);
+	check("dice cuánto falta para el siguiente nivel", pg.endurance?.siguiente?.nivel === "Muy entrenado" && pg.endurance.siguiente.desde === 6600);
+	check("interpreta el balance de carga del mes", pg.balance_carga_mes?.anaerobica?.carga === 796 &&
+		pg.balance_carga_mes.anaerobica.objetivo[1] === 327 && pg.balance_carga_mes.veredicto_garmin === "ABOVE_TARGETS");
+	check("calcula la edad y lee el umbral de lactato", pg.persona.edad === 36 && pg.persona.umbral_lactato_ppm === 171 && pg.persona.peso_kg === 72);
 }
 
 // ── 8c. El caso de Paula: el KV no ha propagado ──
