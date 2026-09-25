@@ -64,6 +64,24 @@ fresco, asi que no duplica peticiones a Garmin y hace de red por si el primero
 ha fallado. La primera carga trae el historico completo
 en varias pasadas acotadas: Garmin responde 429 si se le pide todo de golpe.
 
+### Aislamiento entre usuarios
+
+Una sola base para todos, con el `user_id` (hash del email) en la clave
+primaria de cada tabla y en el `WHERE` de cada consulta. El `user_id` sale
+siempre de la cookie firmada o del token OAuth, nunca de nada que mande el
+navegador.
+
+No hay una base por persona porque en D1 no se puede: el plan gratuito
+permite 10 bases por cuenta, y crearlas sobre la marcha exigiria guardar en
+el Worker un token de cuenta capaz de leerlas todas, que es peor. Como el
+aislamiento vive entonces en que ninguna consulta se olvide del `user_id`,
+hay un test que lee el propio codigo fuente y falla si aparece una sentencia
+que toque datos de personas sin filtrar por usuario.
+
+Quien administra la cuenta de Cloudflare si puede leer la base entera. Eso no
+lo arregla ningun diseño de la aplicacion, y por eso se avisa en la pantalla
+de login.
+
 ### Como se mide la forma
 
 El modelo estandar (CTL/ATL/TSB) se apoya en el TSS, que se calcula con

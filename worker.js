@@ -1812,6 +1812,21 @@ const DEPORTES_BICI = new Set([
 	"virtual_ride", "indoor_cycling", "cyclocross",
 ]);
 
+/**
+ * Garmin etiqueta lo mismo de varias maneras: la misma salida de carretera
+ * llega como "cycling" o como "road_biking" segun el aparato que la grabe.
+ * Contarlas por separado partia el deporte principal en dos trozos y lo
+ * echaba al cajon de "otros". Se agrupan por familia y la bici va siempre
+ * primera, que es de lo que va todo esto.
+ */
+const FAMILIAS = [
+	["bici", DEPORTES_BICI],
+	["correr", new Set(["running", "trail_running", "treadmill_running", "track_running", "virtual_run"])],
+	["fuerza", new Set(["strength_training", "indoor_cardio", "hiit", "pilates", "yoga", "bouldering"])],
+];
+const familiaDe = (tipo) => FAMILIAS.find(([, tipos]) => tipos.has(tipo))?.[0] ?? "otros";
+const FAMILIAS_EN_ORDEN = ["bici", "correr", "fuerza", "otros"];
+
 const UMBRAL_HRR = 0.85; // fraccion de reserva cardiaca que se toma por umbral
 const TRIMP_HORA_UMBRAL = 60 * UMBRAL_HRR * 0.64 * Math.exp(1.92 * UMBRAL_HRR);
 
@@ -1921,22 +1936,13 @@ const lunesDe = (fecha) => {
 	return d.toISOString().slice(0, 10);
 };
 
-/** Horas por deporte y semana. Los deportes minoritarios se agrupan. */
+/** Horas por familia de deporte y semana. */
 function semanas(actividades, fc, ftp) {
-	const horasPorTipo = new Map();
-	for (const a of actividades)
-		horasPorTipo.set(a.type, (horasPorTipo.get(a.type) || 0) + (a.duration_s || 0) / 3600);
-
-	const principales = [...horasPorTipo.entries()]
-		.sort((x, y) => y[1] - x[1])
-		.slice(0, 4)
-		.map(([tipo]) => tipo);
-
 	const porSemana = new Map();
 	for (const a of actividades) {
 		const semana = lunesDe(a.start_date);
 		const fila = porSemana.get(semana) || { semana, carga: 0, horas: {}, km: 0, desnivel: 0 };
-		const clave = principales.includes(a.type) ? a.type : "otros";
+		const clave = familiaDe(a.type);
 		fila.horas[clave] = round((fila.horas[clave] || 0) + (a.duration_s || 0) / 3600, 2);
 		fila.carga = round(fila.carga + cargaDe(a, fc, ftp).carga, 1);
 		if (DEPORTES_BICI.has(a.type)) {
@@ -1946,8 +1952,11 @@ function semanas(actividades, fc, ftp) {
 		porSemana.set(semana, fila);
 	}
 
+	// Orden fijo: la bici siempre primera y siempre del mismo color, aunque
+	// una temporada se corra mas que se pedalee.
+	const usadas = new Set([...porSemana.values()].flatMap((f) => Object.keys(f.horas)));
 	return {
-		deportes: [...principales, "otros"],
+		deportes: FAMILIAS_EN_ORDEN.filter((f) => usadas.has(f)),
 		filas: [...porSemana.values()].sort((x, y) => x.semana.localeCompare(y.semana)),
 	};
 }
@@ -2456,7 +2465,8 @@ function grafApilado(host, filas, claves, nombres, colores) {
           if (f.horas[k2]) html += '<br><span class="llave" style="background:' + colores[j2] + '"></span>' +
             nombres[j2] + ': ' + f.horas[k2].toFixed(1) + ' h';
         });
-        html += '<br>' + f.km + ' km · ' + f.desnivel + ' m · carga ' + f.carga;
+        html += '<br><span class="apagado">En bici: ' + f.km + ' km · ' + f.desnivel +
+          ' m</span><br><span class="apagado">Carga total: ' + f.carga + '</span>';
         mostrarPista(ev, html);
       });
       r.addEventListener('mouseleave', ocultarPista);
@@ -2515,9 +2525,7 @@ function delta(actual, antes, etiqueta) {
     etiqueta + '</span></span>';
 }
 
-var NOMBRES = { cycling: 'Bici', road_biking: 'Bici (carretera)', gravel_cycling: 'Gravel',
-  mountain_biking: 'BTT', running: 'Correr', walking: 'Caminar', hiking: 'Montaña',
-  strength_training: 'Fuerza', paddelball: 'Padel', indoor_cycling: 'Rodillo', otros: 'Otros' };
+var NOMBRES = { bici: 'Bici', correr: 'Correr', fuerza: 'Fuerza', otros: 'Otros' };
 function nombreDeporte(k) { return NOMBRES[k] || k; }
 
 // ─── Montaje ───

@@ -1,4 +1,5 @@
 import worker from "./worker.js";
+import { readFile } from "node:fs/promises";
 
 const ORIGIN = "https://garmin.example.workers.dev";
 
@@ -909,10 +910,45 @@ const rpc = async (env, token, message) => {
 
 	// Semanas y eficiencia
 	check("agrupa por semanas", datos.semanas.filas.length > 5);
-	check("separa los deportes", datos.semanas.deportes.includes("road_biking") && datos.semanas.deportes.includes("running"));
+	check("agrupa la bici y el correr por familia",
+		datos.semanas.deportes.join(",") === "bici,correr", `(${datos.semanas.deportes})`);
 	check("calcula metros por pulsacion", datos.eficiencia.length === 32 &&
 		Math.abs(datos.eficiencia[0].valor - 45000 / (145 * 90)) < 0.01);
 	check("dice que aun no hay potencia", datos.tiene_potencia === false);
+
+	// Garmin manda la misma bici como "cycling" o como "road_biking" segun el
+	// aparato. Contandolas aparte, el deporte principal se partia en dos y
+	// acababa en "otros", que es lo que se vio en los datos reales.
+	{
+		const mezcla = [
+			...Array.from({ length: 6 }, (_, i) => ({ ...actividades[0], activityId: 7000 + i,
+				activityType: { typeKey: "cycling" }, startTimeLocal: haceDias(40 - i) + " 09:00:00" })),
+			...Array.from({ length: 6 }, (_, i) => ({ ...actividades[0], activityId: 7100 + i,
+				activityType: { typeKey: "road_biking" }, startTimeLocal: haceDias(30 - i) + " 09:00:00" })),
+			...Array.from({ length: 9 }, (_, i) => ({ ...actividades[0], activityId: 7200 + i,
+				activityType: { typeKey: "hiking" }, duration: 7200,
+				startTimeLocal: haceDias(20 - i) + " 09:00:00" })),
+		];
+		const envMix = makeEnv();
+		mockGarmin({ "ana@x.com": { password: "a", data: { displayName: "ana", hrv: 50 } } });
+		conPanel(mezcla);
+		const e = await postForm(envMix, "/panel/entrar", { email: "ana@x.com", password: "a" });
+		const ses = { Cookie: (e.headers.get("Set-Cookie") || "").split(";")[0] };
+		await worker.fetch(new Request(`${ORIGIN}/panel/sync`, { method: "POST", headers: ses }), envMix);
+		const mix = await (await get(envMix, "/panel/datos", ses)).json();
+
+		check("cycling y road_biking cuentan como un solo deporte",
+			mix.semanas.deportes.filter((d) => d === "bici").length === 1);
+		check("la bici no acaba en 'otros' por llamarse de dos maneras",
+			mix.semanas.deportes[0] === "bici", `(${mix.semanas.deportes})`);
+		const horasBici = mix.semanas.filas.reduce((s, f) => s + (f.horas.bici || 0), 0);
+		check("suma las horas de las dos etiquetas de bici", Math.abs(horasBici - 12 * 1.5) < 0.05, `(${horasBici})`);
+		// Aunque el senderismo sume mas horas, la bici manda en el orden.
+		check("el senderismo va a otros sin desplazar a la bici",
+			mix.semanas.deportes.join(",") === "bici,otros", `(${mix.semanas.deportes})`);
+		check("los km cuentan las dos etiquetas de bici", mix.total.km === 12 * 45);
+		conPanel(actividades); // se devuelve la lista de siempre a los tests de abajo
+	}
 
 	// Sincronizar otra vez no duplica ni vuelve a pedir el historico entero
 	const antes = listados;
@@ -989,6 +1025,36 @@ const rpc = async (env, token, message) => {
 	check("el segundo cron no repite lo que ya esta fresco", repetidas === 0, `(${repetidas} llamadas)`);
 
 	globalThis.fetch = realFetch;
+}
+
+// ── 11. Ninguna consulta puede olvidarse de a quien pertenece la fila ──
+//
+// El aislamiento entre usuarios no vive en la base (es una sola), vive en que
+// toda consulta filtre por user_id. Un descuido en una sola sentencia lo
+// tiraria abajo sin que fallase ningun otro test, asi que se revisa el
+// codigo fuente: cualquier SQL que toque datos de personas tiene que
+// mencionar user_id.
+{
+	const fuente = await readFile(new URL("./worker.js", import.meta.url), "utf8");
+	const sentencias = [...fuente.matchAll(/prepare\(\s*(["\`'])([\s\S]*?)\1/g)]
+		.map((m) => m[2].replace(/\s+/g, " ").trim())
+		.filter((q) => /\b(activities|days|sync_state)\b/.test(q) && !/^CREATE/i.test(q));
+
+	check("hay consultas de datos que revisar", sentencias.length >= 3, `(${sentencias.length})`);
+	const huerfanas = sentencias.filter((q) => !/user_id/.test(q));
+	check("ninguna consulta de datos se olvida del user_id", huerfanas.length === 0, huerfanas.join(" || "));
+
+	// La lectura generica compone el nombre de la tabla, asi que el grep de
+	// arriba no la ve: se comprueba aparte porque es por donde pasa el panel.
+	check("la lectura generica filtra por usuario",
+		/SELECT \* FROM \$\{tabla\} WHERE user_id = \?/.test(fuente));
+
+	// Y las escrituras llevan el user_id en la clave primaria, no solo en el
+	// WHERE: dos personas no pueden pisarse una fila.
+	check("las claves primarias empiezan por el usuario",
+		/PRIMARY KEY \(user_id, activity_id\)/.test(fuente) &&
+		/PRIMARY KEY \(user_id, date\)/.test(fuente) &&
+		/user_id TEXT PRIMARY KEY/.test(fuente));
 }
 
 /** Firma un token como lo hace el worker, para poder fabricar uno en un test. */
