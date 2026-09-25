@@ -410,20 +410,40 @@ async function displayName(env, userId) {
 }
 
 /**
- * Los recorridos de Garmin no se leen igual que se escriben: el DTO de
- * lectura usa `distanceMeter`/`elevationGainMeter` y el de la lista puede
- * traer otros nombres. Se aceptan ambos en vez de suponer cual toca.
+ * Los recorridos de Garmin no se leen igual que se escriben, y el listado
+ * tampoco usa los mismos nombres que el detalle: al crear se manda
+ * `distanceMeter`, el detalle lo devuelve igual y la lista trae otra cosa.
+ * Adivinar nombres ya costo un recorrido con el desnivel a cero, asi que
+ * aqui se busca el campo por lo que significa y no por como se llama.
  */
+function primerNumero(obj, patron, excluir) {
+	for (const [clave, valor] of Object.entries(obj)) {
+		if (typeof valor !== "number") continue;
+		if (excluir && excluir.test(clave)) continue;
+		if (patron.test(clave)) return valor;
+	}
+	return null;
+}
+
 function resumirCourse(c) {
-	const metros = c.distanceMeter ?? c.distance ?? null;
+	// Los metros pueden venir en `distanceMeter`, `distance` o vaya usted a
+	// saber: cualquier clave que hable de distancia sirve. Se descartan las
+	// que hablan de otra cosa (una distancia "hasta el inicio", por ejemplo).
+	const metros = primerNumero(c, /distance/i, /(start|elev|point|index)/i);
+	const subida = primerNumero(c, /elevat(ion)?.*(gain|ascent)|ascent/i);
+	const bajada = primerNumero(c, /elevat(ion)?.*(loss|descent)|descent/i);
+	const creado = c.createDate ?? c.createdDate ?? c.startDate ?? null;
 	return {
 		course_id: c.courseId ?? c.id ?? null,
 		name: c.courseName ?? c.name ?? null,
-		distance_km: typeof metros === "number" ? round(metros / 1000, 2) : null,
-		elevation_gain_m: c.elevationGainMeter ?? c.elevationGain ?? null,
-		elevation_loss_m: c.elevationLossMeter ?? c.elevationLoss ?? null,
+		// Garmin mezcla metros y kilometros segun el endpoint: por encima de
+		// 1.000 son metros; por debajo, ya venia en kilometros.
+		distance_km: metros == null ? null : round(metros > 1000 ? metros / 1000 : metros, 2),
+		elevation_gain_m: subida == null ? null : Math.round(subida),
+		elevation_loss_m: bajada == null ? null : Math.round(bajada),
 		activity_type: c.activityType?.typeKey ?? c.activityTypePk ?? null,
-		created: c.createDate ?? c.createdDate ?? null,
+		// Las fechas llegan como milisegundos desde epoch o como texto.
+		created: typeof creado === "number" ? new Date(creado).toISOString().slice(0, 10) : creado,
 	};
 }
 

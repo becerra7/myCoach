@@ -611,6 +611,12 @@ const rpc = async (env, token, message) => {
 					  distanceMeter: 42880, elevationGainMeter: 718, elevationLossMeter: 715,
 					  createDate: "2026-09-22" },
 					{ id: 1, name: "Vieja", distance: 70400, elevationGain: 412 },
+					// Nombres que Garmin usa de verdad en el listado.
+					{ courseId: 2, courseName: "Otra", totalDistanceInMeters: 55500,
+					  totalAscentInMeters: 640, totalDescentInMeters: 640, createDate: 1790380800000 },
+					{ courseId: 3, courseName: "Con ruido", distanceFromStart: 999999,
+					  totalDistanceInMeters: 12000 },
+					{ courseId: 4, courseName: "En km", distance: 30.5 },
 				],
 			}));
 		if (u.pathname === "/course-service/course/517620552")
@@ -624,13 +630,21 @@ const rpc = async (env, token, message) => {
 	const lista = await call("garmin_courses", {});
 	check("prueba otra ruta si la primera no existe", lista.endpoint === "/course-service/course/owner");
 	check("insiste antes de rendirse", pedidas.includes("/course-service/course/owner/ana"));
-	check("lista los recorridos guardados", lista.courses.length === 2);
+	check("lista los recorridos guardados", lista.courses.length === 5);
 	check("traduce los metros a km", lista.courses[0].distance_km === 42.88);
 	check("devuelve el desnivel guardado", lista.courses[0].elevation_gain_m === 718);
 	check("devuelve el course_id", lista.courses[0].course_id === 517620552);
 	// Garmin no usa los mismos nombres en la lista y en el detalle.
 	check("acepta los nombres alternativos", lista.courses[1].distance_km === 70.4
 		&& lista.courses[1].name === "Vieja" && lista.courses[1].course_id === 1);
+	// El listado real de Garmin no usa ninguno de los dos nombres que se
+	// suponian, y la ruta salia sin distancia ni desnivel. Ahora el campo se
+	// busca por lo que significa.
+	check("encuentra la distancia con otro nombre", lista.courses[2].distance_km === 55.5);
+	check("encuentra el desnivel con otro nombre", lista.courses[2].elevation_gain_m === 640);
+	check("no confunde la distancia al inicio", lista.courses[3].distance_km === 12.0);
+	check("acepta kilometros ya convertidos", lista.courses[4].distance_km === 30.5);
+	check("traduce la fecha en milisegundos", lista.courses[2].created === "2026-09-26");
 
 	const detalle = await call("garmin_course_detail", { course_id: "517620552", puntos: 12 });
 	check("lee un recorrido concreto", detalle.name === "Cerdanya: bucle solana");
