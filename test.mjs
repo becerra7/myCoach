@@ -546,7 +546,16 @@ const rpc = async (env, token, message) => {
 
 	// Lo que NO debe devolver: el trazado.
 	const payload = JSON.stringify(plan);
-	check("no vuelca el trazado en la respuesta", payload.length < 800, `(${payload.length} chars)`);
+	check("no vuelca el trazado en la respuesta", payload.length < 3000, `(${payload.length} chars)`);
+	// Un perfil compacto si: el modelo necesita saber donde estan las subidas.
+	check("devuelve un perfil de 40 puntos", plan.perfil?.length === 40);
+	check("el perfil empieza en el km 0 y acaba en el total",
+		plan.perfil[0][0] === 0 && plan.perfil.at(-1)[0] > 0 &&
+		plan.perfil.at(-1)[0] === Math.max(...plan.perfil.map((p) => p[0])));
+	check("el perfil lleva altitud y coordenadas",
+		plan.perfil.every((p) => p.length === 4 && typeof p[1] === "number"));
+	check("el perfil se reparte por distancia, no por indice",
+		plan.perfil.slice(1).every((p, i) => p[0] >= plan.perfil[i][0]));
 	check("informa cuantos puntos tiene", plan.points === 2500);
 
 	check("envia lon,lat al router (no al reves)", brouterCalls[0].includes("lonlats=2.1408,41.4914"));

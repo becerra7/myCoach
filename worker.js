@@ -528,6 +528,29 @@ function metresBetween([lon1, lat1], [lon2, lat2]) {
 	return 2 * 6371000 * Math.asin(Math.sqrt(a));
 }
 
+/**
+ * Perfil de la ruta en pocos puntos, repartidos por distancia y no por
+ * indice: el router pone muchos mas puntos en las curvas que en las rectas,
+ * y repartir por indice amontonaria la muestra en los pueblos. Sirve para
+ * que el modelo diga "la subida empieza en el km 12" sin cargar el trazado
+ * entero en la conversacion.
+ */
+function perfilResumido(coords, n) {
+	if (!coords?.length) return [];
+	const acumulada = [0];
+	for (let i = 1; i < coords.length; i++) acumulada.push(acumulada[i - 1] + metresBetween(coords[i - 1], coords[i]));
+	const total = acumulada.at(-1);
+	const puntos = [];
+	let j = 0;
+	for (let k = 0; k < n; k++) {
+		const objetivo = (total * k) / (n - 1);
+		while (j < coords.length - 1 && acumulada[j] < objetivo) j++;
+		const [lon, lat, ele] = coords[j];
+		puntos.push([round(acumulada[j] / 1000, 2), ele == null ? null : Math.round(ele), round(lat, 4), round(lon, 4)]);
+	}
+	return puntos;
+}
+
 const gpxFrom = (name, coords) =>
 	`<?xml version="1.0" encoding="UTF-8"?>
 <gpx version="1.1" creator="garmin-mcp" xmlns="http://www.topografix.com/GPX/1/1">
@@ -780,7 +803,7 @@ const TOOLS = {
 	garmin_plan_route: {
 		title: "Trazar y medir una ruta de bici",
 		description:
-			"Traza una ruta de bici entre los puntos de paso indicados siguiendo carreteras reales, y devuelve sus metricas: distancia, desnivel acumulado, numero de semaforos y tipos de carretera. NO devuelve el trazado: guarda el GPX y devuelve un route_id y un enlace de descarga. Uselo de forma iterativa — proponga puntos, lea las metricas, ajuste los puntos y vuelva a llamar hasta que la distancia y el desnivel cuadren con lo pedido. Para una ruta circular, repita el punto de salida al final.",
+			"Traza una ruta de bici entre los puntos de paso indicados siguiendo carreteras reales, y devuelve sus metricas: distancia, desnivel acumulado, numero de semaforos y tipos de carretera, mas un perfil resumido de 40 puntos [km, altitud, lat, lon] para poder decir donde estan las subidas. El trazado completo no se devuelve: se guarda como GPX con un route_id y un enlace de descarga. Uselo de forma iterativa — proponga puntos, lea las metricas, ajuste los puntos y vuelva a llamar hasta que la distancia y el desnivel cuadren con lo pedido. Para una ruta circular, repita el punto de salida al final.",
 		schema: {
 			type: "object",
 			properties: {
@@ -824,6 +847,7 @@ const TOOLS = {
 				traffic_signals: route.traffic_signals,
 				road_types: route.road_types,
 				points: route.coords.length,
+				perfil: perfilResumido(route.coords, 40),
 				gpx_url: `${env.PUBLIC_ORIGIN || ""}/route/${id}.gpx`,
 				next_step:
 					"Si la distancia o el desnivel no cuadran, ajuste los puntos de paso y vuelva a llamar. " +
