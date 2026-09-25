@@ -58,7 +58,10 @@ pantalla de login, porque el servidor lo hospeda una persona y quien conecta su
 cuenta tiene derecho a saberlo antes de entrar.
 
 Un `scheduled` diario (ver `[triggers]` en `wrangler.toml`) recorre a todos los
-usuarios y actualiza lo que falte. La primera carga trae el historico completo
+usuarios y actualiza lo que falte. Los dos Workers tienen cron, con 15 minutos
+de diferencia, pero comparten KV y D1: el segundo se salta a quien ya este
+fresco, asi que no duplica peticiones a Garmin y hace de red por si el primero
+ha fallado. La primera carga trae el historico completo
 en varias pasadas acotadas: Garmin responde 429 si se le pide todo de golpe.
 
 ### Como se mide la forma

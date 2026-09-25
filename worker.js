@@ -2152,12 +2152,21 @@ async function handlePanel(request, env, ctx) {
 	return json({ error: "not_found" }, 404);
 }
 
+const FRESCO_HORAS = 6;
+
 /**
  * Descarga diaria. Recorre los usuarios conectados y sincroniza a cada uno;
  * un fallo en uno no puede dejar sin datos a los demas.
+ *
+ * Los dos Workers (garmin y garmin-2) comparten KV y D1, asi que los dos ven
+ * a todos los usuarios: sin este filtro, cada uno pediria a Garmin lo mismo
+ * que el otro acaba de pedir, que es justo como se provocan los 429. Saltarse
+ * lo que ya esta fresco convierte al segundo cron en lo que deberia ser: una
+ * red por si el primero ha fallado.
  */
 async function sincronizarTodos(env) {
 	if (!(await prepararEsquema(env))) return;
+	const limite = Date.now() - FRESCO_HORAS * 3600 * 1000;
 	let cursor;
 	do {
 		const pagina = await env.GARMIN.list({ prefix: "user:", cursor });
@@ -2165,6 +2174,7 @@ async function sincronizarTodos(env) {
 			const userId = clave.name.slice("user:".length);
 			try {
 				const estado = await leerEstado(env, userId);
+				if (estado.done && estado.last_sync && Date.parse(estado.last_sync) > limite) continue;
 				await sincronizar(env, userId, estado.done ? { paginas: 1, dias: 10 } : { paginas: 6, dias: 20 });
 			} catch {
 				// Un usuario con la sesion caducada no puede parar al resto.

@@ -975,6 +975,19 @@ const rpc = async (env, token, message) => {
 		{ Cookie: (e3.headers.get("Set-Cookie") || "").split(";")[0] })).json();
 	check("el cron sincroniza sin que nadie abra el panel", trasCron.total.actividades === 5);
 
+	// Los dos Workers comparten KV y D1: si el segundo cron repitiese lo que
+	// acaba de hacer el primero, se le pediria a Garmin todo dos veces.
+	let repetidas = 0;
+	const contando = globalThis.fetch;
+	globalThis.fetch = (url, init) => {
+		if (String(url).includes("/activitylist-service/")) repetidas++;
+		return contando(url, init);
+	};
+	const mas = [];
+	await worker.scheduled({}, env3, { waitUntil: (p) => mas.push(p) });
+	await Promise.all(mas);
+	check("el segundo cron no repite lo que ya esta fresco", repetidas === 0, `(${repetidas} llamadas)`);
+
 	globalThis.fetch = realFetch;
 }
 
