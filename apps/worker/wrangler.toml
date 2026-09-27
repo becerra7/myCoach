@@ -1,0 +1,19 @@
+name = "mycoach"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+# La web (un solo HTML) se sirve como estáticos; /api/* pasa por el Worker.
+[assets]
+directory = "../web/dist"
+binding = "ASSETS"
+run_worker_first = ["/api/*"]
+
+[vars]
+# URL del Worker del conector de Garmin (repo garmin-mcp). Sin barra final.
+GARMIN_URL = "https://garmin.CAMBIA-TU-SUBDOMINIO.workers.dev"
+
+# Sesiones de la web (id aleatorio en cookie → tokens OAuth del conector).
+# Crear con: npx wrangler kv namespace create SESIONES  y pegar el id aquí.
+[[kv_namespaces]]
+binding = "SESIONES"
+id = "CAMBIA-POR-EL-ID-DEL-KV"

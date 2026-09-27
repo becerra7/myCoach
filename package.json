@@ -1,0 +1,19 @@
+{
+  "name": "mycoach",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node apps/web/build.mjs --target web",
+    "build:claude": "node apps/web/build.mjs --target claude",
+    "check": "node apps/web/build.mjs --target web --check && node --test tests/*.test.mjs",
+    "dev": "npm run build && wrangler dev -c apps/worker/wrangler.toml",
+    "deploy": "npm run build && wrangler deploy -c apps/worker/wrangler.toml"
+  },
+  "devDependencies": {
+    "es-atlas": "^0.6.0",
+    "topojson-client": "^3.1.0",
+    "world-atlas": "^2.0.2",
+    "wrangler": "^4.42.0"
+  },
+  "engines": { "node": ">=20" }
+}
