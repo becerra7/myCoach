@@ -1,6 +1,7 @@
 import worker from "./worker.js";
 import { readFile } from "node:fs/promises";
 
+const anot0 = (l) => Object.fromEntries(l.body.result.tools.map((t) => [t.name, t.annotations]));
 const ORIGIN = "https://garmin.example.workers.dev";
 
 // La espera anti-WAF del flujo portal es de ~10s reales: aqui no aporta nada
@@ -450,7 +451,17 @@ const rpc = async (env, token, message) => {
 	check("initialize con token valido", init.body.result?.serverInfo?.name === "garmin");
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("tools/list devuelve 13 herramientas", list.body.result.tools.length === 13);
+	check("tools/list devuelve 15 herramientas", list.body.result.tools.length === 15);
+	check("app_guardar se anuncia como escritura", anot0(list).app_guardar.readOnlyHint === false);
+	{
+		const call = (name, args) => rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name, arguments: args } });
+		await call("app_guardar", { doc: "estado/app", datos: { plan: { "2026-09-28": { dep: "bici" } } } });
+		await call("app_guardar", { doc: "estado/app", datos: { nombre: "A" }, fusionar: true });
+		const leido = JSON.parse((await call("app_leer", { doc: "estado/app" })).body.result.content[0].text);
+		check("myCoach: guardar, fusionar y leer", leido.nombre === "A" && leido.plan["2026-09-28"].dep === "bici");
+		const malo = await call("app_leer", { doc: "../user:x" });
+		check("myCoach: rutas de documento no validas se rechazan", malo.body.result.isError === true);
+	}
 	// Solo garmin_save_course escribe; anunciarlas todas como de solo
 	// lectura invitaba al cliente a llamarla sin preguntar.
 	const anot = Object.fromEntries(list.body.result.tools.map((t) => [t.name, t.annotations]));
@@ -893,7 +904,7 @@ const rpc = async (env, token, message) => {
 	check("el token de acceso vale sin leer del KV", init.body.result?.serverInfo?.name === "garmin");
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("las herramientas se listan igualmente", list.body.result.tools.length === 13);
+	check("las herramientas se listan igualmente", list.body.result.tools.length === 15);
 
 	// Y el dato que si vive en KV avisa en vez de mentir
 	const call = await rpc(env, tokens.access_token, {

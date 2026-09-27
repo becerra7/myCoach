@@ -859,6 +859,43 @@ function codificarPolilinea(puntos) {
 }
 
 const TOOLS = {
+	app_leer: {
+		title: "Leer datos de myCoach",
+		description:
+			"Lee un documento guardado por la app myCoach para este usuario. Documentos: 'estado/app' (plan de la semana y la siguiente por fecha, comidas en cuartos de plato, objetivo, deportes, nombre), 'vivo/datos' (actividades y perfil ya procesados), 'notas' (notas de validacion). Uselo antes de proponer cambios de plan o de comentar la comida.",
+		schema: { type: "object", properties: { doc: { type: "string", description: "Ruta del documento, p. ej. estado/app" } }, required: ["doc"] },
+		run: async (env, userId, { doc }) => {
+			if (!APP_DOC.test(doc || "")) throw new HttpError(400, "Documento no valido");
+			return (await env.GARMIN.get(appKey(userId, doc), "json")) ?? null;
+		},
+	},
+	app_guardar: {
+		title: "Guardar datos en myCoach",
+		write: true,
+		description:
+			"Guarda un documento de la app myCoach para este usuario. Con 'fusionar' mezcla los campos de primer nivel con lo que ya hay (p. ej. solo 'plan' o solo 'meals' en estado/app); con 'anadir' agrega 'datos' al final de una lista (p. ej. notas). Escribe en la app del usuario: confirme con el antes los cambios de plan o de comidas.",
+		schema: {
+			type: "object",
+			properties: {
+				doc: { type: "string" },
+				datos: { description: "Contenido JSON del documento" },
+				fusionar: { type: "boolean" },
+				anadir: { type: "boolean" },
+			},
+			required: ["doc", "datos"],
+		},
+		run: async (env, userId, { doc, datos, fusionar, anadir }) => {
+			if (!APP_DOC.test(doc || "")) throw new HttpError(400, "Documento no valido");
+			const key = appKey(userId, doc);
+			let value = datos;
+			if (anadir) value = [...((await env.GARMIN.get(key, "json")) || []), datos].slice(-500);
+			else if (fusionar && datos && typeof datos === "object") value = { ...((await env.GARMIN.get(key, "json")) || {}), ...datos };
+			const text = JSON.stringify(value);
+			if (text.length > 5_000_000) throw new HttpError(413, "Documento demasiado grande");
+			await env.GARMIN.put(key, text);
+			return { ok: true, doc, bytes: text.length };
+		},
+	},
 	garmin_status: {
 		title: "Estado de la conexion con Garmin",
 		description:
@@ -1511,6 +1548,9 @@ const CODE_TTL = 60 * 5;
 const MFA_TTL = 60 * 10;
 
 const userKey = (id) => `user:${id}`;
+// Documentos de la app myCoach, por usuario. Rutas cortas tipo "estado/app".
+const APP_DOC = /^[a-z0-9-]{1,32}(\/[a-z0-9-]{1,32})?$/;
+const appKey = (id, doc) => `app:${id}:${doc}`;
 const burnKey = (hash) => `burnt:${hash}`;
 const refreshKey = (hash) => `refresh:${hash}`;
 const mfaKey = (id) => `mfa:${id}`;
