@@ -890,6 +890,8 @@ const TOOLS = {
 			let value = datos;
 			if (anadir) value = [...((await env.GARMIN.get(key, "json")) || []), datos].slice(-500);
 			else if (fusionar && datos && typeof datos === "object") value = { ...((await env.GARMIN.get(key, "json")) || {}), ...datos };
+			// Sello de tiempo: la app sabe asi que hay cambios hechos desde Claude.
+			if (value && typeof value === "object" && !Array.isArray(value)) value = { ...value, at: Date.now() };
 			const text = JSON.stringify(value);
 			if (text.length > 5_000_000) throw new HttpError(413, "Documento demasiado grande");
 			await env.GARMIN.put(key, text);
