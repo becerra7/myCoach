@@ -92,6 +92,16 @@ export async function handleApi(request, env) {
 
   if (pathname === '/api/me') return json({ conectado: !!sesion });
 
+  // Diagnóstico de la conexión con el conector (solo datos públicos: metadata OAuth y estado del registro)
+  if (pathname === '/api/diag') {
+    const out = { garmin_url: env.GARMIN_URL, binding: !!env.GARMIN_SVC };
+    for (const [k, path, init] of [['metadata', '/.well-known/oauth-authorization-server', {}], ['register', '/oauth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ client_name: 'myCoach-diag', redirect_uris: [`${origin}/api/callback`] }) }]]) {
+      try { const r = await garmin(env, path, init); const t = await r.text(); out[k] = { status: r.status, body: k === 'register' ? t.replace(/"client_secret":"[^"]*"/, '"client_secret":"…"').slice(0, 160) : t.slice(0, 300) }; }
+      catch (e) { out[k] = { error: String(e.message || e) }; }
+    }
+    return json(out);
+  }
+
   if (pathname === '/api/login') {
     const c = await cliente(env, origin);
     const state = random(), verifier = random(48);

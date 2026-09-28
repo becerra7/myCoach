@@ -39,6 +39,7 @@ jobs:
             echo "Intento $intento: api=$me"; sleep 6
             [ "$intento" = 5 ] && exit 1
           done
+          echo "diag: $(curl -sS https://mycoach.albertbecervas.workers.dev/api/diag)"
           # Login con Garmin: registra la web en el conector y redirige a su pantalla de autorizar
           code=$(curl -sS -o /tmp/login.txt -w '%{http_code}' https://mycoach.albertbecervas.workers.dev/api/login)
           loc=$(curl -sS -o /dev/null -w '%{redirect_url}' https://mycoach.albertbecervas.workers.dev/api/login)
