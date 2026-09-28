@@ -23,4 +23,4 @@ npm run dev        # http://localhost:8787 (necesita wrangler.toml configurado)
 - Para que se despliegue solo con cada push aquí: GitHub → Settings → Secrets → Actions → `CLOUDFLARE_API_TOKEN` y `CLOUDFLARE_ACCOUNT_ID` (los mismos que `garmin-mcp`).
 - Conector: `GARMIN_URL` en `apps/worker/wrangler.toml`. Sesiones: comparte el KV del conector con el prefijo `mc:`.
 
-Ver `ARCHITECTURE.md` para el diseño, los riesgos y el camino a app móvil.
+Ver `ARCHITECTURE.md` para el diseño, los riesgos y el camino a app móvil, y `docs/PLAN-COACH.md` para el análisis de NUA y el plan de entrenador (voz, IA, canales y fases).
