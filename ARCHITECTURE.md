@@ -24,8 +24,10 @@ Navegador (web / PWA / luego app)          Cloudflare
 | `00-geo-dominio.js` | Dominio puro: geografía (municipio/país de cada punto), clasificación por zonas de pulso, W/kg por física, `construir(dataset)` → modelo `M`, indicadores con "qué dato falta". |
 | `10-estado.js` | Estado de usuario `S` (plan, comidas, objetivo…), persistencia, utilidades de fecha, resumen semanal. |
 | `20-hoy.js` … `40-forma-pantallas.js` | Pantallas (Hoy, Plan, Forma, test, evolución, ajustes). |
-| `50-…-arranque.js` | Pueblos, comida, chat, sincronización con Garmin, acciones, arranque. |
-| `60-mapa.js` | Mapa táctil a pantalla completa (SVG, pellizcar, zoom). |
+| `50-pueblos-comida-claude.js` | Pueblos, comida, chat, sincronización con Garmin, acciones. |
+| `60-mapa.js` | Mapa táctil a pantalla completa (SVG, pellizcar, zoom, encuadre de un pueblo). |
+| `99-arranque.js` | Arranque: siempre el último, cuando todo está definido. |
+| `public/` | PWA: manifest, icono y service worker (abre sin red con la última versión). |
 
 Siguiente paso de escalado (sin cambiar el comportamiento):
 1. Sacar `00-geo-dominio.js` a `packages/domain` (ES modules, sin DOM) con tests de `construir`, `tipoPorZonas`, `wkgFisica`, `indicadores`.
@@ -34,7 +36,7 @@ Siguiente paso de escalado (sin cambiar el comportamiento):
 
 ## Camino a app móvil
 
-1. **PWA** (manifest + service worker): instalable en iOS/Android, funciona sin red con la última sincronización. Coste bajo.
+1. **PWA** (hecho: manifest + service worker): instalable en iOS/Android desde el navegador ("Añadir a pantalla de inicio"), abre sin red con la última sincronización.
 2. **Capacitor** envolviendo la misma web: notificaciones push ("tu semana está lista"), compartir nativo, cámara para las comidas. El login OAuth usa el navegador del sistema con un esquema propio de redirect.
 3. Nativo (Compose/SwiftUI) solo si la PWA se queda corta; el dominio ya estaría en `packages/domain` y la API en el Worker.
 

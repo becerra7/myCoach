@@ -71,8 +71,10 @@ function selMuni(p) {
 }
 function focusMuni(id) {
   const svg = $('#mf-view svg'); if (!svg) return; const p = svg.querySelector(`path[data-m="${id}"]`); if (!p) return;
-  const b = p.getBBox(); if (!b.width) return; const pad = Math.max(b.width, b.height) * 1.8 + 6; const r = svg.getBoundingClientRect(); const ar = r.height / r.width;
-  const w = Math.max(b.width + pad * 2, (b.height + pad * 2) / ar); setVB(svg, [b.x + b.width / 2 - w / 2, b.y + b.height / 2 - w * ar / 2, w, w * ar]); selMuni(p);
+  const b = p.getBBox(); if (!b.width) return; const r = svg.getBoundingClientRect(); if (!r.width || !r.height) { setTimeout(() => focusMuni(id), 80); return; }
+  // Encuadre: el pueblo ocupa ~40 % del ancho y queda en el tercio de arriba, por encima de la ficha
+  const ar = r.height / r.width, pad = Math.max(b.width, b.height) * 0.75 + 4; const w = Math.max(b.width + pad * 2, (b.height + pad * 2) / ar), h = w * ar;
+  setVB(svg, [b.x + b.width / 2 - w / 2, b.y + b.height / 2 - h * 0.38, w, h]); selMuni(p);
 }
 
 /* ===== Mapas dibujados en el navegador desde tus datos (sin imágenes fijas) ===== */

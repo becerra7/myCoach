@@ -1,0 +1,11 @@
+{
+  "name": "myCoach",
+  "short_name": "myCoach",
+  "description": "Tu semana, tu forma y tus pueblos a partir de tu Garmin.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F2F2F7",
+  "theme_color": "#F2F2F7",
+  "lang": "es",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}

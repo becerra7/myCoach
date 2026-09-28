@@ -2,7 +2,7 @@
 //   --target web     → apps/web/dist/index.html (web pública; añade platform/web.js)
 //   --target claude  → apps/web/dist/claude.html (artifact de Claude; usa window.claude)
 //   --check          → además comprueba la sintaxis del JS resultante
-import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, cpSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -28,7 +28,12 @@ const parts = [
 const js = parts.join('\n');
 if (args.includes('--check')) new vm.Script(js, { filename: 'app.js' });
 const html = read(join(src, 'shell.html')).replace('/*CSS*/', () => read(join(src, 'app.css'))).replace('/*JS*/', () => js.replaceAll('</script', '<\\/script'));
+// En Claude el runtime pone el esqueleto (doctype, charset, viewport); en la web lo ponemos aquí, con la PWA.
+const page = target === 'web'
+  ? `<!doctype html>\n<html lang="es">\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n<link rel="manifest" href="/manifest.webmanifest">\n<link rel="icon" href="/icon.svg" type="image/svg+xml">\n<link rel="apple-touch-icon" href="/icon.svg">\n<meta name="apple-mobile-web-app-capable" content="yes">\n` + html.replace(/<title>[^<]*<\/title>/, '<title>myCoach</title>') + `\n<script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});</script>\n`
+  : html;
 mkdirSync(join(here, 'dist'), { recursive: true });
+if (target === 'web') cpSync(join(here, 'public'), join(here, 'dist'), { recursive: true });
 const out = join(here, 'dist', target === 'web' ? 'index.html' : 'claude.html');
-writeFileSync(out, html);
-console.log(`${out} · ${(html.length / 1e6).toFixed(2)} MB · ${modules.length} módulos`);
+writeFileSync(out, page);
+console.log(`${out} · ${(page.length / 1e6).toFixed(2)} MB · ${modules.length} módulos`);
