@@ -41,6 +41,8 @@ test('login con PKCE, callback con cookie y llamada a una herramienta', async ()
   assert.match(me.headers.get('Set-Cookie'), new RegExp(`^${cookie}; .*Max-Age=${60 * 60 * 24 * 60}`), 'la sesión se renueva al abrir');
   const r = await req('/api/mcp', { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ tool: 'garmin_activities', input: { limit: 5 } }) });
   assert.deepEqual(await r.json(), { payload: { tool: 'garmin_activities', ok: true } });
+  const coach = await req('/api/mcp', { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ tool: 'coach_hoy', input: {} }) });
+  assert.deepEqual(await coach.json(), { payload: { tool: 'coach_hoy', ok: true } }, 'la web puede pedir el semáforo al conector');
   const no = await req('/api/mcp', { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ tool: 'garmin_save_course' }) });
   assert.equal(no.status, 403);
   const csrf = await req('/api/mcp', { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'text/plain' }, body: '{"tool":"app_guardar"}' });

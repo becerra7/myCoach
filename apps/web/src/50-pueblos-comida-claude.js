@@ -238,7 +238,7 @@ async function sync(manual, live = !!LIVE && S.modo === 'vivo') {
     ds.evo.sort((a, b) => a[0].localeCompare(b[0])); }
   fin(); ds.at = Date.now(); construir(ds); guardarCache(ds);
   if (!S.sports.length) S.sports = Object.keys(horasPorDeporte()).slice(0, 6);
-  S.lastSync = Date.now(); S.liveOk = errs.length < 2; save(); render(); markFlow('sync');
+  S.lastSync = Date.now(); S.liveOk = errs.length < 2; save(); render(); markFlow('sync'); cargarCoach(manual);
   const pendientes = ds.acts.filter(a => !ds.det[a.id] && a.d > d60 && ['bici', 'correr', 'skimo'].includes(FAM[a.t])).length + ds.acts.filter(a => !(a.id in ds.rutas) && a.km > 0.5 && FAM[a.t] && FAM[a.t] !== 'fuerza' && FAM[a.t] !== 'raqueta').length;
   if (!errs.length) toast(`${nuevas ? `${nuevas} actividad${nuevas === 1 ? '' : 'es'} nueva${nuevas === 1 ? '' : 's'}. ` : ''}${pendientes ? `Faltan ${pendientes} por analizar: vuelve a actualizar.` : 'Todo al día con Garmin.'}`, { ms: 6000 });
   else { const e = errs[0] || {}; const m = { needs_reauth: 'Vuelve a conectar Garmin en claude.ai → Ajustes → Conectores', server_not_connected: 'Añade el conector de Garmin en claude.ai → Conectores', not_in_manifest: 'No has dado permiso a esta página para usar Garmin', selection_required: 'Elige qué conector de Garmin usar', server_unavailable: 'Garmin no responde ahora; prueba en un rato', tool_error: 'Garmin ha devuelto un error: ' + (e.message || '') }[e.code] || 'No he podido leer Garmin (' + (e.code || 'error') + ')'; toast(m, { ms: 8000 }); }

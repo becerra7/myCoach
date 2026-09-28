@@ -20,6 +20,9 @@ export const TOOLS = new Set([
   'garmin_status', 'garmin_activities', 'garmin_activity_detail', 'garmin_activity_route',
   'garmin_training_readiness', 'garmin_sleep', 'garmin_hrv', 'garmin_body_battery', 'garmin_daily_summary',
   'app_leer', 'app_guardar',
+  // El entrenador: el semáforo y las reglas del plan viven en el conector,
+  // así la web y tu Claude deciden con el mismo método.
+  'coach_hoy', 'coach_semana', 'coach_perfil', 'coach_perfil_guardar', 'coach_proponer', 'coach_anotar',
 ]);
 
 const json = (data, status = 200, headers = {}) =>

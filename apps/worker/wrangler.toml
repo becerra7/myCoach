@@ -24,3 +24,21 @@ service = "garmin"
 [[kv_namespaces]]
 binding = "SESIONES"
 id = "7711af0372714afd942bf460cff02518"
+
+# Web de pruebas (mycoach-pruebas): el código de una rama contra el conector
+# de pruebas (garmin-pruebas), sin tocar la web ni el conector de producción.
+# La despliega el CI a mano ("Run workflow") desde cualquier rama que no sea
+# main. Hay que desplegar antes garmin-pruebas: el service binding lo exige.
+[env.pruebas]
+name = "mycoach-pruebas"
+
+[env.pruebas.vars]
+GARMIN_URL = "https://garmin-pruebas.albertbecervas.workers.dev"
+
+[[env.pruebas.services]]
+binding = "GARMIN_SVC"
+service = "garmin-pruebas"
+
+[[env.pruebas.kv_namespaces]]
+binding = "SESIONES"
+id = "7711af0372714afd942bf460cff02518"

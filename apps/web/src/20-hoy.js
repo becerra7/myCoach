@@ -145,7 +145,8 @@ function cardReadiness() {
   const nivel = r < 50 ? 'baja' : r < 75 ? 'moderada' : 'alta'; const real = r === R.score;
   let out = `<div class="card"><div class="card-h">${ic('battery', 18)}<span class="grow">Cómo estás hoy</span>${real ? (M.fuente === 'vivo' ? '<span class="live">En vivo</span>' : simTag('Demo')) : simTag('Simulado')}</div>
     <div class="row"><div class="ring" style="--p:${r};--c:${r < 50 ? 'var(--bad)' : r < 75 ? 'var(--warn)' : 'var(--good)'}"><span>${r}</span></div><div class="grow stack" style="gap:2px"><b style="font-size:17px">Readiness ${nivel}</b><span class="small muted">${real ? [R.sleep != null ? `Sueño ${R.sleep}` : '', R.hrv != null ? `VFC ${R.hrv}` : '', R.rec ? `${nf(R.rec, 0)} h de recuperación` : 'recuperado'].filter(Boolean).join(' · ') : 'Valor simulado para probar el flujo'}</span></div></div></div>`;
-  if (!fit.ok && S.adapt === null) out += `<div class="adapt"><div class="card-h">${ic('info', 18)}<span class="grow">Tu plan de hoy no encaja</span><span class="xs" style="text-transform:none">sin IA: reglas</span></div>
+  // Con el entrenador del conector en vivo, la propuesta es la suya: no dos consejos a la vez.
+  if (!fit.ok && S.adapt === null && !COACH && S.modo !== 'demo') out += `<div class="adapt"><div class="card-h">${ic('info', 18)}<span class="grow">Tu plan de hoy no encaja</span><span class="xs" style="text-transform:none">sin IA: reglas</span></div>
       <p>Tenías <b>${esc(s.d)}</b>. Con readiness ${r}, elige:</p>
       <button type="button" class="opt rec" data-a="adapt" data-v="suave">${ic('check', 22)}<span class="main"><b>1 h muy suave hoy y lo fuerte mañana</b><span>Recuperación hoy; la sesión pasa a mañana.</span></span></button>
       <button type="button" class="opt" data-a="adapt" data-v="descanso">${ic('battery', 22)}<span class="main"><b>Descansar hoy</b><span>Y la sesión, mañana.</span></span></button>
@@ -198,7 +199,7 @@ function syncLine() {
 function tabHoy() {
   const banner = S.simRide && !S.seenSim && M.fuente === 'demo' ? `<div class="adapt b-full"><div class="row">${ic('pueblos', 26)}<div class="grow"><b style="font-size:17px">Nueva actividad: +3 pueblos</b><p class="small muted">Palau-solità i Plegamans, Polinyà y Santa Perpètua de Mogoda.</p></div></div><div class="btns"><button class="btn fill" type="button" data-a="seen-sim">Ver en el mapa</button></div></div>` : '';
   const orden = S.variant === 'forma' ? ['forma', 'semana', 'ready'] : S.variant === 'objetivo' ? ['obj', 'semana', 'ready'] : ['semana', 'ready', 'forma'];
-  const bloques = { semana: `<div class="b-hero">${cardSemana(true)}</div>`, ready: `<div class="b-side stack" style="gap:16px">${cardReadiness()}</div>`, forma: `<div class="b-side">${cardForma(S.variant !== 'forma')}</div>`, obj: `<div class="b-hero">${cardObjetivo()}</div>` };
+  const bloques = { semana: `<div class="b-hero">${cardSemana(true)}</div>`, ready: `<div class="b-side stack" style="gap:16px">${cardCoach()}${cardReadiness()}</div>`, forma: `<div class="b-side">${cardForma(S.variant !== 'forma')}</div>`, obj: `<div class="b-hero">${cardObjetivo()}</div>` };
   const html = orden.map(k => bloques[k]).join('');
   return { title: 'Hoy', html: head('Hoy', `${cap1(fLarga(HOY))} · ${syncLine()}`) + `<div class="content"><div class="bento">${banner}${cardAvisoPlan()}${html}
     <div class="b-full"><div class="section-h"><h2>Tus deportes</h2><button class="link" type="button" data-a="push" data-v="ajustes">Elegir</button></div>${tilesDeportes()}</div>

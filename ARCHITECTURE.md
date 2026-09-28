@@ -26,6 +26,7 @@ Navegador (web / PWA / luego app)          Cloudflare
 | `20-hoy.js` … `40-forma-pantallas.js` | Pantallas (Hoy, Plan, Forma, test, evolución, ajustes). |
 | `35-agenda.js` | Tu calendario (iCal) y huecos para entrenar; aviso de semana sin plan. |
 | `50-pueblos-comida-claude.js` | Pueblos, comida, chat, sincronización con Garmin, acciones. |
+| `55-coach.js` | Tarjeta "Tu entrenador": semáforo del día, aplicar la propuesta y anotar cómo estás. Lo decide el conector (`coach_hoy`, `coach_proponer`, `coach_anotar`); en demo, un ejemplo con las mismas reglas. |
 | `60-mapa.js` | Mapa táctil a pantalla completa (SVG, pellizcar, zoom, encuadre de un pueblo). |
 | `99-arranque.js` | Arranque: siempre el último, cuando todo está definido. |
 | `public/` | PWA: manifest, icono y service worker (abre sin red con la última versión). |

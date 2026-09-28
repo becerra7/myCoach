@@ -157,6 +157,13 @@ body.nosim .sim{display:none}
 .ring{--p:39;--c:var(--bad);width:64px;height:64px;border-radius:50%;background:conic-gradient(var(--c) calc(var(--p)*1%),var(--fill) 0);display:grid;place-items:center;flex:none}
 .ring::before{content:"";grid-area:1/1;width:50px;height:50px;border-radius:50%;background:var(--card)}
 .ring span{grid-area:1/1;font-family:var(--font-num);font-weight:700;font-size:24px;z-index:1}
+/* Semáforo del entrenador (lo decide el conector: coach_hoy) */
+.semaf{--c:var(--good);--s:var(--good-soft);width:64px;height:64px;border-radius:50%;background:var(--s);display:grid;place-items:center;flex:none}
+.semaf::before{content:"";width:28px;height:28px;border-radius:50%;background:var(--c)}
+.semaf.ambar{--c:var(--warn);--s:var(--warn-soft)}.semaf.rojo{--c:var(--bad);--s:var(--bad-soft)}
+.coach-msg{margin:12px 0 0;font-size:16px;line-height:1.4}
+.coach-why{margin:6px 0 0;padding:0;list-style:none;display:grid;gap:2px}
+.coach-feel{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 .row{display:flex;align-items:center;gap:12px}
 .row .grow{flex:1;min-width:0}
 .stack{display:flex;flex-direction:column;gap:8px}
