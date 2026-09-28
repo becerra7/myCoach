@@ -28,3 +28,14 @@ jobs:
       - name: Deploy
         if: env.CLOUDFLARE_API_TOKEN != ''
         run: npm run deploy
+      # Un despliegue no está bien hasta que la web y la API contestan.
+      - name: Comprobación post-despliegue
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        run: |
+          for intento in 1 2 3 4 5; do
+            me=$(curl -fsS https://mycoach.albertbecervas.workers.dev/api/me || true)
+            html=$(curl -fsS https://mycoach.albertbecervas.workers.dev/ | head -c 200 || true)
+            if echo "$me" | grep -q '"conectado"' && echo "$html" | grep -qi '<!doctype html'; then echo "OK: $me"; exit 0; fi
+            echo "Intento $intento: api=$me"; sleep 6
+          done
+          exit 1
