@@ -30,7 +30,7 @@ const setCookie = (v, maxAge) => `${COOKIE}=${v}; Path=/; HttpOnly; Secure; Same
 
 async function cliente(env, origin) {
   const redirect = `${origin}/api/callback`;
-  const key = `cliente:${redirect}`;
+  const key = `mc:cliente:${redirect}`;
   const cached = await env.SESIONES.get(key, 'json');
   if (cached) return cached;
   const r = await fetch(`${env.GARMIN_URL}/oauth/register`, {
@@ -65,7 +65,7 @@ async function llamar(env, origin, sid, s, name, input) {
     const nuevo = s.refresh && await token(env, await cliente(env, origin), { grant_type: 'refresh_token', refresh_token: s.refresh });
     if (!nuevo) return json({ code: 'needs_reauth', message: 'Vuelve a conectar tu Garmin' }, 401);
     Object.assign(s, nuevo);
-    await env.SESIONES.put(`s:${sid}`, JSON.stringify(s), { expirationTtl: SESSION_TTL });
+    await env.SESIONES.put(`mc:s:${sid}`, JSON.stringify(s), { expirationTtl: SESSION_TTL });
     r = await rpc(s.access);
   }
   if (!r.ok) return json({ code: 'server_unavailable', message: `Conector ${r.status}` }, 502);
@@ -82,14 +82,14 @@ export async function handleApi(request, env) {
   const url = new URL(request.url);
   const { pathname, origin } = url;
   const sid = cookieOf(request);
-  const sesion = sid ? await env.SESIONES.get(`s:${sid}`, 'json') : null;
+  const sesion = sid ? await env.SESIONES.get(`mc:s:${sid}`, 'json') : null;
 
   if (pathname === '/api/me') return json({ conectado: !!sesion });
 
   if (pathname === '/api/login') {
     const c = await cliente(env, origin);
     const state = random(), verifier = random(48);
-    await env.SESIONES.put(`pkce:${state}`, verifier, { expirationTtl: 600 });
+    await env.SESIONES.put(`mc:pkce:${state}`, verifier, { expirationTtl: 600 });
     const q = new URLSearchParams({
       response_type: 'code', client_id: c.client_id, redirect_uri: c.redirect, state,
       code_challenge: await sha256(verifier), code_challenge_method: 'S256',
@@ -99,19 +99,19 @@ export async function handleApi(request, env) {
 
   if (pathname === '/api/callback') {
     const state = url.searchParams.get('state'), code = url.searchParams.get('code');
-    const verifier = state && await env.SESIONES.get(`pkce:${state}`);
+    const verifier = state && await env.SESIONES.get(`mc:pkce:${state}`);
     if (!verifier || !code) return new Response('Enlace caducado. Vuelve a intentarlo desde la app.', { status: 400 });
-    await env.SESIONES.delete(`pkce:${state}`);
+    await env.SESIONES.delete(`mc:pkce:${state}`);
     const c = await cliente(env, origin);
     const t = await token(env, c, { grant_type: 'authorization_code', code, redirect_uri: c.redirect, code_verifier: verifier });
     if (!t) return new Response('No se pudo conectar con Garmin.', { status: 502 });
     const nuevo = random();
-    await env.SESIONES.put(`s:${nuevo}`, JSON.stringify(t), { expirationTtl: SESSION_TTL });
+    await env.SESIONES.put(`mc:s:${nuevo}`, JSON.stringify(t), { expirationTtl: SESSION_TTL });
     return new Response(null, { status: 302, headers: { Location: '/', 'Set-Cookie': setCookie(nuevo, SESSION_TTL) } });
   }
 
   if (pathname === '/api/logout' && request.method === 'POST') {
-    if (sid) await env.SESIONES.delete(`s:${sid}`);
+    if (sid) await env.SESIONES.delete(`mc:s:${sid}`);
     return json({ ok: true }, 200, { 'Set-Cookie': setCookie('', 0) });
   }
 

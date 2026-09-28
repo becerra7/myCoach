@@ -16,13 +16,11 @@ npm run dev        # http://localhost:8787 (necesita wrangler.toml configurado)
 
 `npm run build:claude` genera `apps/web/dist/claude.html`, la versión para publicar como artifact dentro de Claude.
 
-## Poner la web en marcha (pasos humanos, en orden)
+## Despliegue
 
-1. En `garmin-mcp`, fusiona la rama `mycoach-estado` en `main` (añade `app_leer` / `app_guardar`; se despliega sola).
-2. Cloudflare → crea el KV de sesiones: `npx wrangler kv namespace create SESIONES` y pega el id en `apps/worker/wrangler.toml`.
-3. En `apps/worker/wrangler.toml`, pon en `GARMIN_URL` la URL de tu Worker de Garmin (la que usas como conector en Claude, sin `/mcp`).
-4. GitHub → Settings → Secrets → Actions: añade `CLOUDFLARE_API_TOKEN` (plantilla "Edit Cloudflare Workers") y `CLOUDFLARE_ACCOUNT_ID`.
-5. Push a `main`: CI pasa los tests y despliega en `https://mycoach.<tu-subdominio>.workers.dev`.
-6. En la web: Ajustes → **Conectar mi Garmin** (inicia sesión en Garmin una vez).
+- **Web**: `https://mycoach.albertbecervas.workers.dev`
+- Mientras este repo no tenga sus propios secretos de Cloudflare, lo despliega el workflow **Deploy myCoach** del repo `garmin-mcp` (a mano, "Run workflow"), que usa el token de Cloudflare que ya tiene.
+- Para que se despliegue solo con cada push aquí: GitHub → Settings → Secrets → Actions → `CLOUDFLARE_API_TOKEN` y `CLOUDFLARE_ACCOUNT_ID` (los mismos que `garmin-mcp`).
+- Conector: `GARMIN_URL` en `apps/worker/wrangler.toml`. Sesiones: comparte el KV del conector con el prefijo `mc:`.
 
 Ver `ARCHITECTURE.md` para el diseño, los riesgos y el camino a app móvil.
