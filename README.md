@@ -43,6 +43,36 @@ listado no es estable, asi que `garmin_courses` prueba las conocidas en
 orden y devuelve cual ha contestado. Si un dia dejan de funcionar todas, el
 error enumera lo que se intento.
 
+## Entrenador de myCoach (`coach_*`)
+
+El método de entrenamiento de myCoach vive aquí, no en la web ni en el
+modelo. Las herramientas deciden con reglas fijas y devuelven el porqué;
+quien las llama (tu Claude, la web de myCoach o un bot) solo explica y
+negocia. Así da igual con quién hables: la lógica es la misma.
+
+| Herramienta | Qué hace |
+|---|---|
+| `coach_hoy` | Semáforo del día (verde / ámbar / rojo) con sus razones: readiness, VFC y pulso en reposo frente a tu mediana de 28 días, horas de sueño, frescura (TSB) y lo que hayas anotado. Si hace falta, propone cambiar, recortar o mover la sesión del plan. Trae un mensaje ya redactado. |
+| `coach_semana` | Plan frente a lo hecho día a día, carga de la semana frente a la media de 4 y avisos (rampa, descarga, fuerza, intensidad). |
+| `coach_proponer` | Valida cambios de plan (máximo de intensos, nada de intensos seguidos, semáforo, horas, fuerza, lesiones). Sin `guardar` solo valida; con errores no guarda y ofrece una versión corregida. Deja el porqué en `coach/decisiones`. |
+| `coach_perfil` / `coach_perfil_guardar` | Objetivo con fecha, disponibilidad, lesiones, preferencias y material. |
+| `coach_anotar` | Sensaciones (1-5), dolores y notas. Un dolor en las últimas 36 h pone el día en rojo. |
+
+Las instrucciones del servidor (`initialize`) incluyen la voz y el método,
+así que cualquier Claude con este conector habla como el entrenador. Cada
+mañana el cron deja `coach/hoy` calculado para quien usa myCoach.
+
+## Worker de pruebas
+
+`garmin-pruebas` es el mismo código en otra URL, para probar una rama en
+Claude sin tocar los conectores de producción. Comparte KV y D1 (mismos
+datos, misma cuenta de Garmin) y no tiene cron.
+
+1. GitHub → Actions → **Deploy** → *Run workflow* y elegir la rama. Desde
+   una rama que no sea `main` solo se despliega `garmin-pruebas`.
+2. En Claude: Ajustes → Conectores → Añadir conector personalizado →
+   `https://garmin-pruebas.albertbecervas.workers.dev/mcp`.
+
 ## Panel de progreso
 
 `/panel` es una pagina con el historico de entrenamiento: condicion fisica
