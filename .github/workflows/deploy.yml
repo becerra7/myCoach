@@ -3,6 +3,9 @@ name: Deploy
 on:
   push:
     branches: [main]
+  # A mano: desde main vuelve a desplegar produccion; desde cualquier otra
+  # rama despliega SOLO el Worker de pruebas (garmin-pruebas), para probar un
+  # cambio en Claude sin tocar los conectores que usa la gente.
   workflow_dispatch:
 
 # El despliegue solo necesita leer el repo; el acceso a Cloudflare va por
@@ -38,6 +41,7 @@ jobs:
           SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
 
       - name: Deploy
+        if: github.ref == 'refs/heads/main'
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -47,11 +51,20 @@ jobs:
       # Segunda instancia, para tener dos cuentas de Garmin conectadas a la
       # vez en el mismo Claude. Mismo codigo, otra URL, otro conector.
       - name: Deploy del segundo Worker
+        if: github.ref == 'refs/heads/main'
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy --env segundo --secrets-file .secrets.json
+
+      - name: Deploy del Worker de pruebas
+        if: github.ref != 'refs/heads/main'
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy --env pruebas --secrets-file .secrets.json
 
       - name: Borrar el fichero de secretos
         if: always()
@@ -74,5 +87,9 @@ jobs:
             curl -sS "$1/.well-known/oauth-authorization-server" || true
             return 1
           }
-          comprobar "https://garmin.albertbecervas.workers.dev"
-          comprobar "https://garmin-2.albertbecervas.workers.dev"
+          if [ "$GITHUB_REF" = "refs/heads/main" ]; then
+            comprobar "https://garmin.albertbecervas.workers.dev"
+            comprobar "https://garmin-2.albertbecervas.workers.dev"
+          else
+            comprobar "https://garmin-pruebas.albertbecervas.workers.dev"
+          fi

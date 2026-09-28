@@ -1508,7 +1508,8 @@ async function handleRpc(message, env, userId) {
 				"el usuario habitualmente, mire garmin_activities. Guardar la ruta en Garmin (garmin_save_course) " +
 				"Los recorridos ya guardados se leen con garmin_courses y garmin_course_detail: mirelos antes " +
 				"de proponer una ruta nueva, para no repetir una que el usuario ya tiene. " +
-				"escribe en su cuenta: pida permiso antes.",
+				"escribe en su cuenta: pida permiso antes." +
+				INSTRUCCIONES_COACH,
 		});
 	}
 
@@ -2449,6 +2450,711 @@ function resumenPanel(actividades, dias, estado) {
 	};
 }
 
+// ─────────────────── Entrenador: el motor que decide ───────────────────
+//
+// Las herramientas coach_* son el "metodo" de myCoach. Deciden con reglas
+// fijas (semaforo del dia, limites de intensidad, validacion del plan) y
+// devuelven el porque de cada decision. El modelo que las llama —el Claude
+// del usuario, la web o un bot— solo explica y negocia: asi da igual quien
+// hable, la logica es siempre la misma. Es la leccion de otros entrenadores
+// de IA: si quien decide no es quien explica, las explicaciones dejan de
+// cuadrar con las decisiones.
+//
+// Estado en el KV de la app (mismos documentos que lee y escribe la web):
+//   estado/app        plan (esta semana), next (la siguiente), goal, sports
+//   atleta/perfil     objetivo con fecha, disponibilidad, lesiones, preferencias
+//   atleta/diario     sensaciones y dolores anotados (lista)
+//   coach/hoy         ultimo semaforo calculado (lo deja el cron cada manana)
+//   coach/decisiones  cambios de plan aplicados y su porque (lista)
+
+const ZONA_COACH = "Europe/Madrid";
+
+/** Fecha local del usuario: a las 00:30 en Madrid ya es "hoy" aunque en UTC no. */
+const fechaLocal = (d = new Date(), zona = ZONA_COACH) =>
+	new Intl.DateTimeFormat("en-CA", { timeZone: zona, year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+
+const DIAS_SEMANA = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+const diaDe = (fecha) => DIAS_SEMANA[new Date(`${fecha}T12:00:00Z`).getUTCDay()];
+const semanaDe = (fecha) => [0, 1, 2, 3, 4, 5, 6].map((i) => sumaDias(lunesDe(fecha), i));
+
+// Los mismos objetivos que la app (MODOS en 10-estado.js): horas por semana,
+// dias intensos (minimo, maximo) y sesiones de fuerza.
+const MODOS_COACH = {
+	forma: { nombre: "Estar en forma y sano", h: [5, 7], int: [1, 2], fuerza: 2 },
+	reto: { nombre: "Preparar un reto", h: [7, 10], int: [1, 2], fuerza: 2 },
+	mejorar: { nombre: "Mejorar en un deporte", h: [6, 9], int: [2, 2], fuerza: 2 },
+	volver: { nombre: "Volver tras un paron", h: [3, 5], int: [0, 1], fuerza: 2 },
+};
+const TIPOS_SESION = new Set(["rec", "fondo", "tempo", "int", "otros", "descanso"]);
+const DEPORTES_APP = new Set(["bici", "correr", "skimo", "montana", "raqueta", "fuerza", "esqui", "caminar", "otros"]);
+const DUROS = new Set(["int", "tempo"]);
+
+function objetivoDe(estadoApp) {
+	const goal = estadoApp?.goal || {};
+	const modo = MODOS_COACH[goal.modo] ? goal.modo : "forma";
+	const m = MODOS_COACH[modo];
+	return { modo, nombre: m.nombre, h: goal.h || m.h, int: goal.int || m.int, fuerza: goal.fuerza ?? m.fuerza };
+}
+
+/** Tipo de actividad de Garmin -> deporte de la app. */
+function deporteApp(tipo) {
+	const t = String(tipo || "");
+	if (DEPORTES_BICI.has(t)) return "bici";
+	if (/run/.test(t)) return "correr";
+	if (/backcountry|skimo|ski_touring/.test(t)) return "skimo";
+	if (/hik|mountaineer|climb/.test(t)) return "montana";
+	if (/tennis|padel|paddel|squash|badminton|racket|pickleball/.test(t)) return "raqueta";
+	if (familiaDe(t) === "fuerza") return "fuerza";
+	if (/ski|snowboard/.test(t)) return "esqui";
+	if (/walk/.test(t)) return "caminar";
+	return "otros";
+}
+
+/**
+ * Intensidad de una actividad hecha. Es una estimacion con el efecto de
+ * entrenamiento de Garmin: el tipo exacto (series, umbral) no viaja en la
+ * lista de actividades, y para contar dias duros basta con esto.
+ */
+function intensidadHecha(a) {
+	if ((a.anaerobic_te ?? 0) >= 2 || (a.aerobic_te ?? 0) >= 4) return "int";
+	if ((a.aerobic_te ?? 0) >= 3.5) return "tempo";
+	return "suave";
+}
+
+const mediana = (valores) => {
+	const orden = valores.filter((v) => typeof v === "number" && Number.isFinite(v)).sort((a, b) => a - b);
+	if (!orden.length) return null;
+	const m = Math.floor(orden.length / 2);
+	return orden.length % 2 ? orden[m] : (orden[m - 1] + orden[m]) / 2;
+};
+
+/** Linea base personal: mediana de los 28 dias anteriores a hoy. */
+function lineaBase(dias, hoy) {
+	const previos = dias.filter((d) => d.date < hoy && diasEntre(d.date, hoy) <= 28);
+	return {
+		hrv: mediana(previos.map((d) => d.hrv)),
+		resting_hr: mediana(previos.map((d) => d.resting_hr)),
+		sleep_h: mediana(previos.map((d) => d.sleep_h)),
+		dias: previos.length,
+	};
+}
+
+const horasTexto = (h) => {
+	const min = Math.round(h * 60);
+	return `${Math.floor(min / 60)} h${min % 60 ? ` ${String(min % 60).padStart(2, "0")}` : ""}`;
+};
+
+function lecturaFrescura(tsb) {
+	if (tsb == null) return null;
+	if (tsb > 10) return "fresco";
+	if (tsb >= -10) return "equilibrado";
+	if (tsb >= -30) return "cargado (normal en un bloque de entreno)";
+	return "muy cargado";
+}
+
+/**
+ * Semaforo del dia. Cada senal suma 1 (leve) o 2 (fuerte): rojo desde 4,
+ * ambar desde 2. Ninguna senal sola pone el dia en rojo salvo un readiness
+ * muy bajo o un dolor anotado: un mal dato suelto no debe tirar una semana.
+ */
+function semaforo({ hoy, datosHoy = {}, base = {}, tsb = null, diario = [], perfil = {} }) {
+	const senales = [];
+	const positivos = [];
+	const senal = (peso, texto) => senales.push({ peso, texto });
+
+	const r = datosHoy.readiness;
+	if (r != null) {
+		if (r < 35) senal(4, `readiness ${r} de Garmin`);
+		else if (r < 55) senal(1, `readiness ${r} de Garmin`);
+		else if (r >= 70) positivos.push(`readiness ${r}`);
+	}
+
+	const hrv = datosHoy.hrv;
+	if (hrv != null && base.hrv) {
+		const ratio = hrv / base.hrv;
+		if (ratio < 0.8) senal(2, `VFC ${Math.round(hrv)} ms, muy por debajo de lo normal para ti (${Math.round(base.hrv)})`);
+		else if (ratio < 0.9) senal(1, `VFC ${Math.round(hrv)} ms, algo baja (tu normal: ${Math.round(base.hrv)})`);
+		else positivos.push("VFC normal");
+	} else if (datosHoy.hrv_status) {
+		const s = String(datosHoy.hrv_status).toUpperCase();
+		if (s === "POOR") senal(2, "VFC en estado malo según Garmin");
+		else if (s === "LOW" || s === "UNBALANCED") senal(1, "VFC desequilibrada según Garmin");
+		else if (s === "BALANCED") positivos.push("VFC equilibrada");
+	}
+
+	const fc = datosHoy.resting_hr;
+	if (fc != null && base.resting_hr) {
+		const sube = fc - base.resting_hr;
+		if (sube >= 7) senal(2, `pulso en reposo ${Math.round(fc)}, ${Math.round(sube)} por encima de lo normal`);
+		else if (sube >= 4) senal(1, `pulso en reposo ${Math.round(fc)}, algo alto`);
+	}
+
+	const sueno = datosHoy.sleep_h;
+	if (sueno != null && sueno > 0) {
+		if (sueno < 5) senal(2, `has dormido ${horasTexto(sueno)}`);
+		else if (sueno < 6.25) senal(1, `has dormido ${horasTexto(sueno)}`);
+		else if (datosHoy.sleep_score != null && datosHoy.sleep_score < 45) senal(1, `sueño de mala calidad (${datosHoy.sleep_score}/100)`);
+		else if (sueno >= 7) positivos.push(`has dormido ${horasTexto(sueno)}`);
+	}
+
+	if (tsb != null) {
+		if (tsb < -30) senal(2, `mucha fatiga acumulada (frescura ${Math.round(tsb)})`);
+		else if (tsb < -18) senal(1, `fatiga acumulada (frescura ${Math.round(tsb)})`);
+		else if (tsb > 5) positivos.push("llegas fresco");
+	}
+
+	// Lo que el usuario ha contado en las ultimas 36 h pesa tanto como los datos.
+	const reciente = diario.filter((n) => n?.fecha && diasEntre(n.fecha, hoy) <= 1);
+	for (const n of reciente) {
+		if (n.tipo === "dolor") senal(4, `anotaste dolor: ${String(n.texto || "").slice(0, 60)}`);
+		else if (n.tipo === "sensacion" && n.nivel != null) {
+			if (n.nivel <= 1) senal(2, "dijiste que estabas reventado");
+			else if (n.nivel === 2) senal(1, "dijiste que estabas cansado");
+		}
+	}
+
+	const lesiones = (perfil.lesiones || []).filter((l) => l && l.estado !== "curada");
+	if (lesiones.length) senal(1, `lesión activa: ${lesiones.map((l) => l.zona).join(", ")}`);
+
+	const puntos = senales.reduce((s, x) => s + x.peso, 0);
+	const color = puntos >= 4 ? "rojo" : puntos >= 2 ? "ambar" : "verde";
+	const faltan = ["readiness", "hrv", "sleep_h"].filter((k) => datosHoy[k] == null);
+	return {
+		color,
+		dolor: reciente.some((n) => n.tipo === "dolor"),
+		puntos,
+		razones: senales.sort((a, b) => b.peso - a.peso).map((s) => s.texto),
+		positivos,
+		datos_que_faltan: faltan,
+	};
+}
+
+/**
+ * Dia de esta semana, despues de hoy, donde cabe una sesion dura sin pegarse
+ * a otra. Primero los dias libres, luego los de recuperacion y los fondos
+ * cortos. Nunca un descanso ni el dia largo: tambien son parte del plan.
+ */
+function diaParaMover(plan, hoy, { desde = 1 } = {}) {
+	// La sesion de hoy es justo la que se mueve: no cuenta como dura.
+	const duro = (f) => f !== hoy && DUROS.has(plan[f]?.t);
+	const preferencia = (f) => {
+		const s = plan[f];
+		if (!s) return 0;
+		if (s.t === "rec") return 1;
+		if (s.t === "fondo" && (s.min || 0) < 150) return 2;
+		if (s.t === "otros") return 3;
+		return null; // descanso, fondo largo o duro
+	};
+	const candidatos = semanaDe(hoy)
+		.filter((f) => f >= sumaDias(hoy, desde) && !duro(sumaDias(f, -1)) && !duro(sumaDias(f, 1)) && preferencia(f) != null)
+		.sort((a, b) => preferencia(a) - preferencia(b) || a.localeCompare(b));
+	return candidatos[0] ?? null;
+}
+
+/** Que hacer hoy con la sesion prevista segun el semaforo. null = mantenerla. */
+function ajusteDelDia(sesion, color, plan, hoy, semaforoDolor = false) {
+	if (!sesion) {
+		if (color === "verde") return { accion: "libre", texto: "Día libre. Si te apetece, 45-60 min suaves." };
+		return { accion: "descansar", texto: "Día libre: aprovecha para descansar." };
+	}
+	if (sesion.t === "descanso" || color === "verde") return null;
+
+	const min = sesion.min || 0;
+	const duro = DUROS.has(sesion.t);
+	// Con dolor no se reprograma la intensidad: primero, que deje de doler.
+	// En rojo, mañana todavia es pronto.
+	const destino = duro && !semaforoDolor ? diaParaMover(plan, hoy, { desde: color === "rojo" ? 2 : 1 }) : null;
+	// Lo que habia ese dia se sustituye: se dice, para que nadie lo pierda sin saberlo.
+	const mover = destino ? { a: destino, dia: diaDe(destino), sesion, sustituye: plan[destino] || null } : null;
+
+	if (color === "rojo") {
+		return {
+			accion: "cambiar",
+			sesion: { dep: sesion.dep, t: "rec", d: "Descanso o 30 min muy suaves", min: 30 },
+			mover,
+			texto: `Hoy descanso o 30 min muy suaves${mover ? `; ${sesion.d || "la sesión"} pasa al ${mover.dia}` : ""}.` +
+				(semaforoDolor ? " Nada exigente hasta que deje de doler; si no mejora, consulta a un profesional." : ""),
+		};
+	}
+	// Ambar
+	if (duro) {
+		const suave = Math.max(30, Math.round((min * 0.75) / 5) * 5);
+		return {
+			accion: "cambiar",
+			sesion: { dep: sesion.dep, t: "fondo", d: `${suave} min suaves en lugar de: ${sesion.d || sesion.t}`, min: suave },
+			mover,
+			texto: `Cambia ${sesion.d || "la sesión dura"} por ${suave} min suaves${mover ? ` y pásala al ${mover.dia}` : ""}.`,
+		};
+	}
+	if (sesion.t === "fondo" && min >= 120) {
+		const corto = Math.round((min * 0.7) / 5) * 5;
+		return {
+			accion: "recortar",
+			sesion: { ...sesion, d: `${sesion.d || "Fondo"} (recortado a ${corto} min)`, min: corto },
+			texto: `Recorta el fondo a ${corto} min y sin apretar.`,
+		};
+	}
+	return { accion: "suave", texto: "Mantenla, pero sin apretar." };
+}
+
+function mensajeDelDia({ color, razones, positivos }, sesion, ajuste) {
+	const circulo = { verde: "🟢", ambar: "🟠", rojo: "🔴" }[color];
+	const porque = (color === "verde" ? positivos : razones).slice(0, 2).join(" y ");
+	const que = ajuste?.texto
+		? ajuste.texto
+		: sesion && sesion.t !== "descanso"
+			? `Hoy toca ${sesion.d || sesion.t}${sesion.min ? ` (${sesion.min} min)` : ""}.`
+			: "Hoy descanso.";
+	return `${circulo} ${que}${porque ? ` ${porque.charAt(0).toUpperCase()}${porque.slice(1)}.` : ""}`;
+}
+
+async function leerDoc(env, userId, doc) {
+	return (await env.GARMIN.get(appKey(userId, doc), "json")) ?? null;
+}
+
+async function guardarDoc(env, userId, doc, valor) {
+	const v = valor && typeof valor === "object" && !Array.isArray(valor) ? { ...valor, at: Date.now() } : valor;
+	await env.GARMIN.put(appKey(userId, doc), JSON.stringify(v));
+	return v;
+}
+
+async function anadirADoc(env, userId, doc, entrada, max = 300) {
+	const lista = (await leerDoc(env, userId, doc)) || [];
+	const nueva = [...(Array.isArray(lista) ? lista : []), entrada].slice(-max);
+	await env.GARMIN.put(appKey(userId, doc), JSON.stringify(nueva));
+	return nueva;
+}
+
+const planCompleto = (estadoApp) => ({ ...(estadoApp?.next || {}), ...(estadoApp?.plan || {}) });
+
+/** Historico de D1 y la curva de forma. Si el cron aun no ha pasado, trae un trozo. */
+async function historico(env, userId) {
+	if (!(await prepararEsquema(env))) return { actividades: [], dias: [], curva: [], fc: null, ftp: null };
+	let estado = await leerEstado(env, userId);
+	const viejo = !estado.last_sync || Date.now() - Date.parse(estado.last_sync) > 3 * 3600 * 1000;
+	if (viejo) {
+		try {
+			await sincronizar(env, userId, estado.done ? { paginas: 1, dias: 5 } : { paginas: 3, dias: 14 });
+			estado = await leerEstado(env, userId);
+		} catch {
+			// Sin Garmin se decide con lo que haya guardado.
+		}
+	}
+	const [actividades, dias] = await Promise.all([
+		leerTabla(env, "activities", userId, "start_date"),
+		leerTabla(env, "days", userId, "date"),
+	]);
+	const fc = referenciasFC(actividades, dias, estado);
+	const { ftp } = referenciaFTP(actividades, estado);
+	return { actividades, dias, curva: curvaDeForma(actividades, fc, ftp), fc, ftp };
+}
+
+/** Lo de esta manana, en vivo: la noche de hoy aun no esta en D1. */
+async function datosDeHoy(env, userId, fecha) {
+	const [sueno, hrv, readiness] = await Promise.all([
+		TOOLS.garmin_sleep.run(env, userId, { date: fecha }).catch(() => null),
+		TOOLS.garmin_hrv.run(env, userId, { date: fecha }).catch(() => null),
+		apiGet(env, userId, `/metrics-service/metrics/trainingreadiness/${fecha}`).catch(() => null),
+	]);
+	const r = Array.isArray(readiness) ? readiness[0] : readiness;
+	return {
+		sleep_h: sueno?.sleep_hours || null,
+		sleep_score: sueno?.sleep_score ?? null,
+		resting_hr: sueno?.resting_hr ?? null,
+		hrv: hrv?.last_night_avg ?? sueno?.avg_overnight_hrv ?? null,
+		hrv_status: hrv?.status ?? null,
+		readiness: r?.score ?? null,
+	};
+}
+
+async function calcularHoy(env, userId, { fecha } = {}) {
+	const hoy = fecha || fechaLocal();
+	const [estadoApp, perfil, diario, hist, datosHoy] = await Promise.all([
+		leerDoc(env, userId, "estado/app"),
+		leerDoc(env, userId, "atleta/perfil"),
+		leerDoc(env, userId, "atleta/diario"),
+		historico(env, userId),
+		datosDeHoy(env, userId, hoy),
+	]);
+	const plan = planCompleto(estadoApp);
+	const sesion = plan[hoy] || null;
+	const forma = hist.curva.at(-1) || null;
+	const base = lineaBase(hist.dias, hoy);
+	const sem = semaforo({ hoy, datosHoy, base, tsb: forma?.tsb ?? null, diario: diario || [], perfil: perfil || {} });
+	const hechoHoy = hist.actividades.filter((a) => a.start_date === hoy);
+	// Si ya ha entrenado, no tiene sentido proponerle cambiar la sesion de hoy.
+	const ajuste = hechoHoy.length ? null : ajusteDelDia(sesion, sem.color, plan, hoy, sem.dolor);
+
+	return {
+		fecha: hoy,
+		dia: diaDe(hoy),
+		semaforo: sem,
+		sesion_prevista: sesion,
+		ya_entrenado_hoy: hechoHoy.map((a) => ({ deporte: deporteApp(a.type), min: Math.round((a.duration_s || 0) / 60), nombre: a.name })),
+		propuesta: ajuste,
+		forma: forma && { forma_ctl: forma.ctl, fatiga_atl: forma.atl, frescura_tsb: forma.tsb, lectura: lecturaFrescura(forma.tsb) },
+		datos_hoy: datosHoy,
+		linea_base_28d: base,
+		mensaje: mensajeDelDia(sem, sesion, ajuste),
+		calculado_en: new Date().toISOString(),
+	};
+}
+
+/**
+ * Reglas del plan de una semana. Errores = no se guarda; avisos = se guarda
+ * pero se le dice al usuario. Devuelve tambien una version corregida para que
+ * quien habla pueda ofrecerla en vez de un simple "no".
+ */
+function validarSemana(semanaPlan, { objetivo, hoy, colorHoy = null, perfil = {} }) {
+	const errores = [];
+	const avisos = [];
+	const corregido = structuredClone(semanaPlan);
+	const fechas = Object.keys(semanaPlan).sort();
+
+	for (const f of fechas) {
+		const s = semanaPlan[f];
+		if (s == null) continue;
+		if (typeof s !== "object" || !TIPOS_SESION.has(s.t) || !DEPORTES_APP.has(s.dep))
+			errores.push({ fecha: f, regla: "formato", texto: `La sesión del ${diaDe(f)} necesita dep (${[...DEPORTES_APP].join(", ")}) y t (${[...TIPOS_SESION].join(", ")}).` });
+		else if (s.min != null && !(Number(s.min) >= 0 && Number(s.min) <= 600))
+			errores.push({ fecha: f, regla: "formato", texto: `Duración no válida el ${diaDe(f)}: ${s.min} min.` });
+	}
+	if (errores.length) return { errores, avisos, corregido: null };
+
+	const intensas = fechas.filter((f) => corregido[f]?.t === "int");
+	const max = objetivo.int[1];
+	if (intensas.length > max) {
+		errores.push({ fecha: null, regla: "max_intensos", texto: `${intensas.length} días intensos: el máximo para "${objetivo.nombre}" es ${max}.` });
+		for (const f of intensas.slice(max)) corregido[f] = { ...corregido[f], t: "fondo", d: `Suave (era intenso): ${corregido[f].d || ""}`.trim() };
+	}
+
+	for (const f of fechas) {
+		const ayer = sumaDias(f, -1);
+		if (corregido[f]?.t === "int" && corregido[ayer]?.t === "int") {
+			errores.push({ fecha: f, regla: "intensos_seguidos", texto: `Dos días intensos seguidos (${diaDe(ayer)} y ${diaDe(f)}): entre uno y otro, al menos un día suave.` });
+			corregido[f] = { ...corregido[f], t: "fondo", d: `Suave (era intenso): ${corregido[f].d || ""}`.trim() };
+		} else if (DUROS.has(corregido[f]?.t) && DUROS.has(corregido[ayer]?.t)) {
+			avisos.push({ fecha: f, regla: "duros_seguidos", texto: `${diaDe(ayer)} y ${diaDe(f)} son los dos exigentes: vigila como llegas.` });
+		}
+	}
+
+	if (colorHoy && DUROS.has(corregido[hoy]?.t)) {
+		if (colorHoy === "rojo") {
+			errores.push({ fecha: hoy, regla: "semaforo", texto: "Hoy estás en rojo: nada exigente." });
+			corregido[hoy] = { ...corregido[hoy], t: "rec", d: "30 min muy suaves", min: 30 };
+		} else if (colorHoy === "ambar") {
+			avisos.push({ fecha: hoy, regla: "semaforo", texto: "Hoy estás en ámbar: mejor suave." });
+		}
+	}
+
+	const minutos = fechas.reduce((s, f) => s + (corregido[f]?.t === "descanso" ? 0 : Number(corregido[f]?.min) || 0), 0);
+	const horas = minutos / 60;
+	if (fechas.length >= 5 && horas > 0) {
+		if (horas < objetivo.h[0] * 0.85) avisos.push({ fecha: null, regla: "horas", texto: `${round(horas, 1)} h: por debajo de tus ${objetivo.h[0]}-${objetivo.h[1]} h.` });
+		if (horas > objetivo.h[1] * 1.15) avisos.push({ fecha: null, regla: "horas", texto: `${round(horas, 1)} h: por encima de tus ${objetivo.h[0]}-${objetivo.h[1]} h.` });
+		const fuerza = fechas.filter((f) => corregido[f]?.dep === "fuerza" && corregido[f]?.t !== "descanso").length;
+		if (fuerza < objetivo.fuerza) avisos.push({ fecha: null, regla: "fuerza", texto: `${fuerza} de ${objetivo.fuerza} sesiones de fuerza recomendadas.` });
+		const larga = Math.max(0, ...fechas.map((f) => Number(corregido[f]?.min) || 0));
+		if (minutos > 240 && larga > minutos * 0.45) avisos.push({ fecha: null, regla: "sesion_larga", texto: "Una sola sesión se lleva casi la mitad de la semana: reparte un poco." });
+	}
+
+	const lesiones = (perfil.lesiones || []).filter((l) => l && l.estado !== "curada");
+	if (lesiones.length && fechas.some((f) => DUROS.has(corregido[f]?.t)))
+		avisos.push({ fecha: null, regla: "lesion", texto: `Con ${lesiones.map((l) => l.zona).join(", ")} sin curar, nada exigente que la cargue.` });
+
+	return { errores, avisos, corregido };
+}
+
+function resumenSemana(lunes, plan, actividades, hist, objetivo, hoy) {
+	const dias = semanaDe(lunes).map((f) => {
+		const prevista = plan[f] || null;
+		const hecho = actividades
+			.filter((a) => a.start_date === f)
+			.map((a) => ({ deporte: deporteApp(a.type), min: Math.round((a.duration_s || 0) / 60), intensidad: intensidadHecha(a), nombre: a.name }));
+		let estado;
+		if (prevista?.t === "descanso") estado = hecho.length ? "extra" : "descanso";
+		else if (prevista) estado = hecho.length ? "hecho" : f < hoy ? "saltado" : "pendiente";
+		else estado = hecho.length ? "extra" : "libre";
+		return { fecha: f, dia: diaDe(f), prevista, hecho, estado };
+	});
+
+	const cargaSemana = (l) =>
+		round(actividades.filter((a) => lunesDe(a.start_date) === l).reduce((s, a) => s + cargaDe(a, hist.fc, hist.ftp).carga, 0), 0);
+	const previas = [1, 2, 3, 4].map((i) => cargaSemana(sumaDias(lunes, -7 * i)));
+	const media = previas.reduce((s, x) => s + x, 0) / 4;
+	const carga = cargaSemana(lunes);
+	const subidas = [0, 1, 2].every((i) => (i === 0 ? carga : previas[i - 1]) > previas[i] * 1.05 && previas[i] > 0);
+
+	const hechas = dias.flatMap((d) => d.hecho);
+	const previstas = dias.filter((d) => d.prevista && d.prevista.t !== "descanso");
+	const totales = {
+		min_previstos: previstas.reduce((s, d) => s + (Number(d.prevista.min) || 0), 0),
+		min_hechos: hechas.reduce((s, h) => s + h.min, 0),
+		sesiones_previstas: previstas.length,
+		sesiones_hechas: dias.filter((d) => d.estado === "hecho").length,
+		saltadas: dias.filter((d) => d.estado === "saltado").length,
+		intensas_hechas: hechas.filter((h) => h.intensidad === "int").length,
+		fuerza_hecha: hechas.filter((h) => h.deporte === "fuerza").length,
+	};
+
+	const avisos = [];
+	const semanaAcabada = sumaDias(lunes, 6) < hoy;
+	if (media > 0 && carga > media * 1.3 && semanaAcabada)
+		avisos.push(`La carga ha subido un ${Math.round((carga / media - 1) * 100)} % sobre tu media de 4 semanas: sube poco a poco.`);
+	if (subidas) avisos.push("Llevas tres semanas subiendo carga: la siguiente toca descarga (un 30-40 % menos).");
+	if (semanaAcabada && totales.fuerza_hecha < objetivo.fuerza) avisos.push(`Fuerza: ${totales.fuerza_hecha} de ${objetivo.fuerza}.`);
+	if (totales.intensas_hechas > objetivo.int[1]) avisos.push(`${totales.intensas_hechas} días intensos hechos: más de los ${objetivo.int[1]} recomendados.`);
+
+	return {
+		lunes,
+		dias,
+		totales,
+		carga: { semana: carga, media_4_semanas: round(media, 0), rampa_pct: media ? Math.round((carga / media - 1) * 100) : null },
+		avisos,
+	};
+}
+
+const esquemaSesion = {
+	type: ["object", "null"],
+	description: "Sesion del dia, o null para dejarlo libre.",
+	properties: {
+		dep: { type: "string", description: "bici, correr, skimo, montana, raqueta, fuerza, esqui, caminar u otros" },
+		t: { type: "string", description: "rec, fondo, tempo, int, otros o descanso" },
+		d: { type: "string", description: "Descripcion corta, p. ej. 'Umbral: 3 x 10 min a 160-166 ppm'" },
+		min: { type: "number", description: "Duracion en minutos" },
+	},
+};
+
+const COACH_TOOLS = {
+	coach_hoy: {
+		title: "Entrenador: que hago hoy",
+		description:
+			"Semaforo del dia (verde, ambar o rojo) con sus razones, la sesion prevista en el plan de myCoach y, si hace falta, " +
+			"la propuesta de ajuste del motor (cambiar, recortar o mover la sesion). Incluye forma, fatiga y frescura, y un " +
+			"mensaje corto ya redactado. Es la primera herramienta para '¿que hago hoy?', '¿puedo apretar?' o '¿como estoy?'. " +
+			"La decision la toma el motor: explíquela con sus razones, no la cambie por su cuenta.",
+		schema: { type: "object", properties: { fecha: { type: "string", description: "YYYY-MM-DD. Por defecto hoy (hora de Madrid)." } } },
+		run: async (env, userId, { fecha } = {}) => {
+			const hoy = await calcularHoy(env, userId, { fecha });
+			if (!fecha || fecha === fechaLocal()) await guardarDoc(env, userId, "coach/hoy", hoy);
+			return hoy;
+		},
+	},
+
+	coach_semana: {
+		title: "Entrenador: mi semana",
+		description:
+			"Semana dia a dia: lo previsto en el plan de myCoach frente a lo hecho en Garmin (hecho, saltado, pendiente, extra), " +
+			"totales, carga de la semana frente a la media de 4 semanas, forma actual y avisos del metodo (rampa de carga, " +
+			"descarga, fuerza, intensidad). Uselo para revisar la semana o antes de planificar la siguiente.",
+		schema: {
+			type: "object",
+			properties: {
+				semana: { type: "string", description: "'actual' (por defecto), 'anterior', 'siguiente' o una fecha YYYY-MM-DD de esa semana." },
+			},
+		},
+		run: async (env, userId, { semana } = {}) => {
+			const hoy = fechaLocal();
+			const ref = semana === "siguiente" ? sumaDias(hoy, 7) : semana === "anterior" ? sumaDias(hoy, -7) : /^\d{4}-\d{2}-\d{2}$/.test(semana || "") ? semana : hoy;
+			const [estadoApp, perfil, hist] = await Promise.all([
+				leerDoc(env, userId, "estado/app"),
+				leerDoc(env, userId, "atleta/perfil"),
+				historico(env, userId),
+			]);
+			const objetivo = objetivoDe(estadoApp);
+			const plan = planCompleto(estadoApp);
+			const lunes = lunesDe(ref);
+			const res = resumenSemana(lunes, plan, hist.actividades, hist, objetivo, hoy);
+			const semanaPlan = Object.fromEntries(semanaDe(lunes).filter((f) => plan[f]).map((f) => [f, plan[f]]));
+			const reglas = validarSemana(semanaPlan, { objetivo, hoy, perfil: perfil || {} });
+			const forma = hist.curva.at(-1);
+			return {
+				objetivo,
+				...res,
+				plan_cumple_reglas: { errores: reglas.errores, avisos: reglas.avisos },
+				siguiente_semana_planificada: semanaDe(sumaDias(lunes, 7)).some((f) => plan[f]),
+				forma: forma && { forma_ctl: forma.ctl, fatiga_atl: forma.atl, frescura_tsb: forma.tsb, lectura: lecturaFrescura(forma.tsb) },
+			};
+		},
+	},
+
+	coach_proponer: {
+		title: "Entrenador: cambiar el plan",
+		write: true,
+		description:
+			"Propone cambios en el plan de myCoach (esta semana o la siguiente) y el motor los valida con las reglas del metodo: " +
+			"maximo de dias intensos segun el objetivo, nada de intensos seguidos, nada exigente con el semaforo en rojo, horas, " +
+			"fuerza y lesiones. Con guardar=false (por defecto) solo valida y devuelve errores, avisos y una version corregida. " +
+			"Enseñe la propuesta al usuario y, cuando diga que si, llame otra vez con guardar=true. Si hay errores no se guarda: " +
+			"ofrezca la version corregida. 'porque' queda registrado como memoria de las decisiones.",
+		schema: {
+			type: "object",
+			properties: {
+				cambios: {
+					type: "object",
+					description: "Mapa fecha YYYY-MM-DD -> sesion { dep, t, d, min } o null para dejar el dia libre.",
+					additionalProperties: esquemaSesion,
+				},
+				porque: { type: "string", description: "Motivo en una frase, p. ej. 'Cena el martes; series al jueves'." },
+				guardar: { type: "boolean", description: "true solo cuando el usuario ya ha dicho que si." },
+			},
+			required: ["cambios", "porque"],
+		},
+		run: async (env, userId, { cambios, porque, guardar = false } = {}) => {
+			if (!cambios || typeof cambios !== "object" || Array.isArray(cambios)) throw new HttpError(400, "cambios debe ser un objeto fecha -> sesion");
+			const hoy = fechaLocal();
+			const actual = lunesDe(hoy);
+			const siguiente = sumaDias(actual, 7);
+			const fechas = Object.keys(cambios);
+			for (const f of fechas) {
+				if (!/^\d{4}-\d{2}-\d{2}$/.test(f)) throw new HttpError(400, `Fecha no valida: ${f}`);
+				if (f < hoy) throw new HttpError(400, `El ${f} ya ha pasado: el plan solo se cambia de hoy en adelante.`);
+				if (![actual, siguiente].includes(lunesDe(f))) throw new HttpError(400, `El ${f} no es de esta semana ni de la siguiente.`);
+			}
+
+			const [estadoApp, perfil, hoyGuardado] = await Promise.all([
+				leerDoc(env, userId, "estado/app"),
+				leerDoc(env, userId, "atleta/perfil"),
+				leerDoc(env, userId, "coach/hoy"),
+			]);
+			const objetivo = objetivoDe(estadoApp);
+			const plan = planCompleto(estadoApp);
+			const nuevo = { ...plan };
+			for (const [f, s] of Object.entries(cambios)) {
+				if (s == null) delete nuevo[f];
+				else nuevo[f] = { dep: s.dep, t: s.t, d: String(s.d || "").slice(0, 120), min: s.min == null ? undefined : Math.round(Number(s.min)) };
+			}
+			const colorHoy = hoyGuardado?.fecha === hoy ? hoyGuardado.semaforo?.color : null;
+
+			const semanas = [...new Set(fechas.map(lunesDe))].sort();
+			const resultado = semanas.map((l) => {
+				const semanaPlan = Object.fromEntries(semanaDe(l).filter((f) => nuevo[f]).map((f) => [f, nuevo[f]]));
+				const v = validarSemana(semanaPlan, { objetivo, hoy, colorHoy, perfil: perfil || {} });
+				// Con errores, la version corregida completa: lo que cambia respecto al plan de antes.
+				const corregidos = v.errores.length && v.corregido
+					? Object.fromEntries(semanaDe(l)
+						.filter((f) => JSON.stringify(v.corregido[f] ?? null) !== JSON.stringify(plan[f] ?? null))
+						.map((f) => [f, v.corregido[f] ?? null]))
+					: null;
+				return { semana: l, errores: v.errores, avisos: v.avisos, cambios_corregidos: corregidos };
+			});
+			const errores = resultado.flatMap((r) => r.errores);
+
+			if (!guardar || errores.length) {
+				return {
+					guardado: false,
+					valido: errores.length === 0,
+					semanas: resultado,
+					siguiente_paso: errores.length
+						? "No cumple las reglas. Explique el motivo y ofrezca los cambios_corregidos."
+						: "Valido. Enseñe los cambios y, si el usuario dice que si, llame de nuevo con guardar=true.",
+				};
+			}
+
+			// Mismo reparto que la app: esta semana en 'plan', la siguiente en 'next'.
+			const planApp = { ...(estadoApp?.plan || {}) };
+			const nextApp = { ...(estadoApp?.next || {}) };
+			for (const f of fechas) {
+				const destino = lunesDe(f) === actual ? planApp : nextApp;
+				const otro = destino === planApp ? nextApp : planApp;
+				delete otro[f];
+				if (nuevo[f]) destino[f] = nuevo[f];
+				else delete destino[f];
+			}
+			await guardarDoc(env, userId, "estado/app", { ...(estadoApp || {}), plan: planApp, next: Object.keys(nextApp).length ? nextApp : null });
+			await anadirADoc(env, userId, "coach/decisiones", { at: new Date().toISOString(), fecha: hoy, cambios, porque: String(porque || "").slice(0, 200) });
+			// El semaforo guardado describia el plan viejo.
+			if (hoyGuardado && fechas.includes(hoy)) await env.GARMIN.delete(appKey(userId, "coach/hoy"));
+			return { guardado: true, avisos: resultado.flatMap((r) => r.avisos), semanas: resultado.map((r) => r.semana) };
+		},
+	},
+
+	coach_perfil: {
+		title: "Entrenador: perfil del deportista",
+		description:
+			"Perfil del deportista que usa el metodo: objetivo con fecha (evento), disponibilidad (dias y horas), lesiones, " +
+			"preferencias (lo que le gusta y lo que no), material (potenciometro, rodillo...) y notas. Lealo al empezar una " +
+			"conversacion de entrenamiento. Si esta vacio, pregunte lo basico y guardelo con coach_perfil_guardar.",
+		schema: { type: "object", properties: {} },
+		run: async (env, userId) => {
+			const perfil = (await leerDoc(env, userId, "atleta/perfil")) || {};
+			const estadoApp = await leerDoc(env, userId, "estado/app");
+			return { perfil, vacio: Object.keys(perfil).length === 0, objetivo_app: objetivoDe(estadoApp), deportes: estadoApp?.sports ?? [] };
+		},
+	},
+
+	coach_perfil_guardar: {
+		title: "Entrenador: guardar en el perfil",
+		write: true,
+		description:
+			"Mezcla campos en el perfil del deportista: objetivo { evento, fecha, tipo }, disponibilidad { dias, horas_semana, " +
+			"franjas }, lesiones (lista completa de { zona, desde, estado: activa|mejorando|curada }), preferencias, material y " +
+			"notas. Guarde lo que el usuario cuente y deba recordarse, diciendole que lo guarda.",
+		schema: {
+			type: "object",
+			properties: {
+				cambios: { type: "object", description: "Campos a mezclar: objetivo, disponibilidad, lesiones, preferencias, material, notas." },
+			},
+			required: ["cambios"],
+		},
+		run: async (env, userId, { cambios } = {}) => {
+			if (!cambios || typeof cambios !== "object" || Array.isArray(cambios)) throw new HttpError(400, "cambios debe ser un objeto");
+			const permitidos = ["objetivo", "disponibilidad", "lesiones", "preferencias", "material", "notas"];
+			const limpio = Object.fromEntries(Object.entries(cambios).filter(([k]) => permitidos.includes(k)));
+			if (!Object.keys(limpio).length) throw new HttpError(400, `Campos validos: ${permitidos.join(", ")}`);
+			const actual = (await leerDoc(env, userId, "atleta/perfil")) || {};
+			const nuevo = { ...actual, ...limpio };
+			if (JSON.stringify(nuevo).length > 50_000) throw new HttpError(413, "Perfil demasiado grande");
+			return { guardado: true, perfil: await guardarDoc(env, userId, "atleta/perfil", nuevo) };
+		},
+	},
+
+	coach_anotar: {
+		title: "Entrenador: anotar como estoy",
+		write: true,
+		description:
+			"Anota en el diario del deportista una sensacion (nivel 1 = reventado ... 5 = genial), un dolor o una nota. El semaforo " +
+			"del dia tiene en cuenta lo anotado en las ultimas 36 h: un dolor lo pone en rojo. Uselo cuando el usuario diga como se " +
+			"encuentra o como le ha ido una sesion.",
+		schema: {
+			type: "object",
+			properties: {
+				tipo: { type: "string", enum: ["sensacion", "dolor", "nota"] },
+				texto: { type: "string" },
+				nivel: { type: "integer", minimum: 1, maximum: 5, description: "Solo para sensacion: 1 reventado, 3 normal, 5 genial." },
+				fecha: { type: "string", description: "YYYY-MM-DD. Por defecto hoy." },
+			},
+			required: ["tipo", "texto"],
+		},
+		run: async (env, userId, { tipo, texto, nivel, fecha } = {}) => {
+			if (!["sensacion", "dolor", "nota"].includes(tipo)) throw new HttpError(400, "tipo: sensacion, dolor o nota");
+			const entrada = {
+				fecha: /^\d{4}-\d{2}-\d{2}$/.test(fecha || "") ? fecha : fechaLocal(),
+				tipo,
+				texto: String(texto || "").slice(0, 300),
+				...(tipo === "sensacion" && nivel ? { nivel: Math.min(5, Math.max(1, Math.round(nivel))) } : {}),
+				at: new Date().toISOString(),
+			};
+			const diario = await anadirADoc(env, userId, "atleta/diario", entrada);
+			return { guardado: true, entrada, total: diario.length };
+		},
+	},
+};
+
+Object.assign(TOOLS, COACH_TOOLS);
+
+/** Instrucciones del entrenador: como habla y como decide, sea quien sea el que lo llame. */
+const INSTRUCCIONES_COACH =
+	"\n\nENTRENADOR MYCOACH. Si el usuario habla de entrenar, de su plan, de como esta o de que hacer hoy, actue como su " +
+	"entrenador de myCoach con las herramientas coach_*: coach_hoy para el dia, coach_semana para la semana, coach_perfil " +
+	"para su contexto (lealo al empezar; coach_perfil_guardar para lo que deba recordarse) y coach_proponer para cualquier cambio de plan. El metodo lo aplica el motor: no " +
+	"invente sesiones ni se salte sus reglas; si el usuario insiste en algo que el motor rechaza, digale que puede hacerlo " +
+	"pero que se lo desaconseja y por que. Cambios de plan: primero coach_proponer sin guardar, luego enseñe el resultado y " +
+	"guarde solo con su si. Cuando cuente como se encuentra o un dolor, anotelo con coach_anotar. Voz: espanol de Espana, " +
+	"tuteando, frases cortas, como un companero que sabe; siempre el porque en una frase; una recomendacion, no un abanico; " +
+	"diga que un dato es estimado cuando lo sea; sin calorias ni culpa con la comida; ante dolor o sintomas raros, baje la " +
+	"carga y recomiende un profesional, nunca diagnostique.";
+
 // ──────────────────── Panel: sesion y endpoints ────────────────────
 
 const PANEL_TTL = 1000 * 60 * 60 * 24 * 30;
@@ -2593,6 +3299,10 @@ async function sincronizarTodos(env) {
 				const estado = await leerEstado(env, userId);
 				if (estado.done && estado.last_sync && Date.parse(estado.last_sync) > limite) continue;
 				await sincronizar(env, userId, estado.done ? { paginas: 1, dias: 10 } : { paginas: 6, dias: 20 });
+				// El semaforo de la manana, listo para la web (y para avisos), solo
+				// para quien usa myCoach: son tres llamadas mas a Garmin.
+				if (await env.GARMIN.get(appKey(userId, "estado/app")))
+					await guardarDoc(env, userId, "coach/hoy", await calcularHoy(env, userId));
 			} catch {
 				// Un usuario con la sesion caducada no puede parar al resto.
 			}

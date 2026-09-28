@@ -451,7 +451,7 @@ const rpc = async (env, token, message) => {
 	check("initialize con token valido", init.body.result?.serverInfo?.name === "garmin");
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("tools/list devuelve 15 herramientas", list.body.result.tools.length === 15);
+	check("tools/list devuelve 21 herramientas", list.body.result.tools.length === 21);
 	check("app_guardar se anuncia como escritura", anot0(list).app_guardar.readOnlyHint === false);
 	{
 		const call = (name, args) => rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name, arguments: args } });
@@ -904,7 +904,7 @@ const rpc = async (env, token, message) => {
 	check("el token de acceso vale sin leer del KV", init.body.result?.serverInfo?.name === "garmin");
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("las herramientas se listan igualmente", list.body.result.tools.length === 15);
+	check("las herramientas se listan igualmente", list.body.result.tools.length === 21);
 
 	// Y el dato que si vive en KV avisa en vez de mentir
 	const call = await rpc(env, tokens.access_token, {
@@ -1207,6 +1207,187 @@ const rpc = async (env, token, message) => {
 		/PRIMARY KEY \(user_id, activity_id\)/.test(fuente) &&
 		/PRIMARY KEY \(user_id, date\)/.test(fuente) &&
 		/user_id TEXT PRIMARY KEY/.test(fuente));
+}
+
+// ── 12. Entrenador: el motor decide, quien habla solo explica ──
+{
+	const fechaMadrid = (d = new Date()) =>
+		new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+	const HOY_C = fechaMadrid();
+	const mas = (f, n) => { const d = new Date(`${f}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+	const lunes = (() => { const d = new Date(`${HOY_C}T12:00:00Z`); return mas(HOY_C, -((d.getUTCDay() + 6) % 7)); })();
+	const proxLunes = mas(lunes, 7);
+
+	// Lo que cuenta Garmin esta manana; cada escenario lo cambia.
+	const manana = { readiness: 80, sueno_h: 7.5, hrv: 50 };
+	const salidas = Array.from({ length: 30 }, (_, i) => ({
+		activityId: 9000 + i,
+		activityName: `Salida ${i}`,
+		activityType: { typeKey: i % 3 ? "cycling" : "running" },
+		startTimeLocal: `${mas(HOY_C, -(i * 2 + 1))} 09:00:00`,
+		duration: 3600, movingDuration: 3500, distance: 30000, averageHR: 135, maxHR: 170,
+		aerobicTrainingEffect: 3, anaerobicTrainingEffect: 0.5,
+	}));
+
+	mockGarmin({
+		"ana@x.com": { password: "a", data: { displayName: "ana", hrv: 50 } },
+		"bob@x.com": { password: "b", data: { displayName: "bob", hrv: 60 } },
+	});
+	const abajo = globalThis.fetch;
+	globalThis.fetch = async (url, init) => {
+		const u = new URL(url);
+		const quien = (init?.headers?.Authorization || "").replace("Bearer TOK-", "");
+		if (quien && u.pathname.includes("/activitylist-service/")) {
+			const desde = Number(u.searchParams.get("start"));
+			return new Response(JSON.stringify(quien === "ana" ? salidas.slice(desde, desde + 100) : []));
+		}
+		if (quien && u.pathname.includes("/usersummary-service/"))
+			return new Response(JSON.stringify({ restingHeartRate: 48, sleepingSeconds: 7.4 * 3600 }));
+		if (quien && u.pathname.includes("/wellness-service/wellness/dailySleepData/")) {
+			const d = u.searchParams.get("date");
+			const h = d === HOY_C ? manana.sueno_h : 7.4;
+			return new Response(JSON.stringify({ dailySleepDTO: { sleepTimeSeconds: h * 3600, sleepScores: { overall: { value: 80 } } }, restingHeartRate: 48 }));
+		}
+		if (quien && u.pathname.startsWith("/hrv-service/hrv/")) {
+			const d = u.pathname.split("/").at(-1);
+			return new Response(JSON.stringify({ hrvSummary: { lastNightAvg: d === HOY_C ? manana.hrv : 50, status: "BALANCED" } }));
+		}
+		if (quien && u.pathname.includes("/metrics-service/metrics/trainingreadiness/"))
+			return new Response(JSON.stringify([{ score: manana.readiness }]));
+		return abajo(url, init);
+	};
+
+	const env = makeEnv();
+	const ana = (await connect(env, "ana@x.com", "a")).tokens.access_token;
+	const bob = (await connect(env, "bob@x.com", "b")).tokens.access_token;
+	const llamar = async (token, name, args = {}) => {
+		const r = await rpc(env, token, { jsonrpc: "2.0", id: 20, method: "tools/call", params: { name, arguments: args } });
+		const res = r.body.result;
+		return res.isError ? { error: res.content[0].text } : JSON.parse(res.content[0].text);
+	};
+
+	const init = await rpc(env, ana, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } });
+	check("las instrucciones del conector traen el metodo del entrenador",
+		init.body.result.instructions.includes("ENTRENADOR MYCOACH") && init.body.result.instructions.includes("coach_proponer"));
+	const lista = await rpc(env, ana, { jsonrpc: "2.0", id: 2, method: "tools/list" });
+	const an = anot0(lista);
+	check("coach_hoy y coach_semana se anuncian como lectura", an.coach_hoy.readOnlyHint && an.coach_semana.readOnlyHint && an.coach_perfil.readOnlyHint);
+	check("cambiar el plan, el perfil o el diario se anuncia como escritura",
+		an.coach_proponer.readOnlyHint === false && an.coach_perfil_guardar.readOnlyHint === false && an.coach_anotar.readOnlyHint === false);
+
+	// Plan de la app: hoy toca series.
+	const semanaActual = Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map((i) => [mas(lunes, i), { dep: "bici", t: "fondo", d: "Suave", min: 60 }]));
+	semanaActual[HOY_C] = { dep: "bici", t: "int", d: "Series 5 x 4 min", min: 60 };
+	await llamar(ana, "app_guardar", { doc: "estado/app", datos: { plan: semanaActual, goal: { modo: "forma" }, sports: ["bici", "correr"] } });
+
+	// Verde
+	const verde = await llamar(ana, "coach_hoy");
+	check("semaforo verde con buenos datos", verde.semaforo?.color === "verde", JSON.stringify(verde.semaforo));
+	check("en verde se mantiene la sesion", verde.propuesta === null && verde.sesion_prevista?.t === "int");
+	check("el mensaje en verde dice que toca y por que", verde.mensaje.startsWith("🟢") && verde.mensaje.includes("Series"), verde.mensaje);
+	check("la linea base sale del historico de D1", verde.linea_base_28d.hrv === 50 && verde.linea_base_28d.dias >= 10, JSON.stringify(verde.linea_base_28d));
+	check("hay forma, fatiga y frescura", typeof verde.forma?.forma_ctl === "number" && typeof verde.forma?.frescura_tsb === "number");
+	check("coach_hoy deja el semaforo guardado para la web",
+		JSON.parse(env._store.get([...env._store.keys()].find((k) => k.endsWith(":coach/hoy")))).semaforo.color === "verde");
+
+	// Ambar: poco sueno y VFC algo baja
+	Object.assign(manana, { sueno_h: 5.5, hrv: 43 });
+	const ambar = await llamar(ana, "coach_hoy");
+	check("semaforo ambar con dos senales leves", ambar.semaforo.color === "ambar", JSON.stringify(ambar.semaforo));
+	check("en ambar las series pasan a suave y mas cortas",
+		ambar.propuesta?.accion === "cambiar" && ambar.propuesta.sesion.t === "fondo" && ambar.propuesta.sesion.min === 45, JSON.stringify(ambar.propuesta));
+	check("si las mueve, es a otro dia de esta semana",
+		ambar.propuesta.mover === null || (ambar.propuesta.mover.a > HOY_C && ambar.propuesta.mover.a <= mas(lunes, 6)));
+	check("el ambar explica las razones", ambar.semaforo.razones.some((r) => r.includes("dormido")) && ambar.mensaje.startsWith("🟠"), ambar.mensaje);
+
+	// Rojo: readiness muy bajo
+	Object.assign(manana, { readiness: 25, sueno_h: 7.5, hrv: 50 });
+	const rojo = await llamar(ana, "coach_hoy");
+	check("readiness muy bajo pone el dia en rojo", rojo.semaforo.color === "rojo");
+	check("en rojo, descanso o muy suave", rojo.propuesta?.sesion?.t === "rec" && rojo.propuesta.sesion.min === 30);
+	check("en rojo, la sesion dura no se mueve a manana", rojo.propuesta.mover === null || rojo.propuesta.mover.a >= mas(HOY_C, 2));
+	check("al mover se dice que sesion se sustituye", ambar.propuesta.mover === null || "sustituye" in ambar.propuesta.mover);
+
+	// Lo que cuenta el usuario tambien cuenta
+	Object.assign(manana, { readiness: 80 });
+	await llamar(ana, "coach_anotar", { tipo: "dolor", texto: "Rodilla derecha al subir escaleras" });
+	const dolor = await llamar(ana, "coach_hoy");
+	check("un dolor anotado pone el dia en rojo", dolor.semaforo.color === "rojo" && dolor.semaforo.razones[0].includes("Rodilla"), JSON.stringify(dolor.semaforo));
+	check("con dolor no se reprograma la intensidad", dolor.propuesta?.mover === null && dolor.propuesta.texto.includes("profesional"), JSON.stringify(dolor.propuesta));
+	check("anotar valida el tipo", Boolean((await llamar(ana, "coach_anotar", { tipo: "otro", texto: "x" })).error));
+
+	// Proponer: las reglas mandan
+	const tres = {
+		[proxLunes]: { dep: "bici", t: "int", d: "Umbral", min: 60 },
+		[mas(proxLunes, 2)]: { dep: "correr", t: "int", d: "Series", min: 45 },
+		[mas(proxLunes, 4)]: { dep: "bici", t: "int", d: "VO2", min: 60 },
+	};
+	const demasiados = await llamar(ana, "coach_proponer", { cambios: tres, porque: "Quiero apretar", guardar: true });
+	check("tres intensos en modo forma no se guardan", demasiados.guardado === false && demasiados.valido === false);
+	check("el motor dice por que", demasiados.semanas[0].errores.some((e) => e.regla === "max_intensos"));
+	const corr = demasiados.semanas[0].cambios_corregidos;
+	check("y ofrece una version corregida", corr && Object.values(corr).filter((s) => s?.t === "int").length === 2 && corr[mas(proxLunes, 4)].t === "fondo", JSON.stringify(corr));
+
+	const seguidos = await llamar(ana, "coach_proponer", {
+		cambios: { [mas(proxLunes, 1)]: { dep: "bici", t: "int", d: "A", min: 60 }, [mas(proxLunes, 2)]: { dep: "bici", t: "int", d: "B", min: 60 } },
+		porque: "prueba",
+	});
+	check("dos intensos seguidos no pasan", seguidos.semanas[0].errores.some((e) => e.regla === "intensos_seguidos"));
+
+	const valido = { [proxLunes]: { dep: "fuerza", t: "otros", d: "Fuerza 45", min: 45 }, [mas(proxLunes, 1)]: { dep: "bici", t: "int", d: "Umbral 3x10", min: 60 } };
+	const soloValidar = await llamar(ana, "coach_proponer", { cambios: valido, porque: "Semana que viene" });
+	check("sin guardar=true solo valida", soloValidar.guardado === false && soloValidar.valido === true);
+	const antes = await llamar(ana, "app_leer", { doc: "estado/app" });
+	check("validar no toca el plan", !antes.next);
+	const guardado = await llamar(ana, "coach_proponer", { cambios: valido, porque: "Semana que viene", guardar: true });
+	check("con guardar=true y reglas cumplidas se guarda", guardado.guardado === true);
+	const despues = await llamar(ana, "app_leer", { doc: "estado/app" });
+	check("la semana siguiente va a 'next', como en la app",
+		despues.next?.[mas(proxLunes, 1)]?.d === "Umbral 3x10" && despues.plan[HOY_C]?.t === "int" && typeof despues.at === "number");
+	check("la decision queda registrada con su porque",
+		(await llamar(ana, "app_leer", { doc: "coach/decisiones" })).at(-1).porque === "Semana que viene");
+
+	const pasado = await llamar(ana, "coach_proponer", { cambios: { [mas(HOY_C, -1)]: null }, porque: "x" });
+	check("el pasado no se cambia", Boolean(pasado.error));
+	const lejos = await llamar(ana, "coach_proponer", { cambios: { [mas(HOY_C, 30)]: null }, porque: "x" });
+	check("solo esta semana y la siguiente", Boolean(lejos.error));
+	const raro = await llamar(ana, "coach_proponer", { cambios: { [proxLunes]: { dep: "nadar", t: "int" } }, porque: "x" });
+	check("una sesion mal formada se rechaza con explicacion", raro.semanas?.[0]?.errores?.[0]?.regla === "formato");
+
+	// Semana
+	const sem = await llamar(ana, "coach_semana");
+	check("la semana tiene 7 dias con plan y lo hecho", sem.dias?.length === 7 && sem.dias.every((d) => d.estado));
+	check("detecta sesiones saltadas o hechas en los dias pasados",
+		sem.dias.filter((d) => d.fecha < HOY_C).every((d) => ["hecho", "saltado"].includes(d.estado)));
+	check("la semana trae la carga frente a la media", typeof sem.carga.semana === "number" && typeof sem.carga.media_4_semanas === "number");
+	check("sabe que la semana siguiente ya tiene plan", sem.siguiente_semana_planificada === true);
+	const sig = await llamar(ana, "coach_semana", { semana: "siguiente" });
+	check("se puede pedir la semana siguiente", sig.lunes === proxLunes && sig.dias[1].prevista?.t === "int");
+
+	// Perfil
+	check("el perfil empieza vacio", (await llamar(ana, "coach_perfil")).vacio === true);
+	await llamar(ana, "coach_perfil_guardar", { cambios: { objetivo: { evento: "Quebrantahuesos", fecha: "2027-06-19" }, lesiones: [{ zona: "rodilla", estado: "activa" }], hackeo: 1 } });
+	const perfil = await llamar(ana, "coach_perfil");
+	check("el perfil guarda solo campos conocidos", perfil.perfil.objetivo.evento === "Quebrantahuesos" && perfil.perfil.hackeo === undefined);
+	const conLesion = await llamar(ana, "coach_proponer", { cambios: { [mas(proxLunes, 3)]: { dep: "bici", t: "int", d: "X", min: 60 } }, porque: "x" });
+	check("con una lesion activa avisa de la intensidad", conLesion.semanas[0].avisos.some((a) => a.regla === "lesion"));
+
+	// Aislamiento: bob no ve nada de ana
+	const deBob = await llamar(bob, "coach_perfil");
+	check("el perfil de otro usuario no se ve", deBob.vacio === true);
+	const hoyBob = await llamar(bob, "coach_hoy");
+	check("el semaforo de bob no usa el diario ni el plan de ana", hoyBob.sesion_prevista === null && !hoyBob.semaforo.razones.some((r) => r.includes("Rodilla")));
+
+	// El cron deja el semaforo preparado solo para quien usa myCoach
+	for (const k of [...env._store.keys()].filter((k) => k.endsWith(":coach/hoy"))) env._store.delete(k);
+	for (const t of env.LOGS._tablas.values()) for (const [k, fila] of t) if (fila.last_sync) t.set(k, { ...fila, last_sync: null });
+	const esperas = [];
+	await worker.scheduled({}, env, { waitUntil: (p) => esperas.push(p) });
+	await Promise.all(esperas);
+	const conSemaforo = [...env._store.keys()].filter((k) => k.endsWith(":coach/hoy"));
+	check("el cron calcula el semaforo de quien usa myCoach, y solo de ellos", conSemaforo.length === 1, conSemaforo.join(","));
+
+	globalThis.fetch = abajo;
 }
 
 /** Firma un token como lo hace el worker, para poder fabricar uno en un test. */

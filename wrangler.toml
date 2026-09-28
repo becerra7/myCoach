@@ -40,6 +40,28 @@ binding = "LOGS"
 database_name = "garmin-diag"
 database_id = "32c6dc43-3fb2-469e-85e8-6f503ea8a925"
 
+# Worker de pruebas: el codigo de una rama, en otra URL, sin tocar los
+# conectores de produccion. Se anade en Claude como un conector mas
+# (https://garmin-pruebas.<subdominio>.workers.dev/mcp) para probar antes de
+# llevar nada a main. Lo despliega el workflow a mano desde cualquier rama.
+#
+# Comparte KV y D1: se entra con la misma cuenta de Garmin y se ven los
+# mismos datos de la app. Sin cron, para no pedirle a Garmin nada de mas.
+[env.pruebas]
+name = "garmin-pruebas"
+
+[env.pruebas.triggers]
+crons = []
+
+[[env.pruebas.kv_namespaces]]
+binding = "GARMIN"
+id = "7711af0372714afd942bf460cff02518"
+
+[[env.pruebas.d1_databases]]
+binding = "LOGS"
+database_name = "garmin-diag"
+database_id = "32c6dc43-3fb2-469e-85e8-6f503ea8a925"
+
 # SIGNING_KEY no se declara como requerido a proposito. Se sube en el propio
 # despliegue con --secrets-file, y exigirlo aqui podria hacer que wrangler
 # abortase por no encontrarlo *antes* de subirlo: el arreglo impediria
