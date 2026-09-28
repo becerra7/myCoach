@@ -90,7 +90,12 @@ export async function handleApi(request, env) {
   const sid = cookieOf(request);
   const sesion = sid ? await env.SESIONES.get(`mc:s:${sid}`, 'json') : null;
 
-  if (pathname === '/api/me') return json({ conectado: !!sesion });
+  // Sesión deslizante: cada vez que abres la app se renuevan los 60 días (cookie y KV).
+  if (pathname === '/api/me') {
+    if (!sesion) return json({ conectado: false });
+    await env.SESIONES.put(`mc:s:${sid}`, JSON.stringify(sesion), { expirationTtl: SESSION_TTL });
+    return json({ conectado: true }, 200, { 'Set-Cookie': setCookie(sid, SESSION_TTL) });
+  }
 
   if (pathname === '/api/login') {
     const c = await cliente(env, origin);

@@ -36,7 +36,9 @@ test('login con PKCE, callback con cookie y llamada a una herramienta', async ()
   assert.equal(cb.status, 302);
   const cookie = cb.headers.get('Set-Cookie').split(';')[0];
   assert.match(cb.headers.get('Set-Cookie'), /HttpOnly; Secure; SameSite=Lax/);
-  assert.deepEqual(await (await req('/api/me', { headers: { Cookie: cookie } })).json(), { conectado: true });
+  const me = await req('/api/me', { headers: { Cookie: cookie } });
+  assert.deepEqual(await me.json(), { conectado: true });
+  assert.match(me.headers.get('Set-Cookie'), new RegExp(`^${cookie}; .*Max-Age=${60 * 60 * 24 * 60}`), 'la sesión se renueva al abrir');
   const r = await req('/api/mcp', { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ tool: 'garmin_activities', input: { limit: 5 } }) });
   assert.deepEqual(await r.json(), { payload: { tool: 'garmin_activities', ok: true } });
   const no = await req('/api/mcp', { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ tool: 'garmin_save_course' }) });
