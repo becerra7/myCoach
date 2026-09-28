@@ -24,6 +24,7 @@ Navegador (web / PWA / luego app)          Cloudflare
 | `00-geo-dominio.js` | Dominio puro: geografía (municipio/país de cada punto), clasificación por zonas de pulso, W/kg por física, `construir(dataset)` → modelo `M`, indicadores con "qué dato falta". |
 | `10-estado.js` | Estado de usuario `S` (plan, comidas, objetivo…), persistencia, utilidades de fecha, resumen semanal. |
 | `20-hoy.js` … `40-forma-pantallas.js` | Pantallas (Hoy, Plan, Forma, test, evolución, ajustes). |
+| `35-agenda.js` | Tu calendario (iCal) y huecos para entrenar; aviso de semana sin plan. |
 | `50-pueblos-comida-claude.js` | Pueblos, comida, chat, sincronización con Garmin, acciones. |
 | `60-mapa.js` | Mapa táctil a pantalla completa (SVG, pellizcar, zoom, encuadre de un pueblo). |
 | `99-arranque.js` | Arranque: siempre el último, cuando todo está definido. |
@@ -33,6 +34,10 @@ Siguiente paso de escalado (sin cambiar el comportamiento):
 1. Sacar `00-geo-dominio.js` a `packages/domain` (ES modules, sin DOM) con tests de `construir`, `tipoPorZonas`, `wkgFisica`, `indicadores`.
 2. Pasar los módulos a ES modules con un bundler (esbuild) y cargar la geografía (1,8 MB) bajo demanda desde `/geo/*.json` con caché, en vez de ir incrustada.
 3. Mover la sincronización pesada (detalles, rutas, cruce con municipios) al Worker con un cron diario, para que el móvil solo descargue el resultado.
+
+## Calendario
+
+El usuario pega el enlace privado iCal de su calendario (Google, Outlook, iCloud). El Worker lo guarda en la sesión, lo descarga (caché 10 min) y `apps/worker/src/ics.js` devuelve solo los bloques ocupados de los próximos días en hora de Madrid: zonas horarias, repeticiones, excepciones y cambios de hora incluidos. La app coloca cada sesión en un hueco libre (6:00-22:00, 15 min de margen), la recorta si no cabe o la mueve al día de descanso libre más cercano. Con Google Calendar por OAuth se podría evitar pegar el enlace, pero exige verificación de Google para datos de calendario.
 
 ## Camino a app móvil
 

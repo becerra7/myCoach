@@ -33,7 +33,7 @@ function listaDias(w) {
     if (s.a) st = SPORTS[s.dep]?.cardio && tipoAct(s.a) !== s.t && !S.overrides[s.a.id] ? `<span class="st dev">Planeado ${TIPOS[s.t].n.toLowerCase()}</span>` : `<span class="st done">${ic('check', 14)} Hecho</span>`;
     else if (f === HOY) st = '<span class="st hoy">Hoy</span>'; else if (f < HOY && s.t !== 'descanso') st = '<span class="st" style="color:var(--bad)">No hecho</span>'; else if (w === PROX) st = '<span class="st plan">Planeado</span>';
     return `<button type="button" class="li ${f === HOY ? 'today' : ''}" data-a="day" data-v="${f}"><span class="day"><small>${DC[d.getDay()]}</small><b>${d.getDate()}</b></span>
-      <span class="main"><b>${s.t === 'descanso' ? '' : sportDot2(s.dep) + ' '}${esc(s.a ? `${s.a.lugar}${s.a.km && SPORTS[s.a.dep].cardio ? ` · ${nf(s.a.km)} km` : ''}` : s.d)}</b><span>${s.a ? `${dur(s.a.min)}${s.a.fc ? ` · ${s.a.fc} ppm` : ''}` : s.ruta ? `Ruta: ${esc(s.ruta)}` : s.min ? dur(s.min) : ''}</span></span>
+      <span class="main"><b>${s.t === 'descanso' ? '' : sportDot2(s.dep) + ' '}${esc(s.a ? `${s.a.lugar}${s.a.km && SPORTS[s.a.dep].cardio ? ` · ${nf(s.a.km)} km` : ''}` : s.d)}</b><span>${s.a ? `${dur(s.a.min)}${s.a.fc ? ` · ${s.a.fc} ppm` : ''}` : `${s.h ? s.h + ' · ' : ''}${s.ruta ? `Ruta: ${esc(s.ruta)}` : s.min ? dur(s.min) : ''}${f >= HOY && resumenAgenda(f) ? ` · ${resumenAgenda(f)}` : ''}`}</span></span>
       <span class="stack" style="align-items:flex-end;gap:4px">${s.dep === 'fuerza' || s.dep === 'raqueta' ? `<span class="chip k-otros">${SPORTS[s.dep].n}</span>` : chip(tipoSes(s))}${st}</span></button>`;
   }).join('');
 }
@@ -41,7 +41,7 @@ const sportDot2 = k => `<i class="dot" style="background:${scol(k)};vertical-ali
 function tabPlan() {
   const w = semSel(); const r = resumen(w), o = objetivos();
   let body = '';
-  if (w === PROX && !planDe(PROX)) body = planificador();
+  if ((w === PROX || w === SEM) && !planDe(w)) body = planificador(w) + (w === SEM ? `<div class="list split" style="margin-top:16px">${listaDias(SEM)}</div>` : '');
   else {
     const ins = insightsSemana(w);
     const cabecera = w === SEM && !r.plan ? `<div class="row"><div class="cring" style="--p:0"><span><b>${r.n}</b><small>hechas</small></span></div><div class="grow stack" style="gap:2px"><b style="font-size:17px">Sin plan esta semana</b><span class="small muted">${nf(r.min / 60)} h hechas · planifica la próxima con el botón "Próxima"</span></div></div>`
@@ -67,17 +67,21 @@ function resumenPlan(p) {
   for (const [f, s] of Object.entries(p || {})) { if (s.t === 'descanso') continue; r.n++; r.min += s.min; r.dep[s.dep] = (r.dep[s.dep] || 0) + s.min; if (s.t in r.tipos) r.tipos[s.t]++; if (s.dep === 'fuerza') r.fuerza++; if (s.dep === 'raqueta') r.juego++; if (SPORTS[s.dep].cardio) r.cardioMin += s.min; }
   return r;
 }
-function planificador() {
-  const d = S.nextDraft || (S.nextDraft = { deps: ['bici', 'correr', 'fuerza', 'raqueta'], h: 7 });
+function planificador(w = PROX) {
   const opts = ['bici', 'correr', 'skimo', 'montana', 'raqueta', 'fuerza'];
+  // Por defecto: tus deportes y tus horas habituales (media del último mes)
+  const mios = S.sports.filter(k => opts.includes(k)), h4 = M.ind && M.ind.h4;
+  const d = S.nextDraft || (S.nextDraft = { deps: mios.length ? mios : ['bici', 'correr', 'fuerza'], h: h4 ? Math.min(12, Math.max(3, Math.round(h4 * 2) / 2)) : 7 });
   const falta = !d.deps.includes('fuerza');
   return `<div class="bento"><div class="card b-hero">
+    ${w === SEM ? `<p><b>Esta semana aún no tiene plan.</b> Te la preparo desde hoy (${DS[dte(HOY).getDay()]}); lo ya hecho cuenta.</p>` : ''}
+    <p class="small ${CAL ? '' : 'muted'}">${ic('plan', 16)} ${CAL ? `Tengo en cuenta tu agenda: ${days7(w).filter(f => f >= HOY).reduce((n, f) => n + agendaDia(f).length, 0)} eventos esta semana.` : calDisponible() ? 'Conecta tu calendario en Ajustes y respetaré tus horas ocupadas.' : 'Tu calendario se puede conectar desde la web de myCoach.'}</p>
     <div class="card-h"><span class="grow">1 · ¿Qué deportes harás?</span></div>
     <div class="filters" style="flex-wrap:wrap">${opts.map(k => `<button type="button" class="fchip" data-a="draft-dep" data-v="${k}" aria-pressed="${d.deps.includes(k)}">${sportDot(k)}${SPORTS[k].n}</button>`).join('')}</div>
     ${falta ? `<p class="small" style="color:var(--warn)">${ic('info', 16)} Sin fuerza esta semana. Recomendado: 2 sesiones cortas.</p>` : ''}
-    <div class="card-h" style="margin-top:8px"><span class="grow">2 · ¿Cuántas horas tienes?</span><span class="num" style="font-size:24px;color:var(--label)">${d.h} h</span></div>
+    <div class="card-h" style="margin-top:8px"><span class="grow">2 · ¿Cuántas horas tienes${w === SEM ? ' en toda la semana' : ''}?</span><span class="num" style="font-size:24px;color:var(--label)">${d.h} h</span></div>
     <label class="vh" for="draft-h">Horas disponibles</label><input id="draft-h" class="range" type="range" min="3" max="12" step="0.5" value="${d.h}" data-a="draft-h">
-    <p class="xs">Tu objetivo (${esc((MODOS[S.goal.modo] || MODOS.forma).n.toLowerCase())}) pide ${objetivos().h[0]}-${objetivos().h[1]} h. La semana pasada hiciste ${nf(resumen(SEM).min / 60)} h.</p>
+    <p class="xs">Tu objetivo (${esc((MODOS[S.goal.modo] || MODOS.forma).n.toLowerCase())}) pide ${objetivos().h[0]}-${objetivos().h[1]} h. ${w === SEM ? `La semana pasada hiciste ${nf(resumen(addDays(SEM, -7)).min / 60)} h.` : `Esta semana llevas ${nf(resumen(SEM).min / 60)} h.`}</p>
     <div class="btns"><button class="btn fill" type="button" data-a="gen-week">Proponer semana</button><button class="btn tonal" type="button" data-a="claude" data-v="Prepárame la semana que viene">${ic('claude', 18)} Con Claude</button></div>
     <p class="xs">"Proponer semana" usa reglas fijas: gratis y al instante. Claude puede afinarla después.</p>
   </div>

@@ -167,8 +167,8 @@ function fitHoy() {
   return { ok: true, nivel: 'ok' };
 }
 /* Generador determinista de semana (sin IA) */
-function generarSemana(deps, horas, modo) {
-  const w = PROX, D = days7(w), m = MODOS[modo] || MODOS.forma, tot = horas * 60;
+function generarSemana(deps, horas, modo, w = PROX) {
+  const D = days7(w), m = MODOS[modo] || MODOS.forma, tot = horas * 60;
   const cardio = deps.filter(d => SPORTS[d].cardio); const main = cardio[0] || 'bici', sec = cardio[1] || main;
   const plan = {}; const set = (i, dep, t, d, min, ruta) => { plan[D[i]] = { dep, t, d, min: Math.round(min / 5) * 5, ruta }; };
   const fu = deps.includes('fuerza'), ju = deps.includes('raqueta');

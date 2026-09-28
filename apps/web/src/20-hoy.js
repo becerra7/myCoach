@@ -200,7 +200,7 @@ function tabHoy() {
   const orden = S.variant === 'forma' ? ['forma', 'semana', 'ready'] : S.variant === 'objetivo' ? ['obj', 'semana', 'ready'] : ['semana', 'ready', 'forma'];
   const bloques = { semana: `<div class="b-hero">${cardSemana(true)}</div>`, ready: `<div class="b-side stack" style="gap:16px">${cardReadiness()}</div>`, forma: `<div class="b-side">${cardForma(S.variant !== 'forma')}</div>`, obj: `<div class="b-hero">${cardObjetivo()}</div>` };
   const html = orden.map(k => bloques[k]).join('');
-  return { title: 'Hoy', html: head('Hoy', `${cap1(fLarga(HOY))} · ${syncLine()}`) + `<div class="content"><div class="bento">${banner}${html}
+  return { title: 'Hoy', html: head('Hoy', `${cap1(fLarga(HOY))} · ${syncLine()}`) + `<div class="content"><div class="bento">${banner}${cardAvisoPlan()}${html}
     <div class="b-full"><div class="section-h"><h2>Tus deportes</h2><button class="link" type="button" data-a="push" data-v="ajustes">Elegir</button></div>${tilesDeportes()}</div>
     ${S.variant === 'objetivo' ? `<div class="b-third">${cardForma(true)}</div>` : `<div class="b-third">${cardObjetivo(true)}</div>`}<div class="b-third">${cardComida()}</div><div class="b-third">${cardPueblos()}</div>
   </div></div>` };

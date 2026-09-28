@@ -142,6 +142,7 @@ function scrAjustes() {
     ${grp('clasif', 'Cómo se clasifican los días', [['min', 'Por mis minutos de pulso', 'Recomendado'], ['garmin', 'Por la etiqueta de Garmin']], S.clasif)}
     <label class="stack" for="nombre-in" style="gap:6px"><b class="small muted" style="padding:0 4px;text-transform:uppercase;letter-spacing:.4px">Tu nombre (para la ficha)</b><input id="nombre-in" class="search" value="${esc(S.nombre)}" data-a="nombre-in" placeholder="Opcional"></label>
     ${window.PLATFORM && PLATFORM.name === 'web' ? `<div class="btns">${LIVE ? '<button class="btn plain" type="button" data-a="web-logout">Desconectar Garmin</button>' : '<button class="btn fill" type="button" data-a="web-login">Conectar mi Garmin</button>'}</div>` : ''}
+    ${calDisponible() ? cardCalendario() : ''}
     ${grp('modo', 'Datos', [['vivo', 'Mi Garmin en vivo', LIVE ? 'Conector disponible' : 'Aquí no hay conector de Garmin'], ['demo', 'Modo demo', 'Datos de ejemplo para probar la app']], S.modo)}
     <p class="xs" style="padding:0 4px">Tu zona en el mapa: ${esc(M.ccaa || 'sin datos')} (la comunidad donde más kilómetros haces).</p>
   </div>` };
