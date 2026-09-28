@@ -52,3 +52,11 @@ test('un state desconocido no abre sesión', async () => {
 test('lo que no es /api va a los estáticos', async () => {
   assert.equal(await (await req('/')).text(), 'html');
 });
+
+test('con service binding, las llamadas al conector van por él y no por internet', async () => {
+  const vistos = [];
+  const env2 = { ...env, SESIONES: kv(), GARMIN_SVC: { fetch: async r => { vistos.push(new URL(r.url).pathname); return globalThis.fetch(r.url, { method: r.method, headers: Object.fromEntries(r.headers), body: await r.text() }); } } };
+  const login = await worker.fetch(new Request('https://mycoach.test/api/login'), env2);
+  assert.equal(login.status, 302);
+  assert.deepEqual(vistos, ['/oauth/register']);
+});

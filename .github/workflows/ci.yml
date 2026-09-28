@@ -35,7 +35,15 @@ jobs:
           for intento in 1 2 3 4 5; do
             me=$(curl -fsS https://mycoach.albertbecervas.workers.dev/api/me || true)
             html=$(curl -fsS https://mycoach.albertbecervas.workers.dev/ | head -c 200 || true)
-            if echo "$me" | grep -q '"conectado"' && echo "$html" | grep -qi '<!doctype html'; then echo "OK: $me"; exit 0; fi
+            if echo "$me" | grep -q '"conectado"' && echo "$html" | grep -qi '<!doctype html'; then echo "OK web y API: $me"; break; fi
             echo "Intento $intento: api=$me"; sleep 6
+            [ "$intento" = 5 ] && exit 1
           done
-          exit 1
+          # Login con Garmin: registra la web en el conector y redirige a su pantalla de autorizar
+          code=$(curl -sS -o /tmp/login.txt -w '%{http_code}' https://mycoach.albertbecervas.workers.dev/api/login)
+          loc=$(curl -sS -o /dev/null -w '%{redirect_url}' https://mycoach.albertbecervas.workers.dev/api/login)
+          echo "login: $code -> $loc"; cat /tmp/login.txt; echo
+          [ "$code" = 302 ] && echo "$loc" | grep -q '^https://garmin.albertbecervas.workers.dev/oauth/authorize?' || exit 1
+          auth=$(curl -sS -o /tmp/auth.html -w '%{http_code}' "$loc")
+          echo "pantalla de autorizar: $auth"; head -c 300 /tmp/auth.html; echo
+          [ "$auth" = 200 ] || exit 1

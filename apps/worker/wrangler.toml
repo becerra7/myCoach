@@ -12,6 +12,11 @@ run_worker_first = ["/api/*"]
 # URL del Worker del conector de Garmin (repo garmin-mcp). Sin barra final.
 GARMIN_URL = "https://garmin.albertbecervas.workers.dev"
 
+# Worker a Worker sin pasar por internet (por URL pública, Cloudflare devuelve 404).
+[[services]]
+binding = "GARMIN_SVC"
+service = "garmin"
+
 # Sesiones de la web (id aleatorio en cookie → tokens OAuth del conector).
 # De momento comparte el KV del conector de Garmin, con todas las claves bajo
 # el prefijo "mc:" para no pisar nada. Si se separa: `wrangler kv namespace

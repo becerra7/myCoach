@@ -28,12 +28,18 @@ const sha256 = async s => b64url(await crypto.subtle.digest('SHA-256', new TextE
 const cookieOf = req => (req.headers.get('Cookie') || '').split(/;\s*/).map(c => c.split('=')).find(([k]) => k === COOKIE)?.[1] || null;
 const setCookie = (v, maxAge) => `${COOKIE}=${v}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`;
 
+// Llamadas servidor a servidor al conector. Cloudflare no deja que un Worker
+// llame a otro de la misma cuenta por su URL workers.dev (da 404), así que va
+// por service binding (GARMIN_SVC). El navegador sí usa la URL pública.
+const garmin = (env, path, init) =>
+  env.GARMIN_SVC ? env.GARMIN_SVC.fetch(new Request(`${env.GARMIN_URL}${path}`, init)) : fetch(`${env.GARMIN_URL}${path}`, init);
+
 async function cliente(env, origin) {
   const redirect = `${origin}/api/callback`;
   const key = `mc:cliente:${redirect}`;
   const cached = await env.SESIONES.get(key, 'json');
   if (cached) return cached;
-  const r = await fetch(`${env.GARMIN_URL}/oauth/register`, {
+  const r = await garmin(env, '/oauth/register', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ client_name: 'myCoach', redirect_uris: [redirect] }),
   });
@@ -45,7 +51,7 @@ async function cliente(env, origin) {
 }
 
 async function token(env, c, params) {
-  const r = await fetch(`${env.GARMIN_URL}/oauth/token`, {
+  const r = await garmin(env, '/oauth/token', {
     method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ client_id: c.client_id, client_secret: c.client_secret, ...params }),
   });
@@ -55,7 +61,7 @@ async function token(env, c, params) {
 }
 
 async function llamar(env, origin, sid, s, name, input) {
-  const rpc = access => fetch(`${env.GARMIN_URL}/mcp`, {
+  const rpc = access => garmin(env, '/mcp', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', Authorization: `Bearer ${access}` },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: input || {} } }),
