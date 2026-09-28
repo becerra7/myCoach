@@ -66,7 +66,9 @@ function render(resetScroll) {
   if (S.theme === 'system') document.documentElement.removeAttribute('data-theme'); else document.documentElement.dataset.theme = S.theme;
   renderTabs();
   const scr = S.stack[S.stack.length - 1];
-  const { html, title } = scr ? SCREENS[scr.s](scr) : TABSCR[S.tab]();
+  let html, title;
+  try { ({ html, title } = scr ? SCREENS[scr.s](scr) : TABSCR[S.tab]()); }
+  catch (e) { console.error(e); title = 'Error'; html = `<div class="content"><div class="card"><div class="card-h"><span class="grow">Esta pantalla ha fallado</span></div><p class="small">Ya está anotado para arreglarlo. Mientras, prueba otra pestaña o actualiza.</p><p class="xs">${esc(e && e.message)}</p></div></div>`; }
   $('#tsmall').textContent = title; $('#topback').hidden = !scr;
   $('#view').innerHTML = html;
   $('#tabbar').classList.toggle('hidden', !S.onboarded);

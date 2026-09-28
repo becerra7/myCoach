@@ -1,11 +1,13 @@
 /* ===== PLAN: selector de semana · revisión · semana actual · planificar ===== */
+/* Semana elegida: la que tocaste si sigue en la lista; si no, la actual */
+const semSel = () => (S.week && semanas().includes(S.week) ? S.week : SEM);
 const semanas = () => { const out = []; let w = addDays(SEM, -7 * 8); while (w <= PROX) { out.push(w); w = addDays(w, 7); } return out; };
 function weekChips() {
   return `<div class="weeks" role="group" aria-label="Semana" id="weeks">${semanas().map(w => {
     const r = resumen(w); const lbl = w === SEM ? 'Esta semana' : w === PROX ? 'Próxima' : `${fDia(w)}`;
     const sub = w === PROX ? (planDe(PROX) ? 'planificada' : 'sin planificar') : r.n ? `${nf(r.min / 60)} h · ${r.n} act.` : 'sin actividad';
     const tot = Object.values(r.dep).reduce((a, b) => a + b, 0) || 1;
-    return `<button type="button" class="wkc" data-a="week" data-v="${w}" aria-pressed="${S.week === w}"><b>${lbl}</b><small>${sub}</small><span class="mini">${SPORT_ORDER.filter(k => r.dep[k]).map(k => `<i style="width:${r.dep[k] / tot * 100}%;background:${scol(k)}"></i>`).join('')}</span></button>`;
+    return `<button type="button" class="wkc" data-a="week" data-v="${w}" aria-pressed="${semSel() === w}"><b>${lbl}</b><small>${sub}</small><span class="mini">${SPORT_ORDER.filter(k => r.dep[k]).map(k => `<i style="width:${r.dep[k] / tot * 100}%;background:${scol(k)}"></i>`).join('')}</span></button>`;
   }).join('')}</div>`;
 }
 function saludMix(r, o) {
@@ -37,12 +39,13 @@ function listaDias(w) {
 }
 const sportDot2 = k => `<i class="dot" style="background:${scol(k)};vertical-align:1px"></i>`;
 function tabPlan() {
-  const w = S.week; const r = resumen(w), o = objetivos();
+  const w = semSel(); const r = resumen(w), o = objetivos();
   let body = '';
   if (w === PROX && !planDe(PROX)) body = planificador();
   else {
     const ins = insightsSemana(w);
-    const cabecera = w === SEM ? `<div class="row"><div class="cring" style="--p:${Math.round(r.hechas / r.plan * 100)}"><span><b>${r.hechas}/${r.plan}</b><small>hechas</small></span></div><div class="grow stack" style="gap:2px"><b style="font-size:17px">${Math.round(r.hechas / r.plan * 100)} % cumplido</b><span class="small muted">${nf(r.min / 60)} h hechas de ${nf(Object.values(planDe(SEM) || {}).reduce((a, s) => a + s.min, 0) / 60)} h planeadas</span></div></div>`
+    const cabecera = w === SEM && !r.plan ? `<div class="row"><div class="cring" style="--p:0"><span><b>${r.n}</b><small>hechas</small></span></div><div class="grow stack" style="gap:2px"><b style="font-size:17px">Sin plan esta semana</b><span class="small muted">${nf(r.min / 60)} h hechas · planifica la próxima con el botón "Próxima"</span></div></div>`
+      : w === SEM ? `<div class="row"><div class="cring" style="--p:${Math.round(r.hechas / r.plan * 100)}"><span><b>${r.hechas}/${r.plan}</b><small>hechas</small></span></div><div class="grow stack" style="gap:2px"><b style="font-size:17px">${Math.round(r.hechas / r.plan * 100)} % cumplido</b><span class="small muted">${nf(r.min / 60)} h hechas de ${nf(Object.values(planDe(SEM) || {}).reduce((a, s) => a + s.min, 0) / 60)} h planeadas</span></div></div>`
       : w === PROX ? `<div class="row"><div class="grow stack" style="gap:2px"><b style="font-size:17px">Semana planificada</b><span class="small muted">${nf(Object.values(planDe(PROX) || {}).reduce((a, s) => a + s.min, 0) / 60)} h · ${Object.values(planDe(PROX) || {}).filter(s => s.t !== 'descanso').length} sesiones</span></div><button class="btn plain" type="button" data-a="replan">Rehacer</button></div>`
       : `<div class="fields"><div class="field"><span class="l">Horas</span><span class="v">${nf(r.min / 60)}</span></div><div class="field"><span class="l">Actividades</span><span class="v">${r.n}</span></div><div class="field"><span class="l">Días activos</span><span class="v">${r.dias.size}</span></div><div class="field"><span class="l">Plan</span><span class="v" style="font-size:16px">sin plan</span></div></div>`;
     const rp = w === PROX ? resumenPlan(planDe(PROX)) : r;
