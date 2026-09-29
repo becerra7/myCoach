@@ -1298,8 +1298,24 @@ const rpc = async (env, token, message) => {
 		ambar.propuesta?.accion === "cambiar" && ambar.propuesta.sesion.t === "fondo" && ambar.propuesta.sesion.min === 45, JSON.stringify(ambar.propuesta));
 	check("si las mueve, es a otro dia de esta semana",
 		ambar.propuesta.mover === null || (ambar.propuesta.mover.a > HOY_C && ambar.propuesta.mover.a <= mas(lunes, 6)));
+	{
+		const d = Object.fromEntries(ambar.semaforo.datos.map((x) => [x.clave, x]));
+		check("el semaforo trae cada dato con su valor, lo normal y como lo lee",
+			d.sueno?.estado === "leve" && d.vfc?.estado === "leve" && d.vfc.normal === "50 ms" && d.readiness?.estado === "bien" && d.pulso?.estado === "bien" && "frescura" in d,
+			JSON.stringify(ambar.semaforo.datos));
+	}
 	check("el ambar explica las razones", ambar.semaforo.razones.some((r) => r.includes("dormido")) && ambar.mensaje.startsWith("🟠"), ambar.mensaje);
 
+	// Aplicar la propuesta y volver a preguntar: no se recorta lo ya recortado.
+	{
+		const cambios = { [HOY_C]: ambar.propuesta.sesion };
+		if (ambar.propuesta.mover) cambios[ambar.propuesta.mover.a] = ambar.propuesta.mover.sesion;
+		const ap = await llamar(ana, "coach_proponer", { cambios, porque: "Semaforo ambar", guardar: true });
+		const otraVez = await llamar(ana, "coach_hoy");
+		check("aplicar la propuesta de hoy se guarda", ap.guardado === true, JSON.stringify(ap));
+		check("una sesion ya ajustada no se vuelve a ajustar", otraVez.semaforo.color === "ambar" && otraVez.propuesta === null, JSON.stringify(otraVez.semaforo));
+		await llamar(ana, "app_guardar", { doc: "estado/app", datos: { plan: semanaActual }, fusionar: true });
+	}
 	// Rojo: readiness muy bajo
 	Object.assign(manana, { readiness: 25, sueno_h: 7.5, hrv: 50 });
 	const rojo = await llamar(ana, "coach_hoy");
@@ -1372,10 +1388,21 @@ const rpc = async (env, token, message) => {
 	const conLesion = await llamar(ana, "coach_proponer", { cambios: { [mas(proxLunes, 3)]: { dep: "bici", t: "int", d: "X", min: 60 } }, porque: "x" });
 	check("con una lesion activa avisa de la intensidad", conLesion.semanas[0].avisos.some((a) => a.regla === "lesion"));
 
+	// El nombre del entrenador lo pone el usuario
+	const instr = async () => (await rpc(env, ana, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } })).body.result.instructions;
+	check("por defecto el entrenador se llama myCoach", (await instr()).includes("Se llama myCoach") && (await llamar(ana, "coach_perfil")).nombre_entrenador === "myCoach");
+	await llamar(ana, "coach_perfil_guardar", { cambios: { entrenador: { nombre: "Rafa" } } });
+	check("con otro nombre, las instrucciones lo usan", (await instr()).includes("Se llama Rafa"));
+	check("y coach_hoy lo devuelve", (await llamar(ana, "coach_hoy")).entrenador === "Rafa");
+	check("un nombre vacio o larguisimo no se guarda", Boolean((await llamar(ana, "coach_perfil_guardar", { cambios: { entrenador: { nombre: "" } } })).error));
+	const padel = await llamar(ana, "coach_proponer", { cambios: { [mas(proxLunes, 5)]: { dep: "raqueta", t: "otros", d: "Padel", min: 60 } }, porque: "x" });
+	check("un deporte que no planifica se avisa pero no se bloquea", padel.valido === true && padel.semanas[0].avisos.some((a) => a.regla === "deporte"));
+
 	// Aislamiento: bob no ve nada de ana
 	const deBob = await llamar(bob, "coach_perfil");
 	check("el perfil de otro usuario no se ve", deBob.vacio === true);
 	const hoyBob = await llamar(bob, "coach_hoy");
+	check("el nombre del entrenador es de cada usuario", hoyBob.entrenador === "myCoach");
 	check("el semaforo de bob no usa el diario ni el plan de ana", hoyBob.sesion_prevista === null && !hoyBob.semaforo.razones.some((r) => r.includes("Rodilla")));
 
 	// El cron deja el semaforo preparado solo para quien usa myCoach

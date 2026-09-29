@@ -1509,7 +1509,7 @@ async function handleRpc(message, env, userId) {
 				"Los recorridos ya guardados se leen con garmin_courses y garmin_course_detail: mirelos antes " +
 				"de proponer una ruta nueva, para no repetir una que el usuario ya tiene. " +
 				"escribe en su cuenta: pida permiso antes." +
-				INSTRUCCIONES_COACH,
+				instruccionesCoach(await nombreEntrenador(env, userId).catch(() => NOMBRE_COACH)),
 		});
 	}
 
@@ -2488,6 +2488,17 @@ const MODOS_COACH = {
 const TIPOS_SESION = new Set(["rec", "fondo", "tempo", "int", "otros", "descanso"]);
 const DEPORTES_APP = new Set(["bici", "correr", "skimo", "montana", "raqueta", "fuerza", "esqui", "caminar", "otros"]);
 const DUROS = new Set(["int", "tempo"]);
+// Lo que el entrenador planifica: deportes que se miden con pulso, ritmo,
+// potencia o cadencia. La fuerza entra como complemento. Todo lo demas
+// (padel, montana, esqui de pista...) cuenta como carga, pero no se planifica.
+const DEPORTES_ENTRENABLES = new Set(["bici", "correr", "skimo"]);
+const NOMBRE_COACH = "myCoach";
+
+async function nombreEntrenador(env, userId) {
+	const perfil = await leerDoc(env, userId, "atleta/perfil");
+	const n = String(perfil?.entrenador?.nombre || "").trim().slice(0, 24);
+	return n || NOMBRE_COACH;
+}
 
 function objetivoDe(estadoApp) {
 	const goal = estadoApp?.goal || {};
@@ -2561,60 +2572,83 @@ function semaforo({ hoy, datosHoy = {}, base = {}, tsb = null, diario = [], perf
 	const senales = [];
 	const positivos = [];
 	const senal = (peso, texto) => senales.push({ peso, texto });
+	// Cada dato con su valor, lo normal para ti y como lo lee el semaforo:
+	// es lo que la app ensena para que se vea POR QUE sale ese color.
+	const datos = [];
+	const dato = (clave, nombre, valor, normal, estado) => datos.push({ clave, nombre, valor, normal, estado });
 
 	const r = datosHoy.readiness;
 	if (r != null) {
 		if (r < 35) senal(4, `readiness ${r} de Garmin`);
 		else if (r < 55) senal(1, `readiness ${r} de Garmin`);
 		else if (r >= 70) positivos.push(`readiness ${r}`);
-	}
+		dato("readiness", "Readiness de Garmin", String(r), null, r < 35 ? "fuerte" : r < 55 ? "leve" : r >= 70 ? "bien" : "normal");
+	} else dato("readiness", "Readiness de Garmin", null, null, "sin_dato");
+
+	const sueno = datosHoy.sleep_h;
+	if (sueno != null && sueno > 0) {
+		let est = "normal";
+		if (sueno < 5) { senal(2, `has dormido ${horasTexto(sueno)}`); est = "fuerte"; }
+		else if (sueno < 6.25) { senal(1, `has dormido ${horasTexto(sueno)}`); est = "leve"; }
+		else if (datosHoy.sleep_score != null && datosHoy.sleep_score < 45) { senal(1, `sueño de mala calidad (${datosHoy.sleep_score}/100)`); est = "leve"; }
+		else if (sueno >= 7) { positivos.push(`has dormido ${horasTexto(sueno)}`); est = "bien"; }
+		dato("sueno", "Sueño", `${horasTexto(sueno)}${datosHoy.sleep_score != null ? ` · ${datosHoy.sleep_score}/100` : ""}`,
+			base.sleep_h ? horasTexto(base.sleep_h) : null, est);
+	} else dato("sueno", "Sueño", null, null, "sin_dato");
 
 	const hrv = datosHoy.hrv;
 	if (hrv != null && base.hrv) {
 		const ratio = hrv / base.hrv;
-		if (ratio < 0.8) senal(2, `VFC ${Math.round(hrv)} ms, muy por debajo de lo normal para ti (${Math.round(base.hrv)})`);
-		else if (ratio < 0.9) senal(1, `VFC ${Math.round(hrv)} ms, algo baja (tu normal: ${Math.round(base.hrv)})`);
+		let est = "bien";
+		if (ratio < 0.8) { senal(2, `VFC ${Math.round(hrv)} ms, muy por debajo de lo normal para ti (${Math.round(base.hrv)})`); est = "fuerte"; }
+		else if (ratio < 0.9) { senal(1, `VFC ${Math.round(hrv)} ms, algo baja (tu normal: ${Math.round(base.hrv)})`); est = "leve"; }
 		else positivos.push("VFC normal");
+		dato("vfc", "VFC nocturna", `${Math.round(hrv)} ms`, `${Math.round(base.hrv)} ms`, est);
 	} else if (datosHoy.hrv_status) {
 		const s = String(datosHoy.hrv_status).toUpperCase();
-		if (s === "POOR") senal(2, "VFC en estado malo según Garmin");
-		else if (s === "LOW" || s === "UNBALANCED") senal(1, "VFC desequilibrada según Garmin");
-		else if (s === "BALANCED") positivos.push("VFC equilibrada");
-	}
+		let est = "normal";
+		if (s === "POOR") { senal(2, "VFC en estado malo según Garmin"); est = "fuerte"; }
+		else if (s === "LOW" || s === "UNBALANCED") { senal(1, "VFC desequilibrada según Garmin"); est = "leve"; }
+		else if (s === "BALANCED") { positivos.push("VFC equilibrada"); est = "bien"; }
+		dato("vfc", "VFC nocturna", hrv != null ? `${Math.round(hrv)} ms` : s.toLowerCase(), null, est);
+	} else dato("vfc", "VFC nocturna", hrv != null ? `${Math.round(hrv)} ms` : null, null, hrv != null ? "normal" : "sin_dato");
 
 	const fc = datosHoy.resting_hr;
 	if (fc != null && base.resting_hr) {
 		const sube = fc - base.resting_hr;
-		if (sube >= 7) senal(2, `pulso en reposo ${Math.round(fc)}, ${Math.round(sube)} por encima de lo normal`);
-		else if (sube >= 4) senal(1, `pulso en reposo ${Math.round(fc)}, algo alto`);
-	}
-
-	const sueno = datosHoy.sleep_h;
-	if (sueno != null && sueno > 0) {
-		if (sueno < 5) senal(2, `has dormido ${horasTexto(sueno)}`);
-		else if (sueno < 6.25) senal(1, `has dormido ${horasTexto(sueno)}`);
-		else if (datosHoy.sleep_score != null && datosHoy.sleep_score < 45) senal(1, `sueño de mala calidad (${datosHoy.sleep_score}/100)`);
-		else if (sueno >= 7) positivos.push(`has dormido ${horasTexto(sueno)}`);
-	}
+		let est = "bien";
+		if (sube >= 7) { senal(2, `pulso en reposo ${Math.round(fc)}, ${Math.round(sube)} por encima de lo normal`); est = "fuerte"; }
+		else if (sube >= 4) { senal(1, `pulso en reposo ${Math.round(fc)}, algo alto`); est = "leve"; }
+		dato("pulso", "Pulso en reposo", `${Math.round(fc)} ppm`, `${Math.round(base.resting_hr)} ppm`, est);
+	} else dato("pulso", "Pulso en reposo", fc != null ? `${Math.round(fc)} ppm` : null, null, fc != null ? "normal" : "sin_dato");
 
 	if (tsb != null) {
-		if (tsb < -30) senal(2, `mucha fatiga acumulada (frescura ${Math.round(tsb)})`);
-		else if (tsb < -18) senal(1, `fatiga acumulada (frescura ${Math.round(tsb)})`);
-		else if (tsb > 5) positivos.push("llegas fresco");
-	}
+		let est = "normal";
+		if (tsb < -30) { senal(2, `mucha fatiga acumulada (frescura ${Math.round(tsb)})`); est = "fuerte"; }
+		else if (tsb < -18) { senal(1, `fatiga acumulada (frescura ${Math.round(tsb)})`); est = "leve"; }
+		else if (tsb > 5) { positivos.push("llegas fresco"); est = "bien"; }
+		dato("frescura", "Frescura (forma − fatiga)", `${Math.round(tsb)} · ${lecturaFrescura(tsb)}`, null, est);
+	} else dato("frescura", "Frescura (forma − fatiga)", null, null, "sin_dato");
 
 	// Lo que el usuario ha contado en las ultimas 36 h pesa tanto como los datos.
 	const reciente = diario.filter((n) => n?.fecha && diasEntre(n.fecha, hoy) <= 1);
 	for (const n of reciente) {
-		if (n.tipo === "dolor") senal(4, `anotaste dolor: ${String(n.texto || "").slice(0, 60)}`);
-		else if (n.tipo === "sensacion" && n.nivel != null) {
+		if (n.tipo === "dolor") {
+			senal(4, `anotaste dolor: ${String(n.texto || "").slice(0, 60)}`);
+			dato("diario", "Lo que has anotado", `Dolor: ${String(n.texto || "").slice(0, 60)}`, null, "fuerte");
+		} else if (n.tipo === "sensacion" && n.nivel != null) {
 			if (n.nivel <= 1) senal(2, "dijiste que estabas reventado");
 			else if (n.nivel === 2) senal(1, "dijiste que estabas cansado");
+			dato("diario", "Lo que has anotado", String(n.texto || `Sensación ${n.nivel}/5`).slice(0, 60), null,
+				n.nivel <= 1 ? "fuerte" : n.nivel === 2 ? "leve" : n.nivel >= 4 ? "bien" : "normal");
 		}
 	}
 
 	const lesiones = (perfil.lesiones || []).filter((l) => l && l.estado !== "curada");
-	if (lesiones.length) senal(1, `lesión activa: ${lesiones.map((l) => l.zona).join(", ")}`);
+	if (lesiones.length) {
+		senal(1, `lesión activa: ${lesiones.map((l) => l.zona).join(", ")}`);
+		dato("lesion", "Lesión", lesiones.map((l) => l.zona).join(", "), null, "leve");
+	}
 
 	const puntos = senales.reduce((s, x) => s + x.peso, 0);
 	const color = puntos >= 4 ? "rojo" : puntos >= 2 ? "ambar" : "verde";
@@ -2625,6 +2659,7 @@ function semaforo({ hoy, datosHoy = {}, base = {}, tsb = null, diario = [], perf
 		puntos,
 		razones: senales.sort((a, b) => b.peso - a.peso).map((s) => s.texto),
 		positivos,
+		datos,
 		datos_que_faltan: faltan,
 	};
 }
@@ -2657,7 +2692,8 @@ function ajusteDelDia(sesion, color, plan, hoy, semaforoDolor = false) {
 		if (color === "verde") return { accion: "libre", texto: "Día libre. Si te apetece, 45-60 min suaves." };
 		return { accion: "descansar", texto: "Día libre: aprovecha para descansar." };
 	}
-	if (sesion.t === "descanso" || color === "verde") return null;
+	// Ya ajustada por el semaforo: no se vuelve a recortar lo recortado.
+	if (sesion.t === "descanso" || color === "verde" || sesion.ajustada) return null;
 
 	const min = sesion.min || 0;
 	const duro = DUROS.has(sesion.t);
@@ -2670,7 +2706,7 @@ function ajusteDelDia(sesion, color, plan, hoy, semaforoDolor = false) {
 	if (color === "rojo") {
 		return {
 			accion: "cambiar",
-			sesion: { dep: sesion.dep, t: "rec", d: "Descanso o 30 min muy suaves", min: 30 },
+			sesion: { dep: sesion.dep, t: "rec", d: "Descanso o 30 min muy suaves", min: 30, ajustada: true },
 			mover,
 			texto: `Hoy descanso o 30 min muy suaves${mover ? `; ${sesion.d || "la sesión"} pasa al ${mover.dia}` : ""}.` +
 				(semaforoDolor ? " Nada exigente hasta que deje de doler; si no mejora, consulta a un profesional." : ""),
@@ -2681,7 +2717,7 @@ function ajusteDelDia(sesion, color, plan, hoy, semaforoDolor = false) {
 		const suave = Math.max(30, Math.round((min * 0.75) / 5) * 5);
 		return {
 			accion: "cambiar",
-			sesion: { dep: sesion.dep, t: "fondo", d: `${suave} min suaves en lugar de: ${sesion.d || sesion.t}`, min: suave },
+			sesion: { dep: sesion.dep, t: "fondo", d: `${suave} min suaves en lugar de: ${sesion.d || sesion.t}`, min: suave, ajustada: true },
 			mover,
 			texto: `Cambia ${sesion.d || "la sesión dura"} por ${suave} min suaves${mover ? ` y pásala al ${mover.dia}` : ""}.`,
 		};
@@ -2690,7 +2726,7 @@ function ajusteDelDia(sesion, color, plan, hoy, semaforoDolor = false) {
 		const corto = Math.round((min * 0.7) / 5) * 5;
 		return {
 			accion: "recortar",
-			sesion: { ...sesion, d: `${sesion.d || "Fondo"} (recortado a ${corto} min)`, min: corto },
+			sesion: { ...sesion, d: `${sesion.d || "Fondo"} (recortado a ${corto} min)`, min: corto, ajustada: true },
 			texto: `Recorta el fondo a ${corto} min y sin apretar.`,
 		};
 	}
@@ -2795,6 +2831,7 @@ async function calcularHoy(env, userId, { fecha } = {}) {
 		forma: forma && { forma_ctl: forma.ctl, fatiga_atl: forma.atl, frescura_tsb: forma.tsb, lectura: lecturaFrescura(forma.tsb) },
 		datos_hoy: datosHoy,
 		linea_base_28d: base,
+		entrenador: String(perfil?.entrenador?.nombre || "").trim() || NOMBRE_COACH,
 		mensaje: mensajeDelDia(sem, sesion, ajuste),
 		calculado_en: new Date().toISOString(),
 	};
@@ -2820,6 +2857,12 @@ function validarSemana(semanaPlan, { objetivo, hoy, colorHoy = null, perfil = {}
 			errores.push({ fecha: f, regla: "formato", texto: `Duración no válida el ${diaDe(f)}: ${s.min} min.` });
 	}
 	if (errores.length) return { errores, avisos, corregido: null };
+
+	for (const f of fechas) {
+		const s = semanaPlan[f];
+		if (s && s.t !== "descanso" && s.dep !== "fuerza" && !DEPORTES_ENTRENABLES.has(s.dep))
+			avisos.push({ fecha: f, regla: "deporte", texto: `El ${diaDe(f)} (${s.dep}) cuenta como carga, pero no lo planifico: solo bici, correr y skimo, y fuerza como complemento.` });
+	}
 
 	const intensas = fechas.filter((f) => corregido[f]?.t === "int");
 	const max = objetivo.int[1];
@@ -2918,8 +2961,9 @@ const esquemaSesion = {
 	type: ["object", "null"],
 	description: "Sesion del dia, o null para dejarlo libre.",
 	properties: {
-		dep: { type: "string", description: "bici, correr, skimo, montana, raqueta, fuerza, esqui, caminar u otros" },
+		dep: { type: "string", description: "bici, correr o skimo; fuerza como complemento" },
 		t: { type: "string", description: "rec, fondo, tempo, int, otros o descanso" },
+		ajustada: { type: "boolean", description: "true si viene de una propuesta de coach_hoy (no se vuelve a ajustar)" },
 		d: { type: "string", description: "Descripcion corta, p. ej. 'Umbral: 3 x 10 min a 160-166 ppm'" },
 		min: { type: "number", description: "Duracion en minutos" },
 	},
@@ -3022,7 +3066,11 @@ const COACH_TOOLS = {
 			const nuevo = { ...plan };
 			for (const [f, s] of Object.entries(cambios)) {
 				if (s == null) delete nuevo[f];
-				else nuevo[f] = { dep: s.dep, t: s.t, d: String(s.d || "").slice(0, 120), min: s.min == null ? undefined : Math.round(Number(s.min)) };
+				else nuevo[f] = {
+					dep: s.dep, t: s.t, d: String(s.d || "").slice(0, 120),
+					min: s.min == null ? undefined : Math.round(Number(s.min)),
+					...(s.ajustada === true ? { ajustada: true } : {}),
+				};
 			}
 			const colorHoy = hoyGuardado?.fecha === hoy ? hoyGuardado.semaforo?.color : null;
 
@@ -3079,7 +3127,14 @@ const COACH_TOOLS = {
 		run: async (env, userId) => {
 			const perfil = (await leerDoc(env, userId, "atleta/perfil")) || {};
 			const estadoApp = await leerDoc(env, userId, "estado/app");
-			return { perfil, vacio: Object.keys(perfil).length === 0, objetivo_app: objetivoDe(estadoApp), deportes: estadoApp?.sports ?? [] };
+			return {
+				perfil,
+				vacio: Object.keys(perfil).length === 0,
+				nombre_entrenador: String(perfil.entrenador?.nombre || "").trim() || NOMBRE_COACH,
+				objetivo_app: objetivoDe(estadoApp),
+				deportes: estadoApp?.sports ?? [],
+				deportes_que_planifico: [...DEPORTES_ENTRENABLES, "fuerza (complemento)"],
+			};
 		},
 	},
 
@@ -3099,7 +3154,8 @@ const COACH_TOOLS = {
 		},
 		run: async (env, userId, { cambios } = {}) => {
 			if (!cambios || typeof cambios !== "object" || Array.isArray(cambios)) throw new HttpError(400, "cambios debe ser un objeto");
-			const permitidos = ["objetivo", "disponibilidad", "lesiones", "preferencias", "material", "notas"];
+			const permitidos = ["objetivo", "disponibilidad", "lesiones", "preferencias", "material", "notas", "entrenador"];
+			if (limpio_entrenador_invalido(cambios)) throw new HttpError(400, "entrenador debe ser { nombre } (hasta 24 letras)");
 			const limpio = Object.fromEntries(Object.entries(cambios).filter(([k]) => permitidos.includes(k)));
 			if (!Object.keys(limpio).length) throw new HttpError(400, `Campos validos: ${permitidos.join(", ")}`);
 			const actual = (await leerDoc(env, userId, "atleta/perfil")) || {};
@@ -3144,16 +3200,22 @@ const COACH_TOOLS = {
 Object.assign(TOOLS, COACH_TOOLS);
 
 /** Instrucciones del entrenador: como habla y como decide, sea quien sea el que lo llame. */
-const INSTRUCCIONES_COACH =
-	"\n\nENTRENADOR MYCOACH. Si el usuario habla de entrenar, de su plan, de como esta o de que hacer hoy, actue como su " +
-	"entrenador de myCoach con las herramientas coach_*: coach_hoy para el dia, coach_semana para la semana, coach_perfil " +
+const instruccionesCoach = (nombre = NOMBRE_COACH) =>
+	`\n\nENTRENADOR MYCOACH. Se llama ${nombre}: es el nombre que el usuario le ha puesto (por defecto myCoach). Si el ` +
+	"usuario habla de entrenar, de su plan, de como esta o de que hacer hoy, actue como su entrenador, " +
+	`${nombre}, con las herramientas coach_*: coach_hoy para el dia, coach_semana para la semana, coach_perfil ` +
 	"para su contexto (lealo al empezar; coach_perfil_guardar para lo que deba recordarse) y coach_proponer para cualquier cambio de plan. El metodo lo aplica el motor: no " +
 	"invente sesiones ni se salte sus reglas; si el usuario insiste en algo que el motor rechaza, digale que puede hacerlo " +
 	"pero que se lo desaconseja y por que. Cambios de plan: primero coach_proponer sin guardar, luego enseñe el resultado y " +
 	"guarde solo con su si. Cuando cuente como se encuentra o un dolor, anotelo con coach_anotar. Voz: espanol de Espana, " +
 	"tuteando, frases cortas, como un companero que sabe; siempre el porque en una frase; una recomendacion, no un abanico; " +
 	"diga que un dato es estimado cuando lo sea; sin calorias ni culpa con la comida; ante dolor o sintomas raros, baje la " +
-	"carga y recomiende un profesional, nunca diagnostique.";
+	"carga y recomiende un profesional, nunca diagnostique." +
+	" Planifique solo bici, correr y skimo (y fuerza como complemento); el resto de deportes cuenta como carga pero no se " +
+	"planifica. Si el usuario quiere cambiar el nombre del entrenador, guardelo con coach_perfil_guardar en entrenador.nombre.";
+const limpio_entrenador_invalido = (c) =>
+	c.entrenador !== undefined &&
+	(typeof c.entrenador !== "object" || !String(c.entrenador?.nombre || "").trim() || String(c.entrenador.nombre).trim().length > 24);
 
 // ──────────────────── Panel: sesion y endpoints ────────────────────
 
