@@ -151,5 +151,6 @@ function scrAjustes() {
     ${sec('Tú', `<label class="stack" for="nombre-in" style="gap:6px"><b>Tu nombre</b><input id="nombre-in" class="search" value="${esc(S.nombre)}" data-a="nombre-in" placeholder="Opcional" autocomplete="given-name"><span class="small muted">Sale en la ficha que compartes.</span></label>
       <p class="small muted">Tu zona en el mapa: ${esc(M.ccaa || 'sin datos')} (la comunidad donde más kilómetros haces).</p>`)}
     ${sec('Datos', grp('modo', 'De dónde salen tus datos', [['vivo', 'Mi Garmin en vivo', LIVE ? 'Conector disponible' : 'Aquí no hay conector de Garmin'], ['demo', 'Modo demo', 'Datos de ejemplo para probar la app']], S.modo))}
+    <p class="small muted aj-nota">myCoach · versión ${esc(APP_VERSION.commit)} · ${esc(APP_VERSION.fecha)}${window.PLATFORM && PLATFORM.name === 'claude-app' ? ' · dentro de Claude' : ''}</p>
   </div>` };
 }

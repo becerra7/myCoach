@@ -46,7 +46,7 @@
 
   const listo = pedir('ui/initialize', {
     protocolVersion: '2026-01-26',
-    appInfo: { name: 'myCoach', version: '1.0.0' }, clientInfo: { name: 'myCoach', version: '1.0.0' },
+    appInfo: { name: 'myCoach', version: APP_VERSION.commit }, clientInfo: { name: 'myCoach', version: APP_VERSION.commit },
     appCapabilities: { availableDisplayModes: ['inline', 'fullscreen'] },
   }).then(r => {
     contexto = (r && r.hostContext) || {};

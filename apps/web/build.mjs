@@ -8,6 +8,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import vm from 'node:vm';
+import { execSync } from 'node:child_process';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -18,7 +19,11 @@ const pkg = name => dirname(require.resolve(`${name}/package.json`));
 
 const src = join(here, 'src');
 const modules = readdirSync(src).filter(f => /^\d\d-.*\.js$/.test(f)).sort();
+// Versión visible (Ajustes) y en la vista de Claude: el commit y la hora del build.
+const commit = (() => { try { return execSync('git rev-parse --short HEAD', { cwd: here, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); } catch { return 'local'; } })();
+const VERSION = { commit, fecha: new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC' };
 const parts = [
+  `const APP_VERSION = ${JSON.stringify(VERSION)};`,
   read(join(pkg('topojson-client'), 'dist/topojson-client.min.js')),
   `const TOPO_ES = ${read(join(pkg('es-atlas'), 'es/municipalities.json'))};`,
   `const TOPO_WORLD = ${read(join(pkg('world-atlas'), 'countries-110m.json'))};`,
@@ -40,4 +45,4 @@ mkdirSync(join(here, 'dist'), { recursive: true });
 if (target === 'web') cpSync(join(here, 'public'), join(here, 'dist'), { recursive: true });
 const out = join(here, 'dist', { web: 'index.html', mcpapp: 'mcp-app.html' }[target] || 'claude.html');
 writeFileSync(out, page);
-console.log(`${out} · ${(page.length / 1e6).toFixed(2)} MB · ${modules.length} módulos`);
+console.log(`${out} · ${(page.length / 1e6).toFixed(2)} MB · ${modules.length} módulos · versión ${commit}`);
