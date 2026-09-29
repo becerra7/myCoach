@@ -96,7 +96,12 @@ const DEFAULTS = () => ({
 let S;
 try { S = Object.assign(DEFAULTS(), JSON.parse(localStorage.getItem('trazo-v3') || 'null') || {}); if (S.v !== 6) S = DEFAULTS(); } catch (e) { S = DEFAULTS(); }
 S.sports = S.sports.filter(k => ENTRENABLES.includes(k));
-let saveTimer; function save() { try { localStorage.setItem('trazo-v3', JSON.stringify(S)); } catch (e) { } S.savedAt = Date.now(); clearTimeout(saveTimer); saveTimer = setTimeout(() => { if (typeof DB !== 'undefined' && DB && S.modo === 'vivo') { const { plan, next, meals, goal, sports, overrides, testRes, nombre } = S; DB.doc('estado/app').set({ plan, next: next || null, meals: meals.map(m => ({ ...m, img: null })), goal, sports, overrides, testRes, nombre, at: S.savedAt }).catch(() => { }); } }, 1500); }
+let saveTimer; function save() { try { localStorage.setItem('trazo-v3', JSON.stringify(S)); } catch (e) { } S.savedAt = Date.now(); clearTimeout(saveTimer); saveTimer = setTimeout(() => { if (typeof DB !== 'undefined' && DB && S.modo === 'vivo') { const { plan, next, meals, goal, sports, overrides, testRes, nombre } = S; DB.doc('estado/app').set({ plan, next: next || null, meals: meals.map(m => ({ ...m, img: null })), goal, sports, overrides, testRes, nombre, at: S.savedAt }, { version: S.serverAt || 0 })
+  .then(r => {
+    // Otro (tu Claude, el entrenador) ha cambiado el plan después de que la app lo leyera: no se pisa, se recarga.
+    if (r && r.conflicto) { S.serverAt = r.at; cargarDeDB(true).then(() => toast('Tu plan ha cambiado desde tu Claude: lo he recargado')); }
+    else if (r && typeof r.at === 'number') { S.serverAt = r.at; try { localStorage.setItem('trazo-v3', JSON.stringify(S)); } catch (e) { } }
+  }).catch(() => { }); } }, 1500); }
 /* Plan y comidas de ejemplo: solo en modo demo */
 function demoSeed() { S.plan = planInicial(); S.meals = comidasIniciales(); }
 if (!S.os) S.os = /Android/i.test(navigator.userAgent) ? 'android' : 'ios';

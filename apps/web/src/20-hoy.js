@@ -48,6 +48,8 @@ function commit(msg, mut) {
 }
 /* Enlace a Claude: copia el encargo y abre Claude (el prefijado por URL no es fiable) */
 function enClaude(prompt) {
+  // Dentro de Claude (MCP Apps) no hace falta copiar: el encargo va directo a la conversación.
+  if (window.PLATFORM && PLATFORM.enClaude) { PLATFORM.enClaude(prompt).then(() => toast('Enviado a la conversación'), () => showPrompt(prompt)); markFlow('ia'); return; }
   const done = () => toast('Encargo copiado. Pégalo en Claude: usará tu conector de Garmin.', { action: { label: 'Abrir Claude', fn: () => window.open('https://claude.ai/new', '_blank', 'noopener') } , ms: 8000 });
   if (navigator.clipboard?.writeText) navigator.clipboard.writeText(prompt).then(done, () => showPrompt(prompt)); else showPrompt(prompt);
   markFlow('ia');

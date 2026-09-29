@@ -1,6 +1,7 @@
 // Monta la app en un solo HTML: shell + CSS + geografía (IGN, Natural Earth) + demo + módulos.
 //   --target web     → apps/web/dist/index.html (web pública; añade platform/web.js)
 //   --target claude  → apps/web/dist/claude.html (artifact de Claude; usa window.claude)
+//   --target mcpapp  → apps/web/dist/mcp-app.html (la app dentro de Claude como MCP App; la sirve el conector)
 //   --check          → además comprueba la sintaxis del JS resultante
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, cpSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -22,7 +23,7 @@ const parts = [
   `const TOPO_ES = ${read(join(pkg('es-atlas'), 'es/municipalities.json'))};`,
   `const TOPO_WORLD = ${read(join(pkg('world-atlas'), 'countries-110m.json'))};`,
   `const DEMO = ${read(join(src, 'demo.json'))};`,
-  ...(target === 'web' ? [read(join(here, 'platform/web.js'))] : []),
+  ...(target === 'web' ? [read(join(here, 'platform/web.js'))] : target === 'mcpapp' ? [read(join(here, 'platform/mcpapp.js'))] : []),
   ...modules.map(f => `/* ==== ${f} ==== */\n` + read(join(src, f))),
 ];
 const js = parts.join('\n');
@@ -31,9 +32,12 @@ const html = read(join(src, 'shell.html')).replace('/*CSS*/', () => read(join(sr
 // En Claude el runtime pone el esqueleto (doctype, charset, viewport); en la web lo ponemos aquí, con la PWA.
 const page = target === 'web'
   ? `<!doctype html>\n<html lang="es">\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n<link rel="manifest" href="/manifest.webmanifest">\n<link rel="icon" href="/icon.svg" type="image/svg+xml">\n<link rel="apple-touch-icon" href="/icon.svg">\n<meta name="apple-mobile-web-app-capable" content="yes">\n` + html.replace(/<title>[^<]*<\/title>/, '<title>myCoach</title>') + `\n<script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});</script>\n`
-  : html;
+  : target === 'mcpapp'
+    // Documento completo (la vista es un iframe aislado), sin PWA: no hay service worker ni manifest.
+    ? `<!doctype html>\n<html lang="es">\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n` + html.replace(/<title>[^<]*<\/title>/, '<title>myCoach</title>') + `\n<style>#proto-fab,#task{display:none!important}</style>\n`
+    : html;
 mkdirSync(join(here, 'dist'), { recursive: true });
 if (target === 'web') cpSync(join(here, 'public'), join(here, 'dist'), { recursive: true });
-const out = join(here, 'dist', target === 'web' ? 'index.html' : 'claude.html');
+const out = join(here, 'dist', { web: 'index.html', mcpapp: 'mcp-app.html' }[target] || 'claude.html');
 writeFileSync(out, page);
 console.log(`${out} · ${(page.length / 1e6).toFixed(2)} MB · ${modules.length} módulos`);

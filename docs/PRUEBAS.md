@@ -41,6 +41,13 @@ Es el primer paso del plan (`docs/PLAN-COACH.md`): **el motor decide, el modelo 
   - Ajustes, ordenado en Conexiones, Tu entrenador, Deportes que entreno, Preferencias, Tú y Datos.
 - 264 tests en verde en el conector.
 
+### Cambios del 29 de septiembre (noche)
+- **myCoach dentro de Claude (MCP Apps).** Nueva herramienta `mycoach_abrir`: Claude abre **la app entera** dentro de la conversación (Hoy, Plan, Forma, Pueblos o Ajustes). Es la misma app, con una plataforma que pide los datos a Claude en vez de a nuestro servidor. Lee y guarda lo mismo que la web y el chat. Sigue el tema claro u oscuro de Claude, se puede poner a pantalla completa, y "Hablarlo con Claude" escribe directamente en la conversación.
+- **Arreglado: el plan subido desde Claude desaparecía.** Había dos fallos:
+  - `app_guardar` no explicaba el formato del plan. Ahora lo explica, dice que para el plan se use `coach_proponer`, y traduce los nombres de campo que se invente Claude (`tipo`, `titulo`, `detalle`, `duracion_min`…) al formato de la app. Lo que no entiende lo rechaza explicando el formato.
+  - La web guardaba el documento entero con su copia local y **pisaba** lo que Claude acababa de escribir. Ahora cada guardado lleva la versión que conoce: si Claude ha cambiado algo después, el conector no guarda y la app recarga.
+- 279 tests en verde en el conector. La app dentro de Claude se ha probado con un anfitrión MCP Apps simulado.
+
 ## 2. Cómo se conecta con tu Claude
 
 ```

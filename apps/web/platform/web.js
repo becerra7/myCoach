@@ -14,7 +14,8 @@
   const tool = (name, input, refresh) => api('/api/mcp', { tool: name, input, refresh: !!refresh }).then(j => j.payload);
   const doc = path => ({
     get: () => tool('app_leer', { doc: path }),
-    set: datos => tool('app_guardar', { doc: path, datos }),
+    // opts.version: el 'at' que conoce la app; si otro lo ha cambiado después, el conector no guarda (conflicto).
+    set: (datos, opts = {}) => tool('app_guardar', { doc: path, datos, ...(typeof opts.version === 'number' ? { version: opts.version } : {}) }),
   });
   let me = null;
   const sesion = () => me || (me = api('/api/me').catch(() => ({ conectado: false })));

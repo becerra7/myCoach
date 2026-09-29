@@ -429,11 +429,15 @@ function cargarModo() {
   else { setHoy(HOY_REAL); const c = cargarCache(); construir(c && c.fuente === 'vivo' ? c : { fuente: 'vivo', perfil: {}, acts: [], det: {}, rutas: {}, evo: [], geo: {} }); if (S.meals.some(m => m.sim)) { S.meals = []; S.plan = {}; } }
 }
 /* Base de datos: si este navegador no tiene nada, recupera tus datos y tu estado de la última vez */
-async function cargarDeDB() {
+/* forzar: lo del servidor manda (p. ej. tras un conflicto: tu Claude cambió el plan mientras la app estaba abierta) */
+async function cargarDeDB(forzar) {
   try {
     if (S.modo === 'vivo' && (!DSET || !DSET.acts.length)) { const [d, r] = await Promise.all([DB.doc('vivo/datos').get(), DB.doc('vivo/rutas').get()]); const dd = d && (d.data ?? d); if (dd && dd.acts && dd.acts.length) { const ds = { ...dd, rutas: ((r && (r.data ?? r)) || {}).rutas || {} }; construir(ds); try { localStorage.setItem('trazo-vivo', JSON.stringify(ds)); } catch (e) { } } }
     const e = await DB.doc('estado/app').get(); const st = e && (e.data ?? e);
-    if (st && S.modo === 'vivo' && (st.at || 0) > (S.savedAt || 0)) { for (const k of ['plan', 'next', 'meals', 'goal', 'sports', 'overrides', 'testRes', 'nombre']) if (st[k] !== undefined) S[k] = st[k]; S.savedAt = st.at; try { localStorage.setItem('trazo-v3', JSON.stringify(S)); } catch (x) { } }
+    if (st && S.modo === 'vivo' && (forzar || (st.at || 0) > (S.savedAt || 0))) { for (const k of ['plan', 'next', 'meals', 'goal', 'sports', 'overrides', 'testRes', 'nombre']) if (st[k] !== undefined) S[k] = st[k]; S.sports = (S.sports || []).filter(k => ENTRENABLES.includes(k)); S.savedAt = st.at; }
+    // La versión que la app ha visto: con ella guarda, y si otro ha escrito después, el conector no deja pisarlo.
+    if (st && typeof st.at === 'number') S.serverAt = st.at;
+    try { localStorage.setItem('trazo-v3', JSON.stringify(S)); } catch (x) { }
     render();
   } catch (e) { }
 }
