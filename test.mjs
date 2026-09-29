@@ -546,7 +546,7 @@ const rpc = async (env, token, message) => {
 	check("initialize con token valido", init.body.result?.serverInfo?.name === "garmin");
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("tools/list devuelve 30 herramientas", list.body.result.tools.length === 30);
+	check("tools/list devuelve 38 herramientas", list.body.result.tools.length === 38);
 	check("app_guardar se anuncia como escritura", anot0(list).app_guardar.readOnlyHint === false);
 	{
 		const call = (name, args) => rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name, arguments: args } });
@@ -1082,7 +1082,7 @@ const rpc = async (env, token, message) => {
 	check("el token de acceso vale sin leer del KV", init.body.result?.serverInfo?.name === "garmin");
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("las herramientas se listan igualmente", list.body.result.tools.length === 30);
+	check("las herramientas se listan igualmente", list.body.result.tools.length === 38);
 
 	// Y el dato que si vive en KV avisa en vez de mentir
 	const call = await rpc(env, tokens.access_token, {
@@ -1735,6 +1735,130 @@ const rpc = async (env, token, message) => {
 	check("un recurso que no existe da error", Boolean((await rpc(env, tok, { jsonrpc: "2.0", id: 6, method: "resources/read", params: { uri: "ui://otra" } })).body.error));
 	const r = JSON.parse((await rpc(env, tok, { jsonrpc: "2.0", id: 7, method: "tools/call", params: { name: "mycoach_abrir", arguments: { pantalla: "plan" } } })).body.result.content[0].text);
 	check("mycoach_abrir devuelve la pantalla pedida", r.abierta === true && r.pantalla === "plan");
+}
+
+// ── 15. Fuerza: entrenos con nombre, registro, historico, reloj ──
+{
+	mockGarmin({ "ana@x.com": { password: "a", data: { displayName: "ana", hrv: 50 } } });
+	const base = globalThis.fetch;
+	const garmin = { creados: [], programados: [], borrados: [], siguienteId: 500 };
+	const HOY = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+	globalThis.fetch = async (url, init = {}) => {
+		const u = new URL(url);
+		if (u.pathname === "/workout-service/workout" && init.method === "POST") {
+			garmin.creados.push(JSON.parse(init.body));
+			return new Response(JSON.stringify({ workoutId: garmin.siguienteId++ }));
+		}
+		if (u.pathname.startsWith("/workout-service/schedule/")) { garmin.programados.push([u.pathname.split("/").pop(), JSON.parse(init.body)]); return new Response("{}"); }
+		if (u.pathname.startsWith("/workout-service/workout/") && init.method === "DELETE") { garmin.borrados.push(u.pathname.split("/").pop()); return new Response(null, { status: 204 }); }
+		if (u.pathname === "/activitylist-service/activities/search/activities")
+			return new Response(JSON.stringify([
+				{ activityId: 77, activityType: { typeKey: "road_biking" }, startTimeLocal: `${HOY} 08:00:00` },
+				{ activityId: 99, activityType: { typeKey: "strength_training" }, startTimeLocal: `${HOY} 19:00:00` },
+			]));
+		if (u.pathname === "/activity-service/activity/99/exerciseSets") {
+			const serie = (category, name, reps, weight) => ({ setType: "ACTIVE", repetitionCount: reps, weight, exercises: [{ category, name, probability: 99 }] });
+			return new Response(JSON.stringify({ exerciseSets: [
+				serie("SQUAT", "GOBLET_SQUAT", 8, 24000), { setType: "REST" }, serie("SQUAT", "GOBLET_SQUAT", 8, 24000), { setType: "REST" }, serie("SQUAT", "GOBLET_SQUAT", 7, 24000),
+				serie("DEADLIFT", "ROMANIAN_DEADLIFT", 10, 30000), serie("DEADLIFT", "ROMANIAN_DEADLIFT", 10, 30000),
+			] }));
+		}
+		return base(url, init);
+	};
+	const env = makeEnv();
+	const ana = (await connect(env, "ana@x.com", "a")).tokens.access_token;
+	const llamar = async (name, args = {}) => {
+		const r = await rpc(env, ana, { jsonrpc: "2.0", id: 30, method: "tools/call", params: { name, arguments: args } });
+		const res = r.body.result;
+		return res.isError ? { error: res.content[0].text } : JSON.parse(res.content[0].text);
+	};
+
+	const busca = await llamar("fuerza_ejercicios_garmin", { buscar: "sentadilla goblet" });
+	check("buscar en castellano encuentra el ejercicio de Garmin", busca.ejercicios[0]?.categoria === "SQUAT" && busca.ejercicios[0]?.ejercicio === "GOBLET_SQUAT", JSON.stringify(busca.ejercicios?.slice(0, 3)));
+	check("y dice que musculos trabaja, en castellano", busca.ejercicios[0].musculos.includes("cuádriceps"));
+	const rumano = await llamar("fuerza_ejercicios_garmin", { buscar: "peso muerto rumano" });
+	check("peso muerto rumano", rumano.ejercicios[0]?.ejercicio === "ROMANIAN_DEADLIFT", JSON.stringify(rumano.ejercicios?.slice(0, 3)));
+
+	const malo = await llamar("fuerza_entreno_guardar", { nombre: "X", ejercicios: [{ nombre: "Sentadilla", garmin: { categoria: "SQUAT", ejercicio: "SENTADILLA" } }] });
+	check("un ejercicio de Garmin que no existe se rechaza con parecidos", /no esta en el catalogo/.test(malo.error || "") && /SQUAT\//.test(malo.error));
+
+	const pierna = {
+		nombre: "Pierna A", lugar: "casa",
+		ejercicios: [
+			{ nombre: "Sentadilla goblet", series: 3, reps: "8-10", peso_kg: 20, material: "mancuerna", descanso_s: 90, garmin: { categoria: "SQUAT", ejercicio: "GOBLET_SQUAT" } },
+			{ nombre: "Peso muerto rumano", series: 3, reps: 10, peso_kg: 30, material: "mancuernas", descanso_s: 90, garmin: { categoria: "DEADLIFT", ejercicio: "ROMANIAN_DEADLIFT" } },
+			{ nombre: "Plancha", series: 3, segundos: 40, descanso_s: 45 },
+		],
+	};
+	const g = await llamar("fuerza_entreno_guardar", pierna);
+	check("guardar un entreno le da un id por su nombre", g.guardado?.id === "pierna-a");
+	check("'8-10' queda como reps 8 y reps_max 10", g.guardado.ejercicios[0].reps === 8 && g.guardado.ejercicios[0].reps_max === 10);
+	check("avisa de los ejercicios sin Garmin", /Plancha/.test(g.aviso || ""));
+
+	const sinGarmin = await llamar("fuerza_enviar_garmin", { entreno: "Pierna A", confirm: true });
+	check("no se manda al reloj si falta el ejercicio de Garmin", /Plancha/.test(sinGarmin.error || ""));
+	pierna.ejercicios[2].garmin = { categoria: "PLANK", ejercicio: "PLANK" };
+	await llamar("fuerza_entreno_guardar", pierna);
+	const sinPermiso = await llamar("fuerza_enviar_garmin", { entreno: "pierna-a", confirm: false });
+	check("mandar al reloj pide confirmacion", /confirmacion/.test(sinPermiso.error || ""));
+
+	const env1 = await llamar("fuerza_enviar_garmin", { entreno: "pierna-a", fecha: HOY, confirm: true });
+	const w = garmin.creados[0];
+	const g1 = w?.workoutSegments?.[0]?.workoutSteps?.[0];
+	check("se crea un entreno de fuerza en Garmin", env1.enviado === true && w.sportType.sportTypeKey === "strength_training" && w.workoutName === "myCoach · Pierna A");
+	check("cada ejercicio es una repeticion de series con reps, peso y descanso",
+		g1.type === "RepeatGroupDTO" && g1.numberOfIterations === 3 &&
+		g1.workoutSteps[0].category === "SQUAT" && g1.workoutSteps[0].exerciseName === "GOBLET_SQUAT" &&
+		g1.workoutSteps[0].endCondition.conditionTypeKey === "reps" && g1.workoutSteps[0].endConditionValue === 8 &&
+		g1.workoutSteps[0].weightValue === 20000 && g1.workoutSteps[1].stepType.stepTypeKey === "rest" && g1.workoutSteps[1].endConditionValue === 90,
+		JSON.stringify(g1).slice(0, 400));
+	check("los pasos van numerados sin repetir", (() => { const o = []; const r = (ps) => ps.forEach((p) => { o.push(p.stepOrder); if (p.workoutSteps) r(p.workoutSteps); }); r(w.workoutSegments[0].workoutSteps); return new Set(o).size === o.length; })());
+	const plancha = w.workoutSegments[0].workoutSteps[2].workoutSteps[0];
+	check("la plancha va al reloj por tiempo", plancha.endCondition.conditionTypeKey === "time" && plancha.endConditionValue === 40);
+	check("y se programa para el dia", garmin.programados[0]?.[0] === "500" && garmin.programados[0][1].date === HOY);
+	await llamar("fuerza_enviar_garmin", { entreno: "pierna-a", fecha: HOY, confirm: true });
+	check("mandarlo otra vez sustituye la copia vieja", garmin.borrados.includes("500") && garmin.creados.length === 2);
+
+	const lista = await llamar("fuerza_entrenos");
+	check("la lista de entrenos trae los nombres de ejercicio que ya usa", lista.entrenos[0].nombre === "Pierna A" && lista.nombres_de_ejercicio.includes("Sentadilla goblet"));
+
+	const reg = await llamar("fuerza_registrar", { entreno: "Pierna A", fecha: "2026-09-22", ejercicios: [{ nombre: "Sentadilla goblet", peso_kg: 22 }, { nombre: "Plancha", omitido: true }] });
+	const cambios = Object.fromEntries(reg.cambios_frente_al_plan.map((c) => [c.ejercicio, c]));
+	check("registrar solo lo que cambio: lo demas, como estaba", cambios["Peso muerto rumano"].estado === "hecho");
+	check("el peso que sube se marca", cambios["Sentadilla goblet"].estado === "mas" && /22 kg \(plan 20\)/.test(cambios["Sentadilla goblet"].texto));
+	check("lo omitido sale como no hecho", cambios.Plancha.estado === "no_hecho");
+	const detalle = await llamar("fuerza_entrenos", { id: "pierna-a" });
+	check("registrar no cambia la plantilla si no se pide", detalle.ejercicios[0].peso_kg === 20);
+	check("el plan de un ejercicio de tiempo se escribe en segundos", detalle.ejercicios[2].plan === "3 × 40 s");
+	check("el entreno trae la ultima vez de cada ejercicio", detalle.ejercicios[0].ultima?.texto === "3 × 8 · 22 kg" && detalle.ejercicios[0].ultima.fecha === "2026-09-22");
+	await llamar("fuerza_registrar", { entreno: "Pierna A", fecha: "2026-09-22", ejercicios: [{ nombre: "Sentadilla goblet", peso_kg: 22 }, { nombre: "Plancha", omitido: true }], actualizar_entreno: true });
+	const detalle2 = await llamar("fuerza_entrenos", { id: "pierna-a" });
+	check("con actualizar_entreno, el peso hecho queda para la proxima", detalle2.ejercicios[0].peso_kg === 22 && detalle2.garmin?.desactualizado === true);
+
+	// El dia de hoy, en el plan, apunta al entreno; el reloj conto las series.
+	await llamar("app_guardar", { doc: "estado/app", datos: { plan: { [HOY]: { deporte: "fuerza", titulo: "Pierna A", min: 45, entreno: "pierna-a" } } } });
+	const estado = await llamar("app_leer", { doc: "estado/app" });
+	check("el plan conserva a que entreno apunta el dia de fuerza", estado.plan[HOY].entreno === "pierna-a" && estado.plan[HOY].dep === "fuerza");
+	const dia = await llamar("fuerza_dia", { fecha: HOY });
+	check("fuerza_dia cierra la sesion con las series del reloj", dia.hecha?.fuente === "garmin" && dia.hecha.actividad_id === "99");
+	const sent = dia.hecha.ejercicios.find((e) => e.clave === "SQUAT/GOBLET_SQUAT");
+	check("con los nombres del usuario y el peso en kg", sent?.nombre === "Sentadilla goblet" && sent.series.length === 3 && sent.series[0].peso_kg === 24);
+	const cd = Object.fromEntries(dia.cambios_frente_al_plan.map((c) => [c.ejercicio, c]));
+	check("y dice que cambio frente al plan", /24 kg \(plan 22\)/.test(cd["Sentadilla goblet"].texto) && /7 reps/.test(cd["Sentadilla goblet"].texto) &&
+		/2 series \(plan 3\)/.test(cd["Peso muerto rumano"].texto) && cd.Plancha.estado === "no_hecho", JSON.stringify(dia.cambios_frente_al_plan));
+	check("fuerza_dia trae el entreno con su ultima vez anterior", dia.entreno?.id === "pierna-a" && dia.entreno.ejercicios[0].ultima?.fecha === "2026-09-22");
+	const otra = await llamar("fuerza_desde_garmin", { fecha: HOY });
+	check("leer otra vez la misma actividad no la duplica", otra.registrado && otra.nueva === false);
+
+	const hist = await llamar("fuerza_historial", { ejercicio: "sentadilla" });
+	check("el historico de un ejercicio, de lo mas nuevo a lo mas viejo", hist.sesiones.length === 2 && hist.sesiones[0].fecha === HOY && hist.sesiones[0].peso_max === 24);
+	check("con su evolucion", /22 kg \(2026-09-22\) → .*24/.test(hist.evolucion || ""), hist.evolucion);
+	const todo = await llamar("fuerza_historial");
+	check("sin nada, cada ejercicio con su ultima vez", todo.ejercicios.some((e) => e.ejercicio === "Peso muerto rumano" && e.veces === 2));
+
+	const borrado = await llamar("fuerza_entreno_guardar", { nombre: "Pierna A", borrar: true });
+	check("un entreno se puede borrar", borrado.borrado === "pierna-a" && (await llamar("fuerza_entrenos")).entrenos.length === 0);
+	globalThis.fetch = base;
 }
 
 /** Firma un token como lo hace el worker, para poder fabricar uno en un test. */

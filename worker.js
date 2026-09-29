@@ -23,6 +23,8 @@
  *   POST /mcp                                      endpoint MCP (JSON-RPC 2.0)
  */
 
+import { CATALOGO_GARMIN } from "./ejercicios-garmin.js";
+
 // ─────────────────────────────── Garmin ───────────────────────────────
 
 const SSO = "https://sso.garmin.com";
@@ -3024,6 +3026,8 @@ function normalizarSesion(s, deporteDefecto) {
 		d: (titulo || (t === "descanso" ? "Descanso" : t)).slice(0, 120),
 		min: t === "descanso" ? 0 : Math.round(Number(minutos) || 0),
 		...(Number.isFinite(Number(s.fc_max)) ? { fc_max: Math.round(Number(s.fc_max)) } : {}),
+		// Un dia de fuerza puede apuntar a un entreno con nombre (fuerza_entrenos).
+		...(typeof s.entreno === "string" && s.entreno.trim() ? { entreno: s.entreno.trim().slice(0, 40) } : {}),
 	};
 }
 
@@ -3890,7 +3894,14 @@ const instruccionesCoach = (nombre = NOMBRE_COACH) =>
 	"(mejores marcas) dan aun mas detalle: eficiencia, desacople, W', zonas de potencia y ritmo, dinamicas de carrera y clima." +
 	" PANTALLAS: si el usuario quiere ver su app, su plan, su semana, su forma o sus pueblos, o acaba de cambiar el plan, " +
 	"abra la app dentro de la conversacion con mycoach_abrir (pantalla hoy, plan, forma, pueblos o ajustes). Es la app de " +
-	"verdad, con sus datos: no dibuje una tarjeta, un grafico ni un artefacto propio imitandola.";
+	"verdad, con sus datos: no dibuje una tarjeta, un grafico ni un artefacto propio imitandola." +
+	" FUERZA: cada sesion con ejercicio, series x reps, peso, material y descanso. Antes de proponer, mire fuerza_entrenos " +
+	"(entrenos guardados, lo que hizo la ultima vez y los nombres de ejercicio que ya usa: reutilicelos). Para repetir un entreno, " +
+	"proponga el ajuste con la ultima vez (si hizo todas las reps, mas reps o mas peso). Si le gusta, guardelo con " +
+	"fuerza_entreno_guardar con un nombre (p. ej. 'Pierna A') y el ejercicio de Garmin de cada uno (fuerza_ejercicios_garmin); en el " +
+	"plan, el dia de fuerza lleva entreno: '<id>'. Puede mandarlo al reloj con fuerza_enviar_garmin (escribe en Garmin: pida permiso). " +
+	"Al acabar: si lo hizo con el reloj, fuerza_desde_garmin; si no, fuerza_registrar con solo lo que cambio. Si subio peso o reps, " +
+	"pregunte si lo deja asi para la proxima (actualizar_entreno). El historico, con fuerza_historial.";
 const limpio_entrenador_invalido = (c) =>
 	c.entrenador !== undefined &&
 	(typeof c.entrenador !== "object" || !String(c.entrenador?.nombre || "").trim() || String(c.entrenador.nombre).trim().length > 24);
@@ -5012,6 +5023,631 @@ addEventListener('resize', function () { clearTimeout(temporizador); temporizado
 cargar();
 </script></body></html>
 `;
+
+// ───────────────────── Fuerza: entrenos con nombre, registro, reloj ─────────────────────
+//
+// Claude propone la sesion (ejercicio, series x reps, peso, material, descanso) y la
+// guarda como un entreno con nombre para repetirla. Lo hecho va al registro, por
+// ejercicio, para ver el historico. El entreno se puede mandar al reloj como entreno de
+// fuerza guiado; al acabar, las series que cuenta el reloj cierran la sesion solas.
+//
+//   app:<id>:fuerza/entrenos   { entrenos: { <id>: entreno } }
+//   app:<id>:fuerza/registro   { sesiones: [sesion] }   (la mas nueva al final)
+//
+// La plantilla (lo que toca) y el registro (lo hecho) van separados: registrar no
+// cambia la plantilla salvo que se pida (actualizar_entreno), asi el historico no se pisa.
+
+const FUERZA_ENTRENOS = "fuerza/entrenos";
+const FUERZA_REGISTRO = "fuerza/registro";
+const MAX_SESIONES = 500;
+
+const MUSCULOS = {
+	ab: "abdominales", ob: "oblicuos", lb: "lumbares", ca: "gemelos", bd: "abductores", bi: "bíceps",
+	hi: "cadera", gl: "glúteos", hm: "isquiotibiales", sh: "hombros", tr: "trapecio", ch: "pecho",
+	qu: "cuádriceps", la: "dorsales", ad: "aductores", tc: "tríceps", fo: "antebrazo",
+};
+
+/** El catalogo de Garmin como mapa "CATEGORIA/EJERCICIO" → { categoria, ejercicio, principales, secundarios }. */
+const CATALOGO = (() => {
+	const mapa = new Map();
+	const codigos = (s) => (s ? s.match(/../g).map((c) => MUSCULOS[c]).filter(Boolean) : []);
+	for (const linea of CATALOGO_GARMIN.split("\n")) {
+		const [categoria, lista] = linea.split(":");
+		for (const item of lista.split(",")) {
+			const [ejercicio, musc = ""] = item.split("=");
+			const [p, s] = musc.split("/");
+			mapa.set(`${categoria}/${ejercicio}`, { categoria, ejercicio, principales: codigos(p), secundarios: codigos(s) });
+		}
+	}
+	return mapa;
+})();
+
+// Lo justo para buscar en castellano: cada palabra se traduce a los terminos de Garmin.
+const ES_A_GARMIN = [
+	[/sentadilla/, "SQUAT"], [/zancada|lunge/, "LUNGE"], [/b[uú]lgara/, "BULGARIAN SPLIT"], [/peso muerto|muerto/, "DEADLIFT"],
+	[/rumano/, "ROMANIAN"], [/remo/, "ROW"], [/dominada/, "PULL UP"], [/flexi[oó]n|flexiones/, "PUSH UP"], [/plancha/, "PLANK"],
+	[/press banca|banca/, "BENCH PRESS"], [/press militar|militar/, "SHOULDER PRESS"], [/press/, "PRESS"], [/gemelo/, "CALF RAISE"],
+	[/puente|hip thrust|empuje de cadera/, "HIP RAISE HIP THRUST BRIDGE"], [/goblet/, "GOBLET"], [/mancuerna/, "DUMBBELL"],
+	[/barra/, "BARBELL"], [/kettlebell|pesa rusa/, "KETTLEBELL"], [/banda|goma/, "BAND"], [/hombro/, "SHOULDER"],
+	[/curl/, "CURL"], [/abdominal|crunch/, "CRUNCH"], [/core/, "CORE"], [/elevaci[oó]n lateral|laterales/, "LATERAL RAISE"],
+	[/aperturas?/, "FLYE"], [/fondos?/, "DIP"], [/tr[ií]ceps/, "TRICEPS"], [/b[ií]ceps/, "CURL"], [/escal[oó]n|step ?up/, "STEP UP"],
+	[/isquio|femoral/, "LEG CURL HAMSTRING"], [/nordic|n[oó]rdico/, "NORDIC"], [/pal[oó]f/, "PALLOF"], [/lumbar|hiperextensi[oó]n/, "HYPEREXTENSION BACK EXTENSION"],
+	[/swing/, "SWING"], [/prensa/, "LEG PRESS"], [/extensi[oó]n de (cuadr[ií]ceps|piernas?)/, "LEG EXTENSION"], [/jal[oó]n/, "LAT PULLDOWN"],
+	[/cable|polea/, "CABLE"], [/lateral/, "LATERAL"], [/una pierna|unilateral/, "SINGLE LEG"], [/copenhague/, "COPENHAGEN"],
+	[/tibial/, "TOE RAISE TIBIALIS"], [/farmer|granjero/, "FARMERS"], [/bird ?dog|perro de caza/, "BIRD DOG"], [/dead ?bug|bicho muerto/, "DEAD BUG"],
+];
+
+const humanizar = (clave) => clave.toLowerCase().replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+
+function buscarEjercicioGarmin(consulta, limite = 8) {
+	const texto = String(consulta || "").toLowerCase().normalize("NFC");
+	const traducido = ES_A_GARMIN.filter(([re]) => re.test(texto)).map(([, en]) => en).join(" ");
+	const palabras = `${texto.toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g, "")} ${traducido}`
+		.split(/[^A-Z0-9]+/).filter((p) => p.length > 1);
+	if (!palabras.length) return [];
+	const puntos = [];
+	for (const [clave, e] of CATALOGO) {
+		const nombre = e.ejercicio.split("_");
+		let p = 0;
+		for (const w of new Set(palabras)) {
+			if (nombre.includes(w)) p += 3;
+			else if (e.ejercicio.includes(w)) p += 1;
+			if (e.categoria.split("_").includes(w)) p += 2;
+		}
+		// Los nombres cortos son el ejercicio basico: "GOBLET_SQUAT" antes que sus mil variantes.
+		if (p > 0) puntos.push([p - nombre.length * 0.1, clave]);
+	}
+	return puntos.sort((a, b) => b[0] - a[0]).slice(0, limite).map(([, clave]) => {
+		const e = CATALOGO.get(clave);
+		return { categoria: e.categoria, ejercicio: e.ejercicio, nombre: humanizar(e.ejercicio), musculos: e.principales, secundarios: e.secundarios };
+	});
+}
+
+const slugFuerza = (s) =>
+	String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+		.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+
+/** Clave de un ejercicio para el historico: la de Garmin si la tiene; si no, su nombre. */
+const claveEjercicio = (e) => (e.garmin ? `${e.garmin.categoria}/${e.garmin.ejercicio}` : `n:${slugFuerza(e.nombre)}`);
+
+const numeroEn = (v, min, max, defecto) => {
+	const n = Number(v);
+	return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : defecto;
+};
+
+function normalizarEjercicioFuerza(e, i) {
+	if (!e || typeof e !== "object" || typeof e.nombre !== "string" || !e.nombre.trim())
+		throw new HttpError(400, `El ejercicio ${i + 1} necesita un nombre.`);
+	const salida = { nombre: e.nombre.trim().slice(0, 60) };
+	// "8-10" o "8 a 10" → reps 8 y reps_max 10 (doble progresion); un numero, tal cual.
+	const rango = String(e.reps ?? "").match(/^\s*(\d+)\s*(?:-|a|–)\s*(\d+)\s*$/);
+	salida.series = Math.round(numeroEn(e.series, 1, 10, 3));
+	salida.reps = Math.round(rango ? Number(rango[1]) : numeroEn(e.reps, 1, 100, 10));
+	const max = rango ? Number(rango[2]) : e.reps_max;
+	if (Number.isFinite(Number(max)) && Number(max) > salida.reps) salida.reps_max = Math.round(Number(max));
+	// Los de tiempo (plancha, isometricos): segundos por serie en vez de reps.
+	if (Number.isFinite(Number(e.segundos)) && Number(e.segundos) > 0) salida.segundos = Math.round(numeroEn(e.segundos, 5, 900, 30));
+	if (e.peso_kg !== undefined && e.peso_kg !== null && e.peso_kg !== "") salida.peso_kg = Math.round(numeroEn(e.peso_kg, 0, 500, 0) * 4) / 4;
+	if (typeof e.material === "string" && e.material.trim()) salida.material = e.material.trim().slice(0, 40);
+	salida.descanso_s = Math.round(numeroEn(e.descanso_s, 0, 600, 90));
+	if (typeof e.nota === "string" && e.nota.trim()) salida.nota = e.nota.trim().slice(0, 140);
+	if (e.garmin) {
+		const clave = `${e.garmin.categoria}/${e.garmin.ejercicio}`;
+		if (!CATALOGO.has(clave)) {
+			const parecidos = buscarEjercicioGarmin(`${e.nombre} ${String(e.garmin.ejercicio || "").replace(/_/g, " ")}`, 3);
+			throw new HttpError(400, `"${clave}" no esta en el catalogo de Garmin (ejercicio "${salida.nombre}"). ` +
+				`Parecidos: ${parecidos.map((p) => `${p.categoria}/${p.ejercicio}`).join(", ") || "ninguno"}. Use fuerza_ejercicios_garmin.`);
+		}
+		salida.garmin = { categoria: e.garmin.categoria, ejercicio: e.garmin.ejercicio };
+	}
+	return salida;
+}
+
+const textoSeries = (series) => {
+	if (!series?.length) return "no hecho";
+	const cuanto = (x) => (x.segundos ? `${x.segundos} s` : x.reps);
+	const iguales = series.every((s) => cuanto(s) === cuanto(series[0]) && s.peso_kg === series[0].peso_kg);
+	const peso = (kg) => (kg ? ` · ${kg} kg` : "");
+	return iguales
+		? `${series.length} × ${cuanto(series[0])}${peso(series[0].peso_kg)}`
+		: series.map((s) => `${cuanto(s)}${s.peso_kg ? `×${s.peso_kg}kg` : ""}`).join(", ");
+};
+
+const seriesDelPlan = (e) => Array.from({ length: e.series }, () => ({
+	reps: e.segundos ? 0 : e.reps, ...(e.segundos ? { segundos: e.segundos } : {}), ...(e.peso_kg !== undefined ? { peso_kg: e.peso_kg } : {}),
+}));
+
+async function leerFuerza(env, userId) {
+	const [entrenos, registro] = await Promise.all([leerDoc(env, userId, FUERZA_ENTRENOS), leerDoc(env, userId, FUERZA_REGISTRO)]);
+	return { entrenos: entrenos?.entrenos || {}, sesiones: Array.isArray(registro?.sesiones) ? registro.sesiones : [] };
+}
+
+/** La ultima vez que se hizo cada ejercicio (por clave), de lo mas nuevo a lo mas viejo. */
+function ultimasVeces(sesiones) {
+	const ultima = new Map();
+	for (const s of [...sesiones].sort((a, b) => b.fecha.localeCompare(a.fecha)))
+		for (const e of s.ejercicios) if (e.series?.length && !ultima.has(e.clave)) ultima.set(e.clave, { fecha: s.fecha, series: e.series, texto: textoSeries(e.series) });
+	return ultima;
+}
+
+function entrenoConUltima(entreno, sesiones) {
+	const ultima = ultimasVeces(sesiones);
+	const suyas = sesiones.filter((s) => s.entreno === entreno.id).sort((a, b) => b.fecha.localeCompare(a.fecha));
+	return {
+		...entreno,
+		ejercicios: entreno.ejercicios.map((e) => ({ ...e, plan: textoSeries(seriesDelPlan(e)), ultima: ultima.get(claveEjercicio(e)) || null })),
+		ultima_sesion: suyas[0] ? { fecha: suyas[0].fecha, fuente: suyas[0].fuente } : null,
+		veces: suyas.length,
+	};
+}
+
+/** Lo que cambio respecto al plan, en frases cortas. */
+function cambiosFrenteAlPlan(entreno, hechos) {
+	if (!entreno) return [];
+	const porClave = new Map(hechos.map((e) => [e.clave, e]));
+	const cambios = [];
+	for (const p of entreno.ejercicios) {
+		const h = porClave.get(claveEjercicio(p));
+		if (!h || !h.series.length) { cambios.push({ ejercicio: p.nombre, estado: "no_hecho", texto: `${p.nombre}: no hecho` }); continue; }
+		const pesoMax = Math.max(0, ...h.series.map((s) => s.peso_kg || 0));
+		const repsMin = Math.min(...h.series.map((s) => s.reps));
+		const partes = [];
+		if (h.series.length !== p.series) partes.push(`${h.series.length} series (plan ${p.series})`);
+		if (p.segundos) {
+			const segMin = Math.min(...h.series.map((s) => s.segundos ?? p.segundos));
+			if (segMin < p.segundos) partes.push(`${segMin} s (plan ${p.segundos})`);
+		} else if (repsMin < p.reps) partes.push(`${repsMin} reps (plan ${p.reps})`);
+		if (p.peso_kg !== undefined && pesoMax !== p.peso_kg) partes.push(`${pesoMax} kg (plan ${p.peso_kg})`);
+		cambios.push(partes.length
+			? { ejercicio: p.nombre, estado: pesoMax > (p.peso_kg ?? 0) ? "mas" : "cambiado", texto: `${p.nombre}: ${partes.join(", ")}` }
+			: { ejercicio: p.nombre, estado: "hecho", texto: `${p.nombre}: como estaba` });
+	}
+	for (const h of hechos) if (!entreno.ejercicios.some((p) => claveEjercicio(p) === h.clave))
+		cambios.push({ ejercicio: h.nombre, estado: "extra", texto: `${h.nombre}: fuera del plan (${textoSeries(h.series)})` });
+	return cambios;
+}
+
+async function guardarSesionFuerza(env, userId, sesion) {
+	const { sesiones } = await leerFuerza(env, userId);
+	const resto = sesiones.filter((s) => s.id !== sesion.id);
+	await guardarDoc(env, userId, FUERZA_REGISTRO, { sesiones: [...resto, sesion].sort((a, b) => a.fecha.localeCompare(b.fecha)).slice(-MAX_SESIONES) });
+	return sesion;
+}
+
+/** Cierra la sesion con las series que conto el reloj. null si ese dia no hay actividad de fuerza. */
+async function sesionDesdeGarmin(env, userId, { fecha, activity_id, entreno: entrenoId }) {
+	let actividad = activity_id ? { activityId: activity_id } : null;
+	if (!actividad) {
+		const lista = await apiGet(env, userId, "/activitylist-service/activities/search/activities", { start: "0", limit: "30" });
+		actividad = (lista || []).find((a) => familiaDe(a.activityType?.typeKey) === "fuerza" && (a.startTimeLocal || "").slice(0, 10) === fecha);
+		if (!actividad) return null;
+	}
+	const datos = await apiGet(env, userId, `/activity-service/activity/${actividad.activityId}/exerciseSets`);
+	const dia = fecha || (actividad.startTimeLocal || "").slice(0, 10) || fechaLocal();
+	const { entrenos, sesiones } = await leerFuerza(env, userId);
+	const ya = sesiones.find((s) => String(s.actividad_id) === String(actividad.activityId));
+	if (ya) return { sesion: ya, entreno: entrenos[ya.entreno] || null, nueva: false };
+
+	// Las series activas, agrupadas por ejercicio en el orden en que se hicieron.
+	const hechos = [];
+	for (const s of datos?.exerciseSets || []) {
+		if (s.setType !== "ACTIVE") continue;
+		const ej = [...(s.exercises || [])].sort((a, b) => (b.probability ?? 0) - (a.probability ?? 0))[0] || {};
+		const garmin = ej.category && ej.name && CATALOGO.has(`${ej.category}/${ej.name}`) ? { categoria: ej.category, ejercicio: ej.name } : null;
+		const clave = garmin ? `${garmin.categoria}/${garmin.ejercicio}` : `n:${slugFuerza(ej.name || ej.category || "sin-identificar")}`;
+		// Garmin da el peso en gramos.
+		const peso = Number(s.weight);
+		const reps = Math.round(Number(s.repetitionCount) || 0);
+		// Sin repeticiones y con duracion: un ejercicio de tiempo (plancha).
+		const segundos = !reps && Number(s.duration) > 0 ? Math.round(Number(s.duration)) : null;
+		const serie = { reps, ...(segundos ? { segundos } : {}), ...(peso > 0 ? { peso_kg: Math.round((peso >= 1000 ? peso / 1000 : peso) * 4) / 4 } : {}) };
+		const previo = hechos[hechos.length - 1];
+		if (previo && previo.clave === clave) previo.series.push(serie);
+		else hechos.push({ clave, garmin, nombre: garmin ? humanizar(garmin.ejercicio) : (ej.name ? humanizar(ej.name) : "Ejercicio sin identificar"), series: [serie] });
+	}
+	if (!hechos.length) return null;
+
+	// ¿Que entreno era? El indicado, el del plan de ese dia, el que se mando al reloj ese dia o el que mas se parece.
+	const plan = await leerDoc(env, userId, "estado/app");
+	const delPlan = plan?.plan?.[dia]?.entreno || plan?.next?.[dia]?.entreno;
+	const claves = new Set(hechos.map((h) => h.clave));
+	const parecido = Object.values(entrenos)
+		.map((e) => [e.ejercicios.filter((x) => claves.has(claveEjercicio(x))).length, e])
+		.sort((a, b) => b[0] - a[0])[0];
+	const entreno = entrenos[entrenoId] || entrenos[delPlan] ||
+		Object.values(entrenos).find((e) => e.garmin?.fecha === dia) || (parecido && parecido[0] > 0 ? parecido[1] : null);
+	// Con el entreno, los nombres de Garmin se cambian por los del usuario.
+	for (const h of hechos) {
+		const suyo = entreno?.ejercicios.find((x) => claveEjercicio(x) === h.clave);
+		if (suyo) { h.nombre = suyo.nombre; h.garmin = suyo.garmin || h.garmin; }
+	}
+	const sesion = await guardarSesionFuerza(env, userId, {
+		id: `${dia}-${entreno?.id || `garmin-${actividad.activityId}`}`,
+		fecha: dia, entreno: entreno?.id || null, nombre: entreno?.nombre || "Fuerza",
+		fuente: "garmin", actividad_id: String(actividad.activityId), ejercicios: hechos,
+	});
+	return { sesion, entreno, nueva: true };
+}
+
+/** Un entreno como entreno de fuerza de Garmin: cada ejercicio es una repeticion de (ejercicio + descanso). */
+function entrenoParaGarmin(entreno) {
+	const deporte = { sportTypeId: 5, sportTypeKey: "strength_training", displayOrder: 5 };
+	const sinObjetivo = { workoutTargetTypeId: 1, workoutTargetTypeKey: "no.target", displayOrder: 1 };
+	let orden = 0;
+	const pasos = entreno.ejercicios.map((e, i) => {
+		const grupo = ++orden;
+		const ejercicio = {
+			type: "ExecutableStepDTO", stepOrder: ++orden, childStepId: i + 1,
+			stepType: { stepTypeId: 3, stepTypeKey: "interval", displayOrder: 3 },
+			...(e.segundos
+				? { endCondition: { conditionTypeId: 2, conditionTypeKey: "time", displayOrder: 2, displayable: true }, endConditionValue: e.segundos }
+				: { endCondition: { conditionTypeId: 10, conditionTypeKey: "reps", displayOrder: 10, displayable: true }, endConditionValue: e.reps }),
+			targetType: sinObjetivo,
+			category: e.garmin.categoria, exerciseName: e.garmin.ejercicio,
+			description: [e.nombre, e.material, e.nota].filter(Boolean).join(" · ").slice(0, 512),
+			// Garmin guarda el peso con factor 1000 (como python-garminconnect).
+			...(e.peso_kg ? { weightValue: e.peso_kg * 1000, weightUnit: { unitId: 8, unitKey: "kilogram", factor: 1000.0 } } : {}),
+		};
+		const descanso = {
+			type: "ExecutableStepDTO", stepOrder: ++orden, childStepId: i + 1,
+			stepType: { stepTypeId: 5, stepTypeKey: "rest", displayOrder: 5 },
+			endCondition: { conditionTypeId: 2, conditionTypeKey: "time", displayOrder: 2, displayable: true },
+			endConditionValue: e.descanso_s || 60, targetType: sinObjetivo,
+		};
+		return {
+			type: "RepeatGroupDTO", stepOrder: grupo, childStepId: i + 1, numberOfIterations: e.series, smartRepeat: false,
+			stepType: { stepTypeId: 6, stepTypeKey: "repeat", displayOrder: 6 },
+			endCondition: { conditionTypeId: 7, conditionTypeKey: "iterations", displayOrder: 7, displayable: false },
+			endConditionValue: e.series,
+			workoutSteps: e.descanso_s === 0 ? [ejercicio] : [ejercicio, descanso],
+		};
+	});
+	return {
+		workoutName: `myCoach · ${entreno.nombre}`.slice(0, 80),
+		description: "Creado por myCoach",
+		sportType: deporte,
+		workoutSegments: [{ segmentOrder: 1, sportType: deporte, workoutSteps: pasos }],
+	};
+}
+
+async function borrarEntrenoGarmin(env, userId, workoutId) {
+	const user = await env.GARMIN.get(userKey(userId), "json");
+	if (!user?.di_token) return;
+	await fetch(`${API}/workout-service/workout/${workoutId}`, {
+		method: "DELETE",
+		headers: { ...NATIVE_HEADERS, Authorization: `Bearer ${user.di_token}`, Accept: "application/json" },
+	}).catch(() => {});
+}
+
+const esquemaEjercicio = {
+	type: "object",
+	properties: {
+		nombre: { type: "string", description: "Nombre en castellano, p. ej. 'Sentadilla goblet'. Reutilice los nombres que ya usa el usuario." },
+		series: { type: "integer" },
+		reps: { description: "Numero (8) o rango ('8-10')." },
+		segundos: { type: "integer", description: "Para los de tiempo (plancha): segundos por serie, en lugar de reps." },
+		peso_kg: { type: "number", description: "Kg por mano o total, como lo diga el usuario. Omitir si es peso corporal." },
+		material: { type: "string", description: "Mancuernas, barra, banda, kettlebell, peso corporal, maquina..." },
+		descanso_s: { type: "integer", description: "Descanso entre series, en segundos." },
+		nota: { type: "string", description: "Tecnica o variante, corta." },
+		garmin: {
+			type: "object",
+			description: "Ejercicio del catalogo de Garmin (de fuerza_ejercicios_garmin). Necesario para mandarlo al reloj y para el historico desde el reloj.",
+			properties: { categoria: { type: "string" }, ejercicio: { type: "string" } },
+		},
+	},
+	required: ["nombre"],
+};
+
+Object.assign(TOOLS, {
+	fuerza_entrenos: {
+		title: "Entrenos de fuerza",
+		description:
+			"Sin id: la lista de entrenos de fuerza guardados (nombre, lugar, ejercicios, ultima vez) y los nombres de ejercicio que ya usa el usuario. " +
+			"Con id: el entreno completo, cada ejercicio con su plan y lo que hizo la ultima vez. Uselo antes de proponer o repetir una sesion de fuerza.",
+		schema: { type: "object", properties: { id: { type: "string", description: "Id del entreno (p. ej. 'pierna-a')." } } },
+		run: async (env, userId, { id }) => {
+			const { entrenos, sesiones } = await leerFuerza(env, userId);
+			if (id) {
+				const e = entrenos[slugFuerza(id)] || Object.values(entrenos).find((x) => slugFuerza(x.nombre) === slugFuerza(id));
+				if (!e) throw new HttpError(404, `No hay ningun entreno "${id}". Entrenos: ${Object.values(entrenos).map((x) => x.nombre).join(", ") || "ninguno"}.`);
+				return entrenoConUltima(e, sesiones);
+			}
+			const nombres = new Set();
+			for (const e of Object.values(entrenos)) for (const x of e.ejercicios) nombres.add(x.nombre);
+			for (const s of sesiones) for (const x of s.ejercicios) nombres.add(x.nombre);
+			return {
+				entrenos: Object.values(entrenos).map((e) => {
+					const c = entrenoConUltima(e, sesiones);
+					return { id: e.id, nombre: e.nombre, lugar: e.lugar || null, ejercicios: e.ejercicios.map((x) => x.nombre), ultima_sesion: c.ultima_sesion, veces: c.veces };
+				}),
+				nombres_de_ejercicio: [...nombres],
+			};
+		},
+	},
+
+	fuerza_entreno_guardar: {
+		title: "Guardar un entreno de fuerza",
+		description:
+			"Crea o cambia un entreno de fuerza con nombre para poder repetirlo: cada ejercicio con series, reps, peso, material y descanso. " +
+			"Si un ejercicio ya existe con otro nombre, reutilice ese nombre (fuerza_entrenos los lista) para que el historico sume. " +
+			"Ponga el campo garmin de cada ejercicio (fuerza_ejercicios_garmin) si se va a mandar al reloj. Con borrar=true lo elimina.",
+		schema: {
+			type: "object",
+			properties: {
+				id: { type: "string", description: "Para cambiar uno existente. Si falta, se saca del nombre." },
+				nombre: { type: "string", description: "P. ej. 'Pierna A'." },
+				lugar: { type: "string", enum: ["casa", "gym"] },
+				nota: { type: "string" },
+				ejercicios: { type: "array", items: esquemaEjercicio },
+				borrar: { type: "boolean" },
+			},
+			required: ["nombre"],
+		},
+		run: async (env, userId, args) => {
+			const id = slugFuerza(args.id || args.nombre);
+			if (!id) throw new HttpError(400, "El entreno necesita un nombre.");
+			const doc = (await leerDoc(env, userId, FUERZA_ENTRENOS)) || { entrenos: {} };
+			const entrenos = doc.entrenos || {};
+			if (args.borrar) {
+				delete entrenos[id];
+				await guardarDoc(env, userId, FUERZA_ENTRENOS, { entrenos });
+				return { borrado: id };
+			}
+			if (!Array.isArray(args.ejercicios) || !args.ejercicios.length) throw new HttpError(400, "El entreno necesita al menos un ejercicio.");
+			const previo = entrenos[id];
+			const entreno = {
+				id, nombre: String(args.nombre).trim().slice(0, 60),
+				...(args.lugar === "casa" || args.lugar === "gym" ? { lugar: args.lugar } : previo?.lugar ? { lugar: previo.lugar } : {}),
+				...(typeof args.nota === "string" && args.nota.trim() ? { nota: args.nota.trim().slice(0, 200) } : {}),
+				ejercicios: args.ejercicios.slice(0, 20).map(normalizarEjercicioFuerza),
+				// Si cambia, la copia del reloj queda vieja hasta que se vuelva a mandar.
+				...(previo?.garmin ? { garmin: { ...previo.garmin, desactualizado: true } } : {}),
+				creado: previo?.creado || fechaLocal(),
+				actualizado: fechaLocal(),
+			};
+			entrenos[id] = entreno;
+			await guardarDoc(env, userId, FUERZA_ENTRENOS, { entrenos });
+			const sinGarminEj = entreno.ejercicios.filter((e) => !e.garmin).map((e) => e.nombre);
+			return {
+				guardado: entreno,
+				...(sinGarminEj.length ? { aviso: `Sin ejercicio de Garmin (no se pueden mandar al reloj): ${sinGarminEj.join(", ")}. Buscalos con fuerza_ejercicios_garmin.` } : {}),
+			};
+		},
+	},
+
+	fuerza_registrar: {
+		title: "Registrar una sesion de fuerza hecha",
+		description:
+			"Guarda lo que hizo el usuario. Con entreno: lo que no se diga se registra como estaba en el plan; pase solo lo que cambio " +
+			"(peso, reps, series) o omitido=true si no lo hizo. Sin entreno: pase todos los ejercicios. Devuelve lo que cambio frente al plan. " +
+			"Si subio peso o reps, pregunte si quiere dejarlo asi para la proxima y, si dice que si, llame de nuevo con actualizar_entreno=true. " +
+			"Si hizo la sesion con el reloj, mejor fuerza_desde_garmin.",
+		schema: {
+			type: "object",
+			properties: {
+				entreno: { type: "string", description: "Id o nombre del entreno." },
+				fecha: { type: "string", description: "AAAA-MM-DD; por defecto hoy." },
+				ejercicios: {
+					type: "array",
+					items: {
+						type: "object",
+						properties: {
+							nombre: { type: "string" }, series: { type: "integer" }, reps: { type: "integer" }, segundos: { type: "integer" }, peso_kg: { type: "number" },
+							series_hechas: { type: "array", items: { type: "object", properties: { reps: { type: "integer" }, peso_kg: { type: "number" } } }, description: "Serie a serie, si fueron distintas." },
+							omitido: { type: "boolean" },
+							garmin: { type: "object", properties: { categoria: { type: "string" }, ejercicio: { type: "string" } } },
+						},
+						required: ["nombre"],
+					},
+				},
+				notas: { type: "string" },
+				actualizar_entreno: { type: "boolean", description: "Deja el peso y las reps hechos como plan para la proxima vez." },
+			},
+		},
+		run: async (env, userId, args) => {
+			const fecha = /^\d{4}-\d{2}-\d{2}$/.test(args.fecha || "") ? args.fecha : fechaLocal();
+			const { entrenos } = await leerFuerza(env, userId);
+			const entreno = args.entreno ? entrenos[slugFuerza(args.entreno)] || Object.values(entrenos).find((x) => slugFuerza(x.nombre) === slugFuerza(args.entreno)) : null;
+			if (args.entreno && !entreno) throw new HttpError(404, `No hay ningun entreno "${args.entreno}".`);
+			const dados = Array.isArray(args.ejercicios) ? args.ejercicios : [];
+			if (!entreno && !dados.length) throw new HttpError(400, "Sin entreno, pase los ejercicios hechos.");
+
+			const buscarDado = (p) => dados.find((d) => slugFuerza(d.nombre) === slugFuerza(p.nombre) ||
+				(d.garmin && p.garmin && d.garmin.ejercicio === p.garmin.ejercicio && d.garmin.categoria === p.garmin.categoria));
+			const aSeries = (d, base) => {
+				if (d?.omitido) return [];
+				if (Array.isArray(d?.series_hechas) && d.series_hechas.length)
+					return d.series_hechas.map((s) => ({ reps: Math.round(numeroEn(s.reps, 0, 100, base?.reps ?? 0)), ...(s.peso_kg != null ? { peso_kg: Number(s.peso_kg) } : base?.peso_kg !== undefined ? { peso_kg: base.peso_kg } : {}) }));
+				const series = Math.round(numeroEn(d?.series, 0, 10, base?.series ?? 1));
+				const reps = Math.round(numeroEn(d?.reps, 0, 100, base?.segundos ? 0 : base?.reps ?? 0));
+				const segundos = d?.segundos != null ? Math.round(Number(d.segundos)) : base?.segundos;
+				const peso = d?.peso_kg != null ? Number(d.peso_kg) : base?.peso_kg;
+				return Array.from({ length: series }, () => ({ reps, ...(segundos ? { segundos } : {}), ...(peso !== undefined ? { peso_kg: peso } : {}) }));
+			};
+			const hechos = [];
+			for (const p of entreno?.ejercicios || []) {
+				const d = buscarDado(p);
+				hechos.push({ clave: claveEjercicio(p), nombre: p.nombre, ...(p.garmin ? { garmin: p.garmin } : {}), series: aSeries(d, p) });
+			}
+			for (const d of dados) {
+				if (entreno?.ejercicios.some((p) => buscarDado(p) === d)) continue;
+				const e = { nombre: String(d.nombre).trim().slice(0, 60), ...(d.garmin && CATALOGO.has(`${d.garmin.categoria}/${d.garmin.ejercicio}`) ? { garmin: { categoria: d.garmin.categoria, ejercicio: d.garmin.ejercicio } } : {}) };
+				hechos.push({ clave: claveEjercicio(e), ...e, series: aSeries(d, null) });
+			}
+			const sesion = await guardarSesionFuerza(env, userId, {
+				id: `${fecha}-${entreno?.id || "libre"}`, fecha, entreno: entreno?.id || null, nombre: entreno?.nombre || "Fuerza",
+				fuente: "claude", ejercicios: hechos, ...(typeof args.notas === "string" && args.notas.trim() ? { notas: args.notas.trim().slice(0, 300) } : {}),
+			});
+
+			let actualizado = null;
+			if (args.actualizar_entreno && entreno) {
+				const doc = (await leerDoc(env, userId, FUERZA_ENTRENOS)) || { entrenos: {} };
+				const e = doc.entrenos[entreno.id];
+				for (const x of e.ejercicios) {
+					const h = hechos.find((y) => y.clave === claveEjercicio(x));
+					if (!h?.series.length) continue;
+					const pesoMax = Math.max(...h.series.map((s) => s.peso_kg ?? -1));
+					if (pesoMax >= 0) x.peso_kg = pesoMax;
+					x.reps = Math.min(...h.series.map((s) => s.reps));
+					x.series = h.series.length;
+				}
+				if (e.garmin) e.garmin.desactualizado = true;
+				e.actualizado = fechaLocal();
+				await guardarDoc(env, userId, FUERZA_ENTRENOS, doc);
+				actualizado = e;
+			}
+			return { guardado: sesion, cambios_frente_al_plan: cambiosFrenteAlPlan(entreno, hechos), ...(actualizado ? { entreno_actualizado: actualizado } : {}) };
+		},
+	},
+
+	fuerza_historial: {
+		title: "Historico de fuerza",
+		description:
+			"Con ejercicio: sus sesiones por fecha (series, reps, peso) y como ha evolucionado. Con entreno: sus sesiones. " +
+			"Sin nada: cada ejercicio con su ultima vez y cuantas veces se ha hecho.",
+		schema: {
+			type: "object",
+			properties: {
+				ejercicio: { type: "string", description: "Nombre (o parte) del ejercicio." },
+				entreno: { type: "string" },
+				limite: { type: "integer", description: "Maximo de sesiones (20 por defecto)." },
+			},
+		},
+		run: async (env, userId, { ejercicio, entreno, limite }) => {
+			const { sesiones } = await leerFuerza(env, userId);
+			const max = Math.round(numeroEn(limite, 1, 100, 20));
+			const nuevas = [...sesiones].sort((a, b) => b.fecha.localeCompare(a.fecha));
+			if (ejercicio) {
+				const q = slugFuerza(ejercicio);
+				const claves = new Set();
+				for (const s of sesiones) for (const e of s.ejercicios) if (slugFuerza(e.nombre).includes(q) || e.clave.toLowerCase().includes(q.replace(/-/g, "_"))) claves.add(e.clave);
+				if (!claves.size) throw new HttpError(404, `No hay registros de "${ejercicio}".`);
+				const filas = [];
+				for (const s of nuevas) for (const e of s.ejercicios) if (claves.has(e.clave) && e.series.length)
+					filas.push({ fecha: s.fecha, entreno: s.nombre, ejercicio: e.nombre, series: e.series, texto: textoSeries(e.series),
+						peso_max: Math.max(0, ...e.series.map((x) => x.peso_kg || 0)), volumen_kg: e.series.reduce((t, x) => t + x.reps * (x.peso_kg || 0), 0) });
+				const lista = filas.slice(0, max);
+				const primera = filas[filas.length - 1], ultima = filas[0];
+				return { ejercicio: ultima?.ejercicio, sesiones: lista, evolucion: primera && ultima && primera !== ultima ? `${primera.texto} (${primera.fecha}) → ${ultima.texto} (${ultima.fecha})` : null };
+			}
+			if (entreno) {
+				const id = slugFuerza(entreno);
+				return { sesiones: nuevas.filter((s) => s.entreno === id || slugFuerza(s.nombre) === id).slice(0, max)
+					.map((s) => ({ fecha: s.fecha, fuente: s.fuente, ejercicios: s.ejercicios.map((e) => `${e.nombre}: ${textoSeries(e.series)}`) })) };
+			}
+			const porClave = new Map();
+			for (const s of nuevas) for (const e of s.ejercicios) {
+				if (!e.series.length) continue;
+				const x = porClave.get(e.clave) || { ejercicio: e.nombre, ultima: { fecha: s.fecha, texto: textoSeries(e.series) }, veces: 0 };
+				x.veces++;
+				porClave.set(e.clave, x);
+			}
+			return { ejercicios: [...porClave.values()] };
+		},
+	},
+
+	fuerza_ejercicios_garmin: {
+		title: "Buscar ejercicios en el catalogo de Garmin",
+		description:
+			"Busca en el catalogo de ejercicios de fuerza de Garmin (en castellano o en ingles: 'sentadilla goblet', 'romanian deadlift'). " +
+			"Devuelve categoria y ejercicio para el campo garmin de fuerza_entreno_guardar, y los musculos que trabaja. Elija el mas parecido al que propone.",
+		schema: { type: "object", properties: { buscar: { type: "string" }, limite: { type: "integer" } }, required: ["buscar"] },
+		run: async (env, userId, { buscar, limite }) => {
+			const encontrados = buscarEjercicioGarmin(buscar, Math.round(numeroEn(limite, 1, 20, 8)));
+			return encontrados.length ? { ejercicios: encontrados } : { ejercicios: [], aviso: "Nada parecido: pruebe con el nombre en ingles (squat, lunge, row, press...)." };
+		},
+	},
+
+	fuerza_enviar_garmin: {
+		title: "Mandar un entreno de fuerza al reloj",
+		write: true,
+		description:
+			"Crea el entreno en Garmin Connect como entreno de fuerza guiado (ejercicio, reps, peso y descanso por serie) y lo programa para la fecha, " +
+			"para que el reloj lo tenga al sincronizar. Todos los ejercicios necesitan el campo garmin. Si ya se mando antes, sustituye la copia vieja. " +
+			"ESCRIBE en la cuenta de Garmin del usuario: pida su confirmacion y pase confirm=true solo cuando la de.",
+		schema: {
+			type: "object",
+			properties: {
+				entreno: { type: "string", description: "Id o nombre del entreno." },
+				fecha: { type: "string", description: "AAAA-MM-DD en que lo hara; por defecto hoy." },
+				confirm: { type: "boolean" },
+			},
+			required: ["entreno", "confirm"],
+		},
+		run: async (env, userId, args) => {
+			if (args.confirm !== true) throw new HttpError(400, "Falta la confirmacion explicita del usuario.");
+			const fecha = /^\d{4}-\d{2}-\d{2}$/.test(args.fecha || "") ? args.fecha : fechaLocal();
+			const doc = (await leerDoc(env, userId, FUERZA_ENTRENOS)) || { entrenos: {} };
+			const entreno = doc.entrenos?.[slugFuerza(args.entreno)] || Object.values(doc.entrenos || {}).find((x) => slugFuerza(x.nombre) === slugFuerza(args.entreno));
+			if (!entreno) throw new HttpError(404, `No hay ningun entreno "${args.entreno}".`);
+			const sin = entreno.ejercicios.filter((e) => !e.garmin).map((e) => e.nombre);
+			if (sin.length) throw new HttpError(400, `Para mandarlo al reloj falta el ejercicio de Garmin de: ${sin.join(", ")}. Buscalos con fuerza_ejercicios_garmin y guarde el entreno.`);
+
+			const creado = await apiPost(env, userId, "/workout-service/workout", entrenoParaGarmin(entreno));
+			const workoutId = creado?.workoutId;
+			if (!workoutId) throw new HttpError(502, "Garmin no devolvio el id del entreno.");
+			let programado = true;
+			try { await apiPost(env, userId, `/workout-service/schedule/${workoutId}`, { date: fecha }); } catch { programado = false; }
+			if (entreno.garmin?.workout_id && String(entreno.garmin.workout_id) !== String(workoutId)) await borrarEntrenoGarmin(env, userId, entreno.garmin.workout_id);
+			entreno.garmin = { workout_id: String(workoutId), fecha, enviado: fechaLocal() };
+			await guardarDoc(env, userId, FUERZA_ENTRENOS, doc);
+			return {
+				enviado: true, workout_id: String(workoutId), fecha, programado,
+				mensaje: programado
+					? `"${entreno.nombre}" esta en tu calendario de Garmin para el ${fecha}. Sincroniza el reloj y lo tendras en Entrenamientos.`
+					: `"${entreno.nombre}" esta en tus entrenos de Garmin, pero no he podido ponerlo en el calendario: buscalo en Entrenamientos del reloj.`,
+			};
+		},
+	},
+
+	fuerza_desde_garmin: {
+		title: "Cerrar la sesion de fuerza con lo que conto el reloj",
+		description:
+			"Lee las series de la actividad de fuerza del reloj (ejercicio, reps y peso) y la registra como sesion hecha, unida a su entreno. " +
+			"Devuelve lo que cambio frente al plan. Uselo cuando el usuario diga que ha acabado la sesion de fuerza con el reloj.",
+		schema: {
+			type: "object",
+			properties: {
+				fecha: { type: "string", description: "AAAA-MM-DD; por defecto hoy." },
+				activity_id: { type: "string", description: "Si se sabe, la actividad concreta." },
+				entreno: { type: "string", description: "Si se sabe, el entreno que era." },
+			},
+		},
+		run: async (env, userId, args) => {
+			const fecha = /^\d{4}-\d{2}-\d{2}$/.test(args.fecha || "") ? args.fecha : fechaLocal();
+			const r = await sesionDesdeGarmin(env, userId, { fecha, activity_id: args.activity_id, entreno: args.entreno && slugFuerza(args.entreno) });
+			if (!r) return { registrado: false, motivo: `No hay ninguna actividad de fuerza con series el ${fecha}. ¿La hiciste con el reloj en modo fuerza?` };
+			return { registrado: true, nueva: r.nueva, sesion: r.sesion, cambios_frente_al_plan: cambiosFrenteAlPlan(r.entreno, r.sesion.ejercicios) };
+		},
+	},
+
+	fuerza_dia: {
+		title: "La fuerza de un dia (para la app)",
+		description:
+			"El entreno de fuerza de un dia del plan con su ultima vez, y la sesion hecha si la hay (si no esta registrada y el reloj tiene una actividad de fuerza ese dia, la cierra). " +
+			"Lo usa la app; Claude puede usar fuerza_entrenos y fuerza_historial.",
+		schema: { type: "object", properties: { fecha: { type: "string" } } },
+		run: async (env, userId, args) => {
+			const fecha = /^\d{4}-\d{2}-\d{2}$/.test(args.fecha || "") ? args.fecha : fechaLocal();
+			const plan = await leerDoc(env, userId, "estado/app");
+			const sesionPlan = plan?.plan?.[fecha] || plan?.next?.[fecha] || null;
+			let { entrenos, sesiones } = await leerFuerza(env, userId);
+			let hecha = sesiones.find((s) => s.fecha === fecha && (!sesionPlan?.entreno || s.entreno === sesionPlan.entreno)) || null;
+			if (!hecha && fecha <= fechaLocal()) {
+				const r = await sesionDesdeGarmin(env, userId, { fecha, entreno: sesionPlan?.entreno }).catch(() => null);
+				if (r) { hecha = r.sesion; ({ entrenos, sesiones } = await leerFuerza(env, userId)); }
+			}
+			const entreno = entrenos[sesionPlan?.entreno] || (hecha?.entreno && entrenos[hecha.entreno]) || null;
+			return {
+				fecha,
+				entreno: entreno ? entrenoConUltima(entreno, sesiones.filter((s) => s.id !== hecha?.id)) : null,
+				hecha,
+				cambios_frente_al_plan: hecha ? cambiosFrenteAlPlan(entreno, hecha.ejercicios) : [],
+			};
+		},
+	},
+});
 
 // ──────────────────────────────── Router ────────────────────────────────
 

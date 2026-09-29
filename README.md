@@ -86,6 +86,10 @@ entrenador tiene el nombre que le ponga cada usuario (por defecto myCoach) y
 solo planifica bici, correr y skimo, con la fuerza como complemento. Cada
 mañana el cron deja `coach/hoy` calculado para quien usa myCoach.
 
+## Fuerza (`fuerza_*`)
+
+Entrenos de fuerza con nombre, liderados por Claude: `fuerza_entrenos`, `fuerza_entreno_guardar`, `fuerza_registrar`, `fuerza_historial`, `fuerza_ejercicios_garmin` (busca en el catálogo de Garmin, en castellano; va en `ejercicios-garmin.js`), `fuerza_enviar_garmin` (crea el entreno de fuerza guiado en Garmin Connect y lo programa; escribe, pide confirmación), `fuerza_desde_garmin` (cierra la sesión con las series que contó el reloj) y `fuerza_dia` (lo que usa la app). Se guarda en `app:<id>:fuerza/entrenos` y `app:<id>:fuerza/registro`; la plantilla y lo hecho van separados.
+
 ## Todas las métricas de una actividad
 
 `garmin_activity_detail` devuelve el resumen de Garmin entero, con nombre y
