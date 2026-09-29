@@ -219,6 +219,13 @@ export async function handleApi(request, env) {
 export default {
   async fetch(request, env) {
     const { pathname } = new URL(request.url);
+    // La app dentro de Claude: el HTML pequeño con la dirección de esta web para cargar el código.
+    if (pathname === '/mcp-app') {
+      const r = await env.ASSETS.fetch(new Request(new URL('/mcp-app', request.url)));
+      if (!r.ok) return r;
+      const html = (await r.text()).replaceAll('__ORIGEN__', new URL(request.url).origin);
+      return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
+    }
     if (pathname.startsWith('/api/')) {
       try { return await handleApi(request, env); }
       catch (e) { return json({ code: 'server_unavailable', message: String(e.message || e) }, 502); }

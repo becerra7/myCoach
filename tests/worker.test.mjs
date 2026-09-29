@@ -100,3 +100,13 @@ test('la cuenta pasa al conector con el token de la sesión, y solo con JSON', a
   const csrf = await req('/api/cuenta/contrasena', { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'nueva=x' });
   assert.equal(csrf.status, 415, 'un formulario de otra web no puede cambiar la contraseña');
 });
+
+test('/mcp-app: el HTML pequeño de Claude sale con la dirección de esta web para cargar el código', async () => {
+  const antes = env.ASSETS;
+  env.ASSETS = { fetch: async req => new URL(req.url).pathname === '/mcp-app' ? new Response('<script src="__ORIGEN__/mcp-app.js?v=abc"></script>') : new Response('no', { status: 404 }) };
+  try {
+    const r = await req('/mcp-app');
+    assert.equal(await r.text(), '<script src="https://mycoach.test/mcp-app.js?v=abc"></script>');
+    assert.equal(r.headers.get('Cache-Control'), 'no-store');
+  } finally { env.ASSETS = antes; }
+});
