@@ -11,7 +11,7 @@ async function cargarIcu() {
 
 function cardIntervals() {
   const caja = (estado, cuerpo) => `<div class="card stack" style="gap:12px"><div class="card-h">${ic('chart', 18)}<span class="grow">Intervals.icu</span>${estado}</div>${cuerpo}</div>`;
-  if (!LIVE || S.modo !== 'vivo') return caja('', '<p class="small">Conecta primero tu Garmin: Intervals.icu se suma a esa conexión.</p>');
+  if (!LIVE || S.modo !== 'vivo') return caja('', '<p class="small">Entra primero en myCoach: Intervals.icu se vincula a tu cuenta.</p>');
   if (ICU === undefined) { cargarIcu(); return caja('', '<p class="small muted">Comprobando…</p>'); }
   if (ICU === null) return caja('', '<p class="small">Tu conector aún no tiene Intervals.icu. Llegará cuando se actualice.</p>');
   if (ICU.conectado) return caja('<span class="live">Conectado</span>', `<p class="small">${ICU.nombre ? `Como <b>${esc(ICU.nombre)}</b>. ` : ''}Tu entrenador y tu Claude ven eficiencia, desacople, zonas de potencia y ritmo, intervalos, mejores marcas y tu bienestar.</p>

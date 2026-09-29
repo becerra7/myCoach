@@ -10,6 +10,7 @@
 //   GET  /api/me        → { conectado }
 //   POST /api/mcp       → { tool, input } → llama a la herramienta del conector
 //   POST /api/logout
+//   /api/cuenta[/contrasena|/garmin] → tu cuenta de myCoach en el conector (contraseña, vincular Garmin)
 
 import { ocupados } from './ics.js';
 
@@ -76,6 +77,16 @@ async function token(env, c, params) {
   if (!r.ok) return null;
   const t = await r.json();
   return { access: t.access_token, refresh: t.refresh_token, exp: Date.now() + (t.expires_in || 3600) * 1000 - 60e3 };
+}
+
+/** Token del conector vigente, renovándolo si hace falta. null: hay que volver a entrar. */
+async function acceso(env, origin, sid, s) {
+  if (s.exp > Date.now()) return s.access;
+  const nuevo = s.refresh && await token(env, await cliente(env, origin), { grant_type: 'refresh_token', refresh_token: s.refresh });
+  if (!nuevo) return null;
+  Object.assign(s, nuevo);
+  await env.SESIONES.put(`mc:s:${sid}`, JSON.stringify(s), { expirationTtl: SESSION_TTL });
+  return s.access;
 }
 
 async function llamar(env, origin, sid, s, name, input) {
@@ -173,6 +184,24 @@ export async function handleApi(request, env) {
   if (pathname === '/api/logout' && request.method === 'POST') {
     if (sid) await env.SESIONES.delete(`mc:s:${sid}`);
     return json({ ok: true }, 200, { 'Set-Cookie': setCookie('', 0) });
+  }
+
+  // La cuenta va aparte de las herramientas: las contraseñas no pasan por el chat.
+  if (pathname === '/api/cuenta' || pathname === '/api/cuenta/contrasena' || pathname === '/api/cuenta/garmin') {
+    if (!sesion) return json({ code: 'needs_reauth', message: 'Entra en myCoach' }, 401);
+    const metodo = request.method;
+    if (!['GET', 'POST', 'DELETE'].includes(metodo)) return json({ code: 'bad_request' }, 405);
+    if (metodo !== 'GET' && !(request.headers.get('Content-Type') || '').startsWith('application/json')) return json({ code: 'bad_request' }, 415);
+    const access = await acceso(env, origin, sid, sesion);
+    if (!access) return json({ code: 'needs_reauth', message: 'Vuelve a entrar en myCoach' }, 401);
+    const r = await garmin(env, pathname.slice(4), {
+      method: metodo,
+      headers: { Authorization: `Bearer ${access}`, ...(metodo === 'POST' ? { 'Content-Type': 'application/json' } : {}) },
+      ...(metodo === 'POST' ? { body: await request.text() } : {}),
+    });
+    const datos = await r.json().catch(() => ({}));
+    if (!r.ok) return json({ code: r.status === 401 && !datos.error ? 'needs_reauth' : 'tool_error', message: datos.error || `Conector ${r.status}` }, r.status === 401 ? 401 : r.status >= 500 ? 502 : r.status);
+    return json(datos);
   }
 
   if (pathname === '/api/mcp' && request.method === 'POST') {

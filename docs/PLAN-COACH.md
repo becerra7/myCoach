@@ -193,6 +193,7 @@ Objetivo: que funcione sin ti delante y aprender qué enamora.
 4. **Nombre del entrenador configurable**, por defecto "myCoach": en Ajustes o diciéndoselo a Claude. Se guarda en `atleta/perfil`.
 5. **Un solo bloque en Hoy**: el semáforo junto con los datos que lo explican (lo que antes era "Cómo estás hoy").
 6. **Siguiente gran pieza: myCoach dentro de Claude** con MCP Apps (pantallas interactivas servidas por el conector).
+7. **Cuenta propia de myCoach; Garmin es una fuente que se vincula.** Entras en myCoach (y conectas tu Claude) con email y contraseña de myCoach. Garmin e Intervals.icu se vinculan en Ajustes › Conexiones. Motivo: Garmin empezó a pedir captcha al login desde nuestro servidor y eso dejaba sin poder reconectar Claude. Así solo falla la fuente, no la app ni Claude, y el día que haya API oficial de Garmin solo cambia cómo se vincula. Más adelante: passkeys y "Entrar con Google".
 
 ## 10. Próximos pasos concretos (2 semanas)
 1. Sacar `packages/domain` con carga TRIMP, semáforo y tests.

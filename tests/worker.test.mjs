@@ -15,6 +15,10 @@ globalThis.fetch = async (url, init = {}) => {
     const { params } = JSON.parse(init.body);
     return Response.json({ jsonrpc: '2.0', id: 1, result: { content: [{ type: 'text', text: JSON.stringify({ tool: params.name, ok: true }) }] } });
   }
+  if (url.includes('/cuenta')) {
+    assert.equal(init.headers.Authorization, 'Bearer tok');
+    return Response.json({ ruta: new URL(url).pathname, metodo: init.method || 'GET', body: init.body ? JSON.parse(init.body) : null });
+  }
   throw new Error('fetch inesperado ' + url);
 };
 const req = (path, init = {}) => worker.fetch(new Request('https://mycoach.test' + path, init), env);
@@ -83,4 +87,16 @@ test('calendario: guardar el enlace, leer bloques ocupados y quitarlo', async ()
     await req('/api/calendario', { method: 'DELETE', headers: { Cookie: cookie } });
     assert.deepEqual(await (await req('/api/calendario', { headers: { Cookie: cookie } })).json(), { configurado: false, eventos: [] });
   } finally { globalThis.fetch = prev; }
+});
+
+test('la cuenta pasa al conector con el token de la sesión, y solo con JSON', async () => {
+  const login = await req('/api/login');
+  const state = new URL(login.headers.get('Location')).searchParams.get('state');
+  const cookie = (await req(`/api/callback?code=c2&state=${state}`)).headers.get('Set-Cookie').split(';')[0];
+  assert.equal((await req('/api/cuenta')).status, 401, 'sin sesión no hay cuenta');
+  assert.deepEqual(await (await req('/api/cuenta', { headers: { Cookie: cookie } })).json(), { ruta: '/cuenta', metodo: 'GET', body: null });
+  const g = await req('/api/cuenta/garmin', { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: '{"email":"a@b.c","password":"x"}' });
+  assert.deepEqual(await g.json(), { ruta: '/cuenta/garmin', metodo: 'POST', body: { email: 'a@b.c', password: 'x' } });
+  const csrf = await req('/api/cuenta/contrasena', { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'nueva=x' });
+  assert.equal(csrf.status, 415, 'un formulario de otra web no puede cambiar la contraseña');
 });

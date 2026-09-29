@@ -137,7 +137,7 @@ let LIVE = undefined; const capListo = capMcp.then(async m => {
     }
   }
   COMPROBANDO = false;
-  if (!S.onboarded && m) { S.obConn = true; S.modo = 'vivo'; if (S.obStep <= 1) S.obStep = 2; save(); renderOnboarding(); sync(false); return; }
+  if (!S.onboarded && m) { S.obConn = true; S.modo = 'vivo'; if (S.obStep <= 1 && !enWeb()) S.obStep = 2; save(); renderOnboarding(); sync(false); return; }
   if (S.onboarded && m && S.modo === 'vivo' && (firstOpen || !DSET || !DSET.acts.length || Date.now() - (S.lastSync || 0) > 15 * 60e3)) sync(false); else render();
 });
 // Sin conector (o si no contesta), se deja de esperar: onboarding o demo, como siempre.
@@ -368,6 +368,18 @@ $('#refresh').addEventListener('click', () => sync(true));
 $('#claude-btn').addEventListener('click', () => openClaude());
 
 /* ===== ONBOARDING ===== */
+// En la web, el primer paso es tu cuenta de myCoach y luego vincular Garmin.
+function obCuentaWeb(steps, nA, desde) {
+  const titulo = `${steps}<h1>Entra en myCoach</h1><p class="lead">Con tu cuenta ves tu plan aquí y en tu Claude. Después vinculas tu Garmin: leemos actividades, sueño y readiness, y no publicamos nada.</p>`;
+  if (!S.obConn) return `${titulo}<div class="card"><button class="btn fill" type="button" data-a="ob-conn">Entrar o crear cuenta</button></div><span class="spacer"></span>`;
+  if (CUENTA === undefined) { cargarCuenta(); return `${titulo}<p class="small muted" role="status">Comprobando tu cuenta…</p>`; }
+  const vinculado = CUENTA && CUENTA.garmin.vinculado;
+  const tarjeta = vinculado
+    ? `<div class="row">${ic('check', 28)}<div class="grow"><b>Garmin vinculado</b><p class="small muted">${nA ? `${nA} actividades desde el ${desde}` : 'Leyendo tu histórico…'}</p></div></div>`
+    : `<div class="stack" style="gap:10px"><p class="small"><b>Cuenta lista.</b> Ahora vincula tu Garmin para que tu entrenador vea tus datos.</p><button class="btn fill" type="button" data-a="garmin-vincular">Vincular Garmin</button></div>`;
+  return `${titulo}<div class="card">${tarjeta}</div><span class="spacer"></span><button class="btn ${vinculado ? 'fill' : 'text'} wide" type="button" data-a="ob-next">${vinculado ? 'Seguir' : 'Ahora no'}</button>`;
+}
+
 function renderOnboarding() {
   let ob = $('#ob'); if (S.onboarded) { ob && ob.remove(); return; }
   if (!ob) { ob = document.createElement('div'); ob.id = 'ob'; ob.className = 'ob'; app.append(ob); }
@@ -375,7 +387,8 @@ function renderOnboarding() {
   const st = S.obStep; const steps = `<div class="steps">${[0, 1, 2, 3, 4, 5].map(i => `<i class="${i <= st ? 'on' : ''}"></i>`).join('')}</div>`; let h = '';
   const horas = horasPorDeporte(); const nA = M.acts.length, desde = nA ? fDia(M.acts[nA - 1].f) : '';
   if (st === 0) h = `<span class="card-h">myCoach</span><h1>Tu forma, fácil de entender</h1><p class="lead">Lee tu Garmin y te lo cuenta en claro: tu semana, tu forma y qué hacer, en todos tus deportes.</p><span class="spacer"></span><button class="btn fill wide" type="button" data-a="ob-next">Empezar</button>`;
-  if (st === 1) h = `${steps}<h1>Conecta tu Garmin</h1><p class="lead">Leemos actividades, sueño y readiness. No publicamos nada.</p><div class="card">${S.obConn ? `<div class="row">${ic('check', 28)}<div class="grow"><b>Conectado</b><p class="small muted">${nA ? `${nA} actividades desde el ${desde}` : 'Leyendo tu histórico…'}</p></div></div>` : `<button class="btn fill" type="button" data-a="ob-conn">Conectar con Garmin</button>`}</div><span class="spacer"></span><button class="btn fill wide" type="button" data-a="ob-next" ${S.obConn ? '' : 'disabled'}>Seguir</button>`;
+  if (st === 1 && enWeb()) h = obCuentaWeb(steps, nA, desde);
+  else if (st === 1) h = `${steps}<h1>Conecta tu Garmin</h1><p class="lead">Leemos actividades, sueño y readiness. No publicamos nada.</p><div class="card">${S.obConn ? `<div class="row">${ic('check', 28)}<div class="grow"><b>Conectado</b><p class="small muted">${nA ? `${nA} actividades desde el ${desde}` : 'Leyendo tu histórico…'}</p></div></div>` : `<button class="btn fill" type="button" data-a="ob-conn">Conectar con Garmin</button>`}</div><span class="spacer"></span><button class="btn fill wide" type="button" data-a="ob-next" ${S.obConn ? '' : 'disabled'}>Seguir</button>`;
   if (st === 2) h = `${steps}<h1>¿Qué deportes analizo?</h1><p class="lead">He encontrado estos en tu Garmin. La app se adapta: parte común y detalle de cada uno.</p><div class="stack" style="gap:8px">${(Object.keys(horas).length ? '' : (syncing ? '<p class="small muted">Leyendo tus actividades de Garmin… aparecerán aquí en unos segundos. Puedes elegir ya o esperar.</p>' : '<p class="small muted">Aún no he leído tus actividades. Elige a mano o sigue y actualiza luego.</p>'))}${ENTRENABLES.map(k => [k, horas[k] || 0]).map(([k, v]) => `<button type="button" class="choice" aria-pressed="${S.sports.includes(k)}" data-a="ob-sport" data-v="${k}"><span class="ico" style="background:${scol(k)};color:#fff">${ic(SPORTS[k].ic)}</span><span><b>${SPORTS[k].n}</b><span>${nf(v)} h desde el ${desde}</span></span></button>`).join('')}</div><button class="btn fill wide" type="button" data-a="ob-next" ${S.sports.length ? '' : 'disabled'}>Seguir</button>`;
   if (st === 3) h = `${steps}<h1>¿Qué quieres ver primero?</h1><div class="stack" style="gap:10px">${[['semana', 'plan', 'Mi semana', 'Plan, % cumplido y qué toca hoy.'], ['forma', 'forma', 'Mi forma', 'Una nota clara y en qué flojeo.'], ['objetivo', 'target', 'Mi objetivo', 'Si voy en camino.']].map(([v, i, t, s]) => `<button type="button" class="choice" aria-pressed="${S.variant === v}" data-a="ob-var" data-v="${v}"><span class="ico">${ic(i)}</span><span><b>${t}</b><span>${s}</span></span></button>`).join('')}</div><span class="spacer"></span><button class="btn fill wide" type="button" data-a="ob-next">Seguir</button>`;
   if (st === 4) h = `${steps}<h1>¿Usamos IA?</h1><p class="lead">Lo básico funciona sin IA. Con IA, usa tu propia cuenta de Claude: no pagas nada extra a la app.</p><div class="stack" style="gap:10px">${[['claude', 'claude', 'Sí, con mi Claude', 'Chat, fotos de comida y planes afinados. Necesitas Claude con el conector de Garmin.'], ['off', 'check', 'No, solo reglas', 'Plan, balance y avisos funcionan igual.']].map(([v, i, t, s]) => `<button type="button" class="choice" aria-pressed="${S.ai === v}" data-a="ob-ai" data-v="${v}"><span class="ico">${ic(i)}</span><span><b>${t}</b><span>${s}</span></span></button>`).join('')}</div><span class="spacer"></span><button class="btn fill wide" type="button" data-a="ob-next">Seguir</button>`;

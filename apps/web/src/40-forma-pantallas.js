@@ -138,12 +138,9 @@ function scrAjustes() {
   const grp = (id, t, opts, cur) => `<fieldset class="aj-grp"><legend class="aj-leg">${t}</legend><div class="opts">${opts.map(([v, l, s]) => `<label class="radio" for="${id}-${v}"><input type="radio" name="${id}" id="${id}-${v}" value="${v}" data-a="set" data-k="${id}" ${cur === v ? 'checked' : ''}><span><b style="font-weight:600">${l}</b>${s ? `<br><span class="small muted">${s}</span>` : ''}</span></label>`).join('')}</div></fieldset>`;
   const horas = horasPorDeporte();
   const otros = Object.entries(horas).filter(([k]) => !ENTRENABLES.includes(k));
-  const web = window.PLATFORM && PLATFORM.name === 'web';
-  const garmin = `<div class="card stack" style="gap:12px"><div class="card-h">${ic('watch', 18)}<span class="grow">Garmin</span>${LIVE ? '<span class="live">Conectado</span>' : ''}</div>
-    <p class="small">${LIVE ? 'Leo tus actividades, tu sueño, tu VFC y tu readiness.' : 'Conéctalo para que tu entrenador vea tus actividades, tu sueño y tu readiness.'}</p>
-    ${web ? `<div class="btns">${LIVE ? '<button class="btn plain" type="button" data-a="web-logout">Desconectar Garmin</button>' : '<button class="btn fill" type="button" data-a="web-login">Conectar mi Garmin</button>'}</div>` : ''}</div>`;
   return { title: 'Ajustes', html: head('Ajustes', M.fuente === 'vivo' ? 'Garmin conectado en vivo' : 'Modo demo') + `<div class="content aj" style="max-width:640px">
-    ${sec('Conexiones', `<div class="stack" style="gap:12px">${garmin}${cardIntervals()}${calDisponible() ? cardCalendario() : ''}</div>`)}
+    ${cardCuenta() ? sec('Tu cuenta', cardCuenta()) : ''}
+    ${sec('Conexiones', `<div class="stack" style="gap:12px">${cardGarmin()}${cardIntervals()}${calDisponible() ? cardCalendario() : ''}</div>`)}
     ${sec('Tu entrenador', `<label class="stack" for="coach-nombre" style="gap:6px"><b>Nombre</b><input id="coach-nombre" class="search" value="${esc(S.coachNombre || '')}" data-a="coach-nombre" placeholder="myCoach" maxlength="24" aria-describedby="coach-nombre-h"><span class="small muted" id="coach-nombre-h">Así se presenta en la app y en tu Claude.</span></label>`)}
     ${sec('Deportes que entreno', `<div class="list">${ENTRENABLES.map(k => `<label class="toggle-row" for="sp-${k}"><span class="main"><b>${sportDot2(k)} ${SPORTS[k].n}</b><br><span class="small muted">${horas[k] ? `${nf(horas[k])} h en tu Garmin` : 'Sin actividades todavía'}${k === 'fuerza' ? ' · complemento' : ''}</span></span><input class="switch" type="checkbox" id="sp-${k}" data-a="sport-t" data-v="${k}" ${S.sports.includes(k) ? 'checked' : ''}></label>`).join('')}</div>
       ${otros.length ? `<p class="small muted aj-nota">También haces ${otros.map(([k, h]) => `${SPORTS[k].n.toLowerCase()} (${nf(h)} h)`).join(', ')}. Cuenta como carga en tu semáforo, pero no lo planifico: no se mide con ritmo, potencia o pulso de forma fiable.</p>` : ''}`,
