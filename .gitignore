@@ -2,3 +2,6 @@ node_modules/
 apps/web/dist/
 .wrangler/
 .dev.vars
+
+# Impeccable: el binario (16 MB) lo descarga el lanzador la primera vez
+.claude/skills/impeccable/scripts/bin/
