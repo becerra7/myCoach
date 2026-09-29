@@ -5,12 +5,15 @@
    Si el conector aún no tiene las herramientas coach_*, la tarjeta no sale. */
 let COACH = null, coachCargando = false;
 const COACH_TXT = { verde: 'Verde: adelante', ambar: 'Ámbar: mejor suave', rojo: 'Rojo: hoy toca recuperar' };
+const COACH_EST = { bien: ['good', 'Bien'], normal: ['label-2', 'Normal'], leve: ['warn', 'Algo peor'], fuerte: ['bad', 'Peor'], sin_dato: ['label-3', 'Sin dato'] };
+/* El nombre lo pone cada uno (Ajustes o su Claude); se guarda en el perfil del conector. Por defecto, myCoach. */
+const nombreCoach = () => (S.coachNombre || '').trim() || (COACH && COACH.entrenador) || 'myCoach';
 const coachCall = (tool, input, fresh) => LIVE.callTool('Garmin', tool, input, { cache: fresh ? { refresh: true } : { staleTime: 20 * 60e3 } }).then(r => r.payload);
 
 async function cargarCoach(fresco) {
   if (!LIVE || S.modo !== 'vivo' || coachCargando) return;
   coachCargando = true;
-  try { const r = await coachCall('coach_hoy', {}, fresco); COACH = r && r.semaforo ? r : null; }
+  try { const r = await coachCall('coach_hoy', {}, fresco); COACH = r && r.semaforo ? r : null; if (COACH && COACH.entrenador && document.activeElement?.id !== 'coach-nombre') { S.coachNombre = COACH.entrenador === 'myCoach' ? '' : COACH.entrenador; } }
   catch (e) { if (!COACH || COACH.fecha !== HOY) COACH = null; }
   coachCargando = false; render();
 }
@@ -26,7 +29,15 @@ function coachDemo() {
   else if (libre && color === 'ambar' && ['int', 'tempo'].includes(s.t)) propuesta = { accion: 'cambiar', texto: `Cambia ${s.d} por ${m5(0.75)} min suaves.`, sesion: { dep: s.dep, t: 'fondo', d: `${m5(0.75)} min suaves en lugar de: ${s.d}`, min: m5(0.75), ajustada: true } };
   else if (libre && color === 'ambar' && s.t === 'fondo' && s.min >= 120) propuesta = { accion: 'recortar', texto: `Recorta el fondo a ${m5(0.7)} min y sin apretar.`, sesion: { ...s, a: undefined, f: undefined, d: `${s.d} (recortado a ${m5(0.7)} min)`, min: m5(0.7), ajustada: true } };
   const que = propuesta ? propuesta.texto : s && s.t !== 'descanso' ? `Hoy toca ${s.d}.` : 'Hoy descanso.';
-  return { fecha: HOY, demo: true, semaforo: { color, razones: color === 'verde' ? [] : [`readiness ${r} de Garmin`], positivos: color === 'verde' ? ['has dormido 7 h 40', 'VFC normal'] : [] },
+  const R = (M.perfil || {}).ready || {};
+  const datos = [
+    { clave: 'readiness', nombre: 'Readiness de Garmin', valor: r == null ? null : String(r), normal: null, estado: r == null ? 'sin_dato' : r < 35 ? 'fuerte' : r < 55 ? 'leve' : r >= 70 ? 'bien' : 'normal' },
+    { clave: 'sueno', nombre: 'Sueño', valor: R.sleep != null ? `7 h 40 · ${R.sleep}/100` : '7 h 40', normal: '7 h 20', estado: 'bien' },
+    { clave: 'vfc', nombre: 'VFC nocturna', valor: '52 ms', normal: '50 ms', estado: 'bien' },
+    { clave: 'pulso', nombre: 'Pulso en reposo', valor: '49 ppm', normal: '48 ppm', estado: 'bien' },
+    { clave: 'frescura', nombre: 'Frescura (forma − fatiga)', valor: '-8 · equilibrado', normal: null, estado: 'normal' },
+  ];
+  return { fecha: HOY, demo: true, semaforo: { color, datos, razones: color === 'verde' ? [] : [`readiness ${r} de Garmin`], positivos: color === 'verde' ? ['has dormido 7 h 40', 'VFC normal'] : [] },
     propuesta, mensaje: `${que} ${color === 'verde' ? 'Dormiste bien y la VFC está normal.' : `Readiness ${r}.`}` };
 }
 
@@ -35,13 +46,16 @@ function cardCoach() {
   const sm = c.semaforo; const p = c.propuesta;
   const porque = (sm.color === 'verde' ? sm.positivos : sm.razones).slice(0, 3);
   const aplicable = p && p.sesion && !c.ya_entrenado_hoy?.length;
-  return `<div class="card"><div class="card-h">${ic('heart', 18)}<span class="grow">Tu entrenador</span>${c.demo ? simTag('Demo') : '<span class="live">En vivo</span>'}</div>
+  const datos = (sm.datos || []).map(d => { const [col, lbl] = COACH_EST[d.estado] || COACH_EST.normal;
+    return `<li><i style="background:var(--${col})" aria-label="${lbl}" title="${lbl}"></i><span class="grow">${esc(d.nombre)}</span><b>${d.valor == null ? '—' : esc(d.valor)}</b>${d.normal ? `<span class="xs muted">normal ${esc(d.normal)}</span>` : ''}</li>`; }).join('');
+  return `<div class="card"><div class="card-h">${ic('heart', 18)}<span class="grow">${esc(nombreCoach())} · cómo estás hoy</span>${c.demo ? simTag('Demo') : '<span class="live">En vivo</span>'}</div>
     <div class="row"><span class="semaf ${sm.color}" role="img" aria-label="Semáforo ${sm.color}"></span><div class="grow stack" style="gap:2px"><b style="font-size:17px">${COACH_TXT[sm.color]}</b>
       ${porque.length ? `<span class="small muted">${esc(cap1(porque.join(' · ')))}</span>` : ''}</div></div>
     <p class="coach-msg">${esc(String(c.mensaje || '').replace(/^(🟢|🟠|🔴)\s*/u, ''))}</p>
     ${p && p.mover && p.mover.sustituye ? `<p class="small muted">El ${esc(p.mover.dia)} tenías ${esc(p.mover.sustituye.d || 'otra sesión')}: se sustituye.</p>` : ''}
     ${sm.datos_que_faltan && sm.datos_que_faltan.length === 3 ? '<p class="small muted">Garmin aún no tiene tu noche: el semáforo se afinará cuando la tenga.</p>' : ''}
     ${aplicable ? `<div class="btns"><button class="btn fill" type="button" data-a="coach-aplicar">Aplicar</button><button class="btn text" type="button" data-a="coach-claude">Hablarlo con Claude</button></div>` : ''}
+    ${datos ? `<div class="coach-datos"><span class="xs muted">Por qué: tus datos de hoy frente a lo normal para ti</span><ul>${datos}</ul></div>` : ''}
     ${c.demo ? '' : `<div class="coach-feel" role="group" aria-label="¿Cómo te encuentras?"><span class="small muted" style="width:100%">¿Cómo te encuentras?</span>${[[1, 'Reventado'], [2, 'Cansado'], [3, 'Normal'], [5, 'Genial']].map(([n, t]) => `<button class="sug" type="button" data-a="coach-sentir" data-v="${n}">${t}</button>`).join('')}<button class="sug" type="button" data-a="coach-dolor">Me duele algo</button></div>`}
   </div>`;
 }
@@ -66,6 +80,14 @@ async function coachAnotar(entrada, gracias) {
   try { await coachCall('coach_anotar', entrada, true); toast(gracias); cargarCoach(true); }
   catch (e) { toast('No he podido anotarlo: ' + (e.message || e.code || 'error')); }
 }
+
+async function guardarNombreCoach(v) {
+  S.coachNombre = v.trim().slice(0, 24); save(); render();
+  if (S.modo !== 'vivo' || !LIVE) { toast('Guardado'); return; }
+  try { await coachCall('coach_perfil_guardar', { cambios: { entrenador: { nombre: S.coachNombre || 'myCoach' } } }, true); toast(`Tu entrenador se llama ${nombreCoach()}. Tu Claude también lo sabrá.`); cargarCoach(true); }
+  catch (e) { toast('Guardado aquí; no he podido avisar al conector (' + (e.code || 'error') + ')'); }
+}
+document.addEventListener('change', e => { if (e.target && e.target.dataset && e.target.dataset.a === 'coach-nombre') guardarNombreCoach(e.target.value); });
 
 Object.assign(ACTIONS, {
   'coach-aplicar': () => coachAplicar(),

@@ -22,6 +22,12 @@ Es el primer paso del plan (`docs/PLAN-COACH.md`): **el motor decide, el modelo 
 
 ![Tarjeta del entrenador en vivo (con datos simulados)](img/semaforo-vivo.png)
 
+### Cambios del 29 de septiembre
+- **Una sola tarjeta en Hoy**: el semáforo y, debajo, *Por qué*, con cada dato (readiness, sueño, VFC, pulso en reposo, frescura y lo anotado) comparado con lo normal para ti y con un punto de color según cómo lo lee el motor. Sustituye a "Cómo estás hoy".
+- **Nombre del entrenador**: en Ajustes → *Nombre de tu entrenador* (por defecto myCoach). También puedes decírselo a Claude ("a partir de ahora te llamas Rafa"). Se guarda en tu perfil del conector y las instrucciones del conector lo usan, así que tu Claude se presenta con ese nombre en los chats nuevos.
+- **Deportes**: el entrenador solo planifica bici, correr y skimo (y fuerza como complemento). Si metes otro deporte en el plan, lo acepta con un aviso: cuenta como carga, pero no lo planifica.
+- 223 tests en verde en el conector.
+
 ## 2. Cómo se conecta con tu Claude
 
 ```

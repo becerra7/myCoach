@@ -163,6 +163,10 @@ body.nosim .sim{display:none}
 .semaf.ambar{--c:var(--warn);--s:var(--warn-soft)}.semaf.rojo{--c:var(--bad);--s:var(--bad-soft)}
 .coach-msg{margin:12px 0 0;font-size:16px;line-height:1.4}
 .coach-why{margin:6px 0 0;padding:0;list-style:none;display:grid;gap:2px}
+.coach-datos{margin-top:12px;padding-top:12px;border-top:1px solid var(--sep, rgba(127,127,127,.2))}
+.coach-datos ul{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:8px}
+.coach-datos li{display:flex;align-items:baseline;gap:8px;font-size:15px}
+.coach-datos li i{width:10px;height:10px;border-radius:50%;flex:none;align-self:center}
 .coach-feel{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 .row{display:flex;align-items:center;gap:12px}
 .row .grow{flex:1;min-width:0}

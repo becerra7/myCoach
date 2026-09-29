@@ -199,7 +199,7 @@ function syncLine() {
 function tabHoy() {
   const banner = S.simRide && !S.seenSim && M.fuente === 'demo' ? `<div class="adapt b-full"><div class="row">${ic('pueblos', 26)}<div class="grow"><b style="font-size:17px">Nueva actividad: +3 pueblos</b><p class="small muted">Palau-solità i Plegamans, Polinyà y Santa Perpètua de Mogoda.</p></div></div><div class="btns"><button class="btn fill" type="button" data-a="seen-sim">Ver en el mapa</button></div></div>` : '';
   const orden = S.variant === 'forma' ? ['forma', 'semana', 'ready'] : S.variant === 'objetivo' ? ['obj', 'semana', 'ready'] : ['semana', 'ready', 'forma'];
-  const bloques = { semana: `<div class="b-hero">${cardSemana(true)}</div>`, ready: `<div class="b-side stack" style="gap:16px">${cardCoach()}${cardReadiness()}</div>`, forma: `<div class="b-side">${cardForma(S.variant !== 'forma')}</div>`, obj: `<div class="b-hero">${cardObjetivo()}</div>` };
+  const bloques = { semana: `<div class="b-hero">${cardSemana(true)}</div>`, ready: `<div class="b-side stack" style="gap:16px">${cardCoach() || cardReadiness()}</div>`, forma: `<div class="b-side">${cardForma(S.variant !== 'forma')}</div>`, obj: `<div class="b-hero">${cardObjetivo()}</div>` };
   const html = orden.map(k => bloques[k]).join('');
   return { title: 'Hoy', html: head('Hoy', `${cap1(fLarga(HOY))} · ${syncLine()}`) + `<div class="content"><div class="bento">${banner}${cardAvisoPlan()}${html}
     <div class="b-full"><div class="section-h"><h2>Tus deportes</h2><button class="link" type="button" data-a="push" data-v="ajustes">Elegir</button></div>${tilesDeportes()}</div>

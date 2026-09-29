@@ -186,11 +186,13 @@ Objetivo: que funcione sin ti delante y aprender qué enamora.
 
 ---
 
-## 9. Decisiones abiertas (tuyas)
-1. **Enfoque:** ¿multideporte "de montaña" (bici, correr, esquí de montaña, montaña, pádel) como identidad frente a NUA, o competir de lleno en ciclismo?
-2. **Voz:** ¿el entrenador tiene nombre y personalidad propios o es "myCoach"?
-3. **Fase 1 con IA de pago:** ¿aceptas una clave de API tuya con tope (~5 €/mes) para probar el bot proactivo, o todo en modo "tu Claude"?
-4. **Intervals.icu:** ¿lo incorporamos ya en la fase 2 como segunda fuente?
+## 9. Decisiones tomadas (29 de septiembre)
+1. **Deportes que planifica el entrenador:** solo los que se miden con pulso, ritmo, potencia o cadencia. Se empieza con **bici (carretera, gravel, MTB, rodillo), correr (asfalto y trail) y skimo**, más **fuerza como complemento**. Después, natación. El esquí de pista, el pádel o la montaña **cuentan como carga** (cansan igual), pero no se planifican.
+2. **Sin Telegram ni bot proactivo** por ahora. Se habla dentro de la app o dentro de Claude. Los avisos llegarán más adelante como **push de la PWA**.
+3. **Amigos: se mantiene el login no oficial de Garmin.** Intervals.icu queda como plan B si Garmin lo rompe, y como vía para abrirlo al público.
+4. **Nombre del entrenador configurable**, por defecto "myCoach": en Ajustes o diciéndoselo a Claude. Se guarda en `atleta/perfil`.
+5. **Un solo bloque en Hoy**: el semáforo junto con los datos que lo explican (lo que antes era "Cómo estás hoy").
+6. **Siguiente gran pieza: myCoach dentro de Claude** con MCP Apps (pantallas interactivas servidas por el conector).
 
 ## 10. Próximos pasos concretos (2 semanas)
 1. Sacar `packages/domain` con carga TRIMP, semáforo y tests.
