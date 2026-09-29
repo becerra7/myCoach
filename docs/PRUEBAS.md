@@ -28,6 +28,19 @@ Es el primer paso del plan (`docs/PLAN-COACH.md`): **el motor decide, el modelo 
 - **Deportes**: el entrenador solo planifica bici, correr y skimo (y fuerza como complemento). Si metes otro deporte en el plan, lo acepta con un aviso: cuenta como carga, pero no lo planifica.
 - 223 tests en verde en el conector.
 
+### Cambios del 29 de septiembre (tarde)
+- **Todas las métricas de cada actividad** (`garmin_activity_detail`): velocidad media y máxima, ritmo y ritmo ajustado a la pendiente, potencia media y normalizada, IF, TSS, cadencia, dinámicas de carrera (zancada, contacto con el suelo, oscilación), velocidad vertical, temperatura, efecto de entrenamiento y **stamina** si tu reloj la graba. Lo que no reconoce también sale, con su nombre de Garmin.
+- **Gráficas sin capturas:** cada actividad trae todas sus series resumidas (mínimo, media, máximo, inicio y final) y un **perfil de 24 tramos** con velocidad, pulso, potencia, cadencia, altitud y stamina. Las instrucciones del conector le dicen a Claude que nunca pida pantallazos.
+- **`coach_progreso`**: "¿estoy mejorando en bici?" → semana a semana, velocidad, ritmo, VAM, pulso, potencia, cadencia y eficiencia (metros por latido); últimas 4 semanas frente a las 4 anteriores y mejores registros. `coach_semana` enseña esas métricas en cada sesión hecha.
+- **Intervals.icu**: se conecta en Ajustes con tu ID de atleta y tu clave (se guarda cifrada). Añade `intervals_actividades`, `intervals_actividad` (intervalos y series), `intervals_bienestar` e `intervals_curvas` (mejores marcas de potencia, ritmo y pulso).
+- **Diseño revisado** (reglas en `CLAUDE.md`):
+  - Hoy empieza por el entrenador ("qué hago hoy y por qué").
+  - El cambio propuesto se enseña como antes → después.
+  - Los estados llevan texto e icono, no solo color.
+  - "Cómo te encuentras" es una hoja con opciones en vez de cinco botones.
+  - Ajustes, ordenado en Conexiones, Tu entrenador, Deportes que entreno, Preferencias, Tú y Datos.
+- 264 tests en verde en el conector.
+
 ## 2. Cómo se conecta con tu Claude
 
 ```
@@ -67,6 +80,10 @@ Web myCoach (mycoach / mycoach-pruebas) ─────────────�
    | "Hoy tengo cena, muévelo" | Mueve la sesión respetando las reglas y te lo confirma antes de guardar. |
    | "Estoy reventado" / "Me duele la rodilla derecha" | `coach_anotar`. Si vuelves a preguntar "¿qué hago hoy?", el semáforo lo tiene en cuenta. Con dolor: rojo, nada de reprogramar series y "consulta a un profesional". |
    | "Mi objetivo es la Quebrantahuesos, el 19 de junio" | `coach_perfil_guardar` te avisa de que lo guarda. En otro chat, `coach_perfil` lo recuerda. |
+   | "Enséñame cómo fue la stamina en mi última carrera" | `garmin_activity_detail` y lee la serie y el perfil de stamina. **No te pide capturas.** |
+   | "¿Estoy mejorando en bici?" | `coach_progreso` con velocidad, eficiencia, potencia y VAM frente al mes anterior. |
+   | Con Intervals.icu conectado: "Analiza las series de ayer" | `intervals_actividad`: cada intervalo con potencia, pulso, velocidad y desacople. |
+   | Con Intervals.icu conectado: "¿Cuáles son mis mejores marcas de potencia?" | `intervals_curvas`: de 5 s a 60 min, en 6 semanas y en un año. |
 
    Fíjate sobre todo en **cómo habla**: frases cortas, el porqué en una frase, una recomendación y no un abanico, y siempre te pide confirmación antes de tocar el plan.
 
@@ -79,6 +96,7 @@ Web myCoach (mycoach / mycoach-pruebas) ─────────────�
    - Prueba **Aplicar** si hay propuesta. La sesión cambia en el plan y, si le preguntas a Claude, la ve cambiada.
    - Prueba **¿Cómo te encuentras? → Reventado**: el semáforo se recalcula.
    - **Hablarlo con Claude** copia un encargo para pegarlo en Claude.
+4. **Intervals.icu** (opcional): en intervals.icu, *Settings → Connections* conecta tu Garmin. Luego, en *Settings → Developer Settings*, copia el **Athlete ID** y crea la **API Key**. En la web de pruebas: **Ajustes → Conexiones → Intervals.icu**, pega los dos y pulsa *Conectar*. El conector comprueba la clave con Intervals.icu antes de guardarla.
 
 ## 4. Cuidado con esto
 

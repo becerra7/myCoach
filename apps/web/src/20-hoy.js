@@ -123,14 +123,18 @@ document.addEventListener('pointermove', e => {
 });
 
 /* ===== HOY ===== */
-function cardSemana(big) {
+function cardSemana(big, conEntrenador) {
   const r = resumen(SEM); const pct = r.plan ? Math.round(r.hechas / r.plan * 100) : 0;
+  const ESTADO_DIA = { done: 'hecha', miss: 'no hecha', today: 'hoy' };
   const strip = days7(SEM).map(f => {
     const s = sesion(f); const d = dte(f); let cls = '', dot = '';
-    if (s) { const k = tipoSes(s); dot = s.t === 'descanso' ? '' : `<i style="background:${scol(s.dep)}"></i>`; if (s.a) cls = 'done'; else if (f < HOY && s.t !== 'descanso') cls = 'miss'; if (f === HOY && !s.a) cls = 'today'; }
-    return `<button type="button" class="d7" data-a="day" data-v="${f}" aria-label="${fLarga(f)}${s ? ': ' + esc(s.d) : ''}"><small>${DL[d.getDay()]}</small><span class="b ${cls}">${dot}${s && s.a ? `<span class="ok">${ic('check', 11)}</span>` : ''}</span><small>${d.getDate()}</small></button>`;
+    if (s) { dot = s.t === 'descanso' ? '' : `<i style="background:${scol(s.dep)}"></i>`; if (s.a) cls = 'done'; else if (f < HOY && s.t !== 'descanso') cls = 'miss'; if (f === HOY && !s.a) cls = 'today'; }
+    // Hecha y no hecha llevan icono, no solo el color del borde.
+    const marca = cls === 'done' ? `<span class="ok">${ic('check', 11)}</span>` : cls === 'miss' ? `<span class="ok ko">${ic('close', 11)}</span>` : '';
+    return `<button type="button" class="d7" data-a="day" data-v="${f}" aria-label="${fLarga(f)}${s ? `: ${esc(s.d)}${ESTADO_DIA[cls] ? `, ${ESTADO_DIA[cls]}` : ''}` : ', libre'}"><small aria-hidden="true">${DL[d.getDay()]}</small><span class="b ${cls}">${dot}${marca}</span><small aria-hidden="true">${d.getDate()}</small></button>`;
   }).join('');
-  const hoy = sesion(HOY); const fit = fitHoy();
+  // Con el entrenador en Hoy, "qué toca hoy" ya está allí: aquí no se repite.
+  const hoy = conEntrenador ? null : sesion(HOY); const fit = fitHoy();
   return `<div class="card ${big ? 'hero' : ''}">
     <button type="button" class="card-h" style="border:0;background:none;padding:0;cursor:pointer;color:inherit;font:inherit;text-align:left" data-a="tab" data-v="plan">${ic('plan', 18)}<span class="grow">Esta semana · ${rangoSem(SEM)}</span>${ic('chev', 18, 'chev')}</button>
     <div class="row"><div class="cring" style="--p:${pct}" role="img" aria-label="${r.plan ? `${r.hechas} de ${r.plan} sesiones hechas` : `${r.n} actividades`}"><span><b>${r.plan ? `${r.hechas}/${r.plan}` : r.n}</b><small>${r.plan ? 'hechas' : 'hechas'}</small></span></div>
@@ -198,10 +202,15 @@ function syncLine() {
 }
 function tabHoy() {
   const banner = S.simRide && !S.seenSim && M.fuente === 'demo' ? `<div class="adapt b-full"><div class="row">${ic('pueblos', 26)}<div class="grow"><b style="font-size:17px">Nueva actividad: +3 pueblos</b><p class="small muted">Palau-solità i Plegamans, Polinyà y Santa Perpètua de Mogoda.</p></div></div><div class="btns"><button class="btn fill" type="button" data-a="seen-sim">Ver en el mapa</button></div></div>` : '';
-  const orden = S.variant === 'forma' ? ['forma', 'semana', 'ready'] : S.variant === 'objetivo' ? ['obj', 'semana', 'ready'] : ['semana', 'ready', 'forma'];
-  const bloques = { semana: `<div class="b-hero">${cardSemana(true)}</div>`, ready: `<div class="b-side stack" style="gap:16px">${cardCoach() || cardReadiness()}</div>`, forma: `<div class="b-side">${cardForma(S.variant !== 'forma')}</div>`, obj: `<div class="b-hero">${cardObjetivo()}</div>` };
-  const html = orden.map(k => bloques[k]).join('');
-  return { title: 'Hoy', html: head('Hoy', `${cap1(fLarga(HOY))} · ${syncLine()}`) + `<div class="content"><div class="bento">${banner}${cardAvisoPlan()}${html}
+  // Hoy responde "¿qué hago hoy y por qué?": el entrenador va primero. Después, la semana
+  // y lo que el usuario haya elegido ver en Ajustes. Preparar la semana solo va arriba si
+  // la actual está sin plan (si no, es algo para el fin de semana y va detrás).
+  const coach = cardCoach();
+  const aviso = cardAvisoPlan(); const avisoUrgente = aviso && !planDe(SEM);
+  const orden = S.variant === 'forma' ? ['forma', 'semana'] : S.variant === 'objetivo' ? ['obj', 'semana'] : ['semana', 'forma'];
+  const bloques = { semana: `<div class="${coach ? 'b-side' : 'b-hero'}">${cardSemana(!coach, !!coach)}</div>${avisoUrgente ? '' : aviso}`, forma: `<div class="b-side">${cardForma(true)}</div>`, obj: `<div class="b-side">${cardObjetivo(true)}</div>` };
+  const html = `<div class="b-hero">${coach || cardReadiness()}</div>` + orden.map(k => bloques[k]).join('');
+  return { title: 'Hoy', html: head('Hoy', `${cap1(fLarga(HOY))}<br>${syncLine()}`) + `<div class="content"><div class="bento">${banner}${avisoUrgente ? aviso : ''}${html}
     <div class="b-full"><div class="section-h"><h2>Tus deportes</h2><button class="link" type="button" data-a="push" data-v="ajustes">Elegir</button></div>${tilesDeportes()}</div>
     ${S.variant === 'objetivo' ? `<div class="b-third">${cardForma(true)}</div>` : `<div class="b-third">${cardObjetivo(true)}</div>`}<div class="b-third">${cardComida()}</div><div class="b-third">${cardPueblos()}</div>
   </div></div>` };

@@ -32,6 +32,9 @@ const SPORTS = {
   esqui: { n: 'Esquí', ic: 'ski' }, caminar: { n: 'Caminar', ic: 'walk' }, otros: { n: 'Otros', ic: 'dot' },
 };
 const SPORT_ORDER = ['bici', 'correr', 'skimo', 'montana', 'raqueta', 'fuerza', 'esqui', 'caminar', 'otros'];
+/* Lo que el entrenador planifica: deportes que se miden con pulso, ritmo, potencia o cadencia, y la fuerza
+   como complemento. El resto (montaña, pádel, esquí de pista…) cuenta como carga, pero no se elige ni se planifica. */
+const ENTRENABLES = ['bici', 'correr', 'skimo', 'fuerza'];
 const scol = k => `var(--s-${k})`;
 const TIPOS = {
   rec: { n: 'Recuperación', c: 'Recup.', k: 'k-rec' }, fondo: { n: 'Fondo', k: 'k-fondo' }, tempo: { n: 'Tempo', k: 'k-tempo' },
@@ -92,6 +95,7 @@ const DEFAULTS = () => ({
 });
 let S;
 try { S = Object.assign(DEFAULTS(), JSON.parse(localStorage.getItem('trazo-v3') || 'null') || {}); if (S.v !== 6) S = DEFAULTS(); } catch (e) { S = DEFAULTS(); }
+S.sports = S.sports.filter(k => ENTRENABLES.includes(k));
 let saveTimer; function save() { try { localStorage.setItem('trazo-v3', JSON.stringify(S)); } catch (e) { } S.savedAt = Date.now(); clearTimeout(saveTimer); saveTimer = setTimeout(() => { if (typeof DB !== 'undefined' && DB && S.modo === 'vivo') { const { plan, next, meals, goal, sports, overrides, testRes, nombre } = S; DB.doc('estado/app').set({ plan, next: next || null, meals: meals.map(m => ({ ...m, img: null })), goal, sports, overrides, testRes, nombre, at: S.savedAt }).catch(() => { }); } }, 1500); }
 /* Plan y comidas de ejemplo: solo en modo demo */
 function demoSeed() { S.plan = planInicial(); S.meals = comidasIniciales(); }

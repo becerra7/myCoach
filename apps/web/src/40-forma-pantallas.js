@@ -131,20 +131,28 @@ function scrCompartir() {
     <button class="btn fill wide" type="button" data-a="do-share">${ic('share', 20)} Compartir</button></div>` };
 }
 /* ===== AJUSTES ===== */
+/* Ajustes, agrupados por lo que viene a hacer el usuario: conectar, su entrenador,
+   sus deportes y sus preferencias. Cada grupo con su encabezado (h2) para lectores de pantalla. */
 function scrAjustes() {
-  const grp = (id, t, opts, cur) => `<div class="stack" style="gap:8px"><b class="small muted" style="padding:0 4px;text-transform:uppercase;letter-spacing:.4px">${t}</b><div class="opts">${opts.map(([v, l, s]) => `<label class="radio" for="${id}-${v}"><input type="radio" name="${id}" id="${id}-${v}" value="${v}" data-a="set" data-k="${id}" ${cur === v ? 'checked' : ''}><span><b style="font-weight:600">${l}</b>${s ? `<br><span class="xs">${s}</span>` : ''}</span></label>`).join('')}</div></div>`;
+  const sec = (t, cuerpo, nota) => `<section class="aj-sec"><h2 class="aj-h">${t}</h2>${nota ? `<p class="small muted aj-nota">${nota}</p>` : ''}${cuerpo}</section>`;
+  const grp = (id, t, opts, cur) => `<fieldset class="aj-grp"><legend class="aj-leg">${t}</legend><div class="opts">${opts.map(([v, l, s]) => `<label class="radio" for="${id}-${v}"><input type="radio" name="${id}" id="${id}-${v}" value="${v}" data-a="set" data-k="${id}" ${cur === v ? 'checked' : ''}><span><b style="font-weight:600">${l}</b>${s ? `<br><span class="small muted">${s}</span>` : ''}</span></label>`).join('')}</div></fieldset>`;
   const horas = horasPorDeporte();
-  return { title: 'Ajustes', html: head('Ajustes', M.fuente === 'vivo' ? 'Garmin conectado en vivo' : 'Modo demo') + `<div class="content" style="max-width:640px">
-    <div class="stack" style="gap:8px"><b class="small muted" style="padding:0 4px;text-transform:uppercase;letter-spacing:.4px">Deportes que analizo</b><p class="xs" style="padding:0 4px">La app se adapta: parte común y detalle de cada deporte que elijas. Detectados en tu Garmin, con horas totales.</p>
-      <div class="list">${Object.entries(horas).map(([k, h]) => `<label class="toggle-row" for="sp-${k}"><span class="main"><b>${sportDot2(k)} ${SPORTS[k].n}</b><br><span class="xs">${nf(h)} h</span></span><input class="switch" type="checkbox" id="sp-${k}" data-a="sport-t" data-v="${k}" ${S.sports.includes(k) ? 'checked' : ''}></label>`).join('')}</div></div>
-    ${grp('variant', 'Lo primero que ves en Hoy', [['semana', 'Tu semana', 'Plan, % cumplido y lo de hoy'], ['forma', 'Tu forma', 'Nota y tipo de deportista'], ['objetivo', 'Tu objetivo', 'Meta y ritmo']], S.variant)}
-    ${grp('ai', 'Inteligencia artificial', [['claude', 'Con mi Claude', 'Gratis para la app: usa tu cuenta de Claude'], ['off', 'Sin IA', 'Todo funciona con reglas; sin fotos de comida ni chat']], S.ai)}
-    ${grp('clasif', 'Cómo se clasifican los días', [['min', 'Por mis minutos de pulso', 'Recomendado'], ['garmin', 'Por la etiqueta de Garmin']], S.clasif)}
-    <label class="stack" for="coach-nombre" style="gap:6px"><b class="small muted" style="padding:0 4px;text-transform:uppercase;letter-spacing:.4px">Nombre de tu entrenador</b><input id="coach-nombre" class="search" value="${esc(S.coachNombre || '')}" data-a="coach-nombre" placeholder="myCoach" maxlength="24"><span class="xs" style="padding:0 4px">Así te habla en la app y en tu Claude.</span></label>
-    <label class="stack" for="nombre-in" style="gap:6px"><b class="small muted" style="padding:0 4px;text-transform:uppercase;letter-spacing:.4px">Tu nombre (para la ficha)</b><input id="nombre-in" class="search" value="${esc(S.nombre)}" data-a="nombre-in" placeholder="Opcional"></label>
-    ${window.PLATFORM && PLATFORM.name === 'web' ? `<div class="btns">${LIVE ? '<button class="btn plain" type="button" data-a="web-logout">Desconectar Garmin</button>' : '<button class="btn fill" type="button" data-a="web-login">Conectar mi Garmin</button>'}</div>` : ''}
-    ${calDisponible() ? cardCalendario() : ''}
-    ${grp('modo', 'Datos', [['vivo', 'Mi Garmin en vivo', LIVE ? 'Conector disponible' : 'Aquí no hay conector de Garmin'], ['demo', 'Modo demo', 'Datos de ejemplo para probar la app']], S.modo)}
-    <p class="xs" style="padding:0 4px">Tu zona en el mapa: ${esc(M.ccaa || 'sin datos')} (la comunidad donde más kilómetros haces).</p>
+  const otros = Object.entries(horas).filter(([k]) => !ENTRENABLES.includes(k));
+  const web = window.PLATFORM && PLATFORM.name === 'web';
+  const garmin = `<div class="card stack" style="gap:12px"><div class="card-h">${ic('watch', 18)}<span class="grow">Garmin</span>${LIVE ? '<span class="live">Conectado</span>' : ''}</div>
+    <p class="small">${LIVE ? 'Leo tus actividades, tu sueño, tu VFC y tu readiness.' : 'Conéctalo para que tu entrenador vea tus actividades, tu sueño y tu readiness.'}</p>
+    ${web ? `<div class="btns">${LIVE ? '<button class="btn plain" type="button" data-a="web-logout">Desconectar Garmin</button>' : '<button class="btn fill" type="button" data-a="web-login">Conectar mi Garmin</button>'}</div>` : ''}</div>`;
+  return { title: 'Ajustes', html: head('Ajustes', M.fuente === 'vivo' ? 'Garmin conectado en vivo' : 'Modo demo') + `<div class="content aj" style="max-width:640px">
+    ${sec('Conexiones', `<div class="stack" style="gap:12px">${garmin}${cardIntervals()}${calDisponible() ? cardCalendario() : ''}</div>`)}
+    ${sec('Tu entrenador', `<label class="stack" for="coach-nombre" style="gap:6px"><b>Nombre</b><input id="coach-nombre" class="search" value="${esc(S.coachNombre || '')}" data-a="coach-nombre" placeholder="myCoach" maxlength="24" aria-describedby="coach-nombre-h"><span class="small muted" id="coach-nombre-h">Así se presenta en la app y en tu Claude.</span></label>`)}
+    ${sec('Deportes que entreno', `<div class="list">${ENTRENABLES.map(k => `<label class="toggle-row" for="sp-${k}"><span class="main"><b>${sportDot2(k)} ${SPORTS[k].n}</b><br><span class="small muted">${horas[k] ? `${nf(horas[k])} h en tu Garmin` : 'Sin actividades todavía'}${k === 'fuerza' ? ' · complemento' : ''}</span></span><input class="switch" type="checkbox" id="sp-${k}" data-a="sport-t" data-v="${k}" ${S.sports.includes(k) ? 'checked' : ''}></label>`).join('')}</div>
+      ${otros.length ? `<p class="small muted aj-nota">También haces ${otros.map(([k, h]) => `${SPORTS[k].n.toLowerCase()} (${nf(h)} h)`).join(', ')}. Cuenta como carga en tu semáforo, pero no lo planifico: no se mide con ritmo, potencia o pulso de forma fiable.</p>` : ''}`,
+      'Los planifico con pulso, ritmo, velocidad, potencia y cadencia. La fuerza entra como complemento.')}
+    ${sec('Preferencias', `${grp('variant', 'Debajo de tu entrenador, en Hoy', [['semana', 'Tu semana', 'Plan y % cumplido'], ['forma', 'Tu forma', 'Nota y tipo de deportista'], ['objetivo', 'Tu objetivo', 'Meta y ritmo']], S.variant)}
+      ${grp('ai', 'Inteligencia artificial', [['claude', 'Con mi Claude', 'Gratis para la app: usa tu cuenta de Claude'], ['off', 'Sin IA', 'Todo funciona con reglas; sin fotos de comida ni chat']], S.ai)}
+      ${grp('clasif', 'Cómo se clasifican los días', [['min', 'Por mis minutos de pulso', 'Recomendado'], ['garmin', 'Por la etiqueta de Garmin']], S.clasif)}`)}
+    ${sec('Tú', `<label class="stack" for="nombre-in" style="gap:6px"><b>Tu nombre</b><input id="nombre-in" class="search" value="${esc(S.nombre)}" data-a="nombre-in" placeholder="Opcional" autocomplete="given-name"><span class="small muted">Sale en la ficha que compartes.</span></label>
+      <p class="small muted">Tu zona en el mapa: ${esc(M.ccaa || 'sin datos')} (la comunidad donde más kilómetros haces).</p>`)}
+    ${sec('Datos', grp('modo', 'De dónde salen tus datos', [['vivo', 'Mi Garmin en vivo', LIVE ? 'Conector disponible' : 'Aquí no hay conector de Garmin'], ['demo', 'Modo demo', 'Datos de ejemplo para probar la app']], S.modo))}
   </div>` };
 }

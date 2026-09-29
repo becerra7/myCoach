@@ -60,14 +60,14 @@ function cardAvisoPlan() {
   else if ([5, 6, 0].includes(dow) && !planDe(PROX)) { w = PROX; t = 'Prepara la semana que viene'; s = `Del ${fDia(PROX)} al ${fDia(addDays(PROX, 6))}${CAL ? ', encajada en tu agenda' : ''}.`; }
   if (!w) return '';
   return `<div class="adapt b-full"><div class="row">${ic('plan', 26)}<div class="grow"><b style="font-size:17px">${t}</b><p class="small muted">${s}</p></div></div>
-    <div class="btns"><button class="btn fill" type="button" data-a="plan-sem" data-v="${w}">Prepararla</button><button class="btn tonal" type="button" data-a="claude" data-v="${w === SEM ? 'Prepárame el resto de esta semana' : 'Prepárame la semana que viene'}">${ic('claude', 18)} Con Claude</button></div></div>`;
+    <div class="btns"><button class="btn fill" type="button" data-a="plan-sem" data-v="${w}">Prepararla</button><button class="btn text" type="button" data-a="claude" data-v="${w === SEM ? 'Prepárame el resto de esta semana' : 'Prepárame la semana que viene'}">${ic('claude', 18)} Con Claude</button></div></div>`;
 }
 
 /* Ajustes: conectar el calendario */
 function cardCalendario() {
-  const tit = '<b class="small muted" style="padding:0 4px;text-transform:uppercase;letter-spacing:.4px">Calendario</b>';
-  if (S.calOk) { const n = Object.values(CAL || {}).flat().length; return `<div class="stack" style="gap:8px">${tit}<div class="card"><p class="small"><b>Conectado.</b> ${n} evento${n === 1 ? '' : 's'} en los próximos 14 días. Pongo tus sesiones en los huecos libres.</p><div class="btns"><button class="btn plain" type="button" data-a="cal-quitar">Quitar calendario</button></div></div></div>`; }
-  return `<div class="stack" style="gap:8px">${tit}<div class="card stack" style="gap:10px">
+  const tit = estado => `<div class="card-h">${ic('plan', 18)}<span class="grow">Calendario</span>${estado || ''}</div>`;
+  if (S.calOk) { const n = Object.values(CAL || {}).flat().length; return `<div class="card stack" style="gap:12px">${tit('<span class="live">Conectado</span>')}<p class="small">${n} evento${n === 1 ? '' : 's'} en los próximos 14 días. Pongo tus sesiones en los huecos libres.</p><div class="btns"><button class="btn plain" type="button" data-a="cal-quitar">Quitar calendario</button></div></div>`; }
+  return `<div><div class="card stack" style="gap:10px">${tit()}
     <p class="small">Conecta tu calendario y no te pondré entrenos cuando estés ocupado.</p>
     <label class="vh" for="cal-url">Enlace privado iCal</label><input id="cal-url" class="search" inputmode="url" autocomplete="off" placeholder="https://calendar.google.com/…/basic.ics">
     <div class="btns"><button class="btn fill" type="button" data-a="cal-guardar">Conectar calendario</button></div>
