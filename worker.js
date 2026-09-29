@@ -194,23 +194,28 @@ async function loginVia(flowName, email, password) {
 	if (type === "INVALID_USERNAME_PASSWORD")
 		throw new HttpError(401, "Email o contrasena incorrectos.");
 
-	throw new HttpError(502, "Garmin devolvio una respuesta inesperada al iniciar sesion.");
+	// Se enseña lo que ha dicho Garmin: sin eso no hay forma de saber que ha cambiado.
+	const detalle = type || (body?.error ? `error ${JSON.stringify(body.error).slice(0, 80)}` : `HTTP ${res.status}`);
+	throw new HttpError(502, `Garmin devolvio una respuesta inesperada al iniciar sesion (${flowName}: ${detalle}).`);
 }
 
 /**
  * Intenta el flujo movil y, si Garmin lo tiene limitado, cae al del portal.
- * Solo el 429 justifica reintentar: una contrasena incorrecta lo seria en
- * ambos, y repetirla solo acerca el bloqueo.
+ * El 429 (limite) y el 502 (respuesta que no entendemos) justifican reintentar;
+ * una contrasena incorrecta lo seria en ambos, y repetirla solo acerca el bloqueo.
  */
 async function ssoLogin(email, password) {
 	try {
 		return await loginVia("ios", email, password);
 	} catch (err) {
-		if (!(err instanceof HttpError) || err.status !== 429) throw err;
+		// Tambien si Garmin responde algo que no entendemos: el otro flujo suele seguir funcionando.
+		if (!(err instanceof HttpError) || (err.status !== 429 && err.status !== 502)) throw err;
 
 		try {
 			return await loginVia("portal", email, password);
 		} catch (fallbackErr) {
+			if (fallbackErr instanceof HttpError && fallbackErr.status === 502 && err.status === 502)
+				throw new HttpError(502, `${err.message} Tambien por el portal: ${fallbackErr.message}`);
 			if (fallbackErr instanceof HttpError && fallbackErr.status === 429)
 				// Se arrastra el detalle del segundo intento: sin el no hay forma
 				// de distinguir un limite de la API de un bloqueo del WAF, que se

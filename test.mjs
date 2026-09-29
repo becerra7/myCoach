@@ -129,7 +129,7 @@ const REDIRECT = "https://claude.ai/api/mcp/auth_callback";
  * email: si no, el email acabaria en el KV por culpa del mock y la prueba de
  * "el email no se almacena" seria falsa.
  */
-function mockGarmin(accounts, { mobileLimited = false, portalLimited = false } = {}) {
+function mockGarmin(accounts, { mobileLimited = false, portalLimited = false, mobileRaro = false, portalRaro = false } = {}) {
 	const tickets = new Map();
 	const handleOf = (email) => accounts[email].data.displayName;
 	const byHandle = (handle) =>
@@ -150,6 +150,7 @@ function mockGarmin(accounts, { mobileLimited = false, portalLimited = false } =
 
 		if (u.pathname === "/portal/api/login") {
 			if (portalLimited) return rateLimited();
+			if (portalRaro) return new Response(JSON.stringify({ responseStatus: { type: "CAPTCHA_REQUIRED" } }));
 			const { username, password } = JSON.parse(init.body);
 			const acc = accounts[username];
 			if (!acc || acc.password !== password)
@@ -161,6 +162,7 @@ function mockGarmin(accounts, { mobileLimited = false, portalLimited = false } =
 
 		if (u.pathname === "/mobile/api/login") {
 			if (mobileLimited) return rateLimited();
+			if (mobileRaro) return new Response(JSON.stringify({ responseStatus: { type: "ACCOUNT_LOCKED_X" } }));
 			const { username, password } = JSON.parse(init.body);
 			const acc = accounts[username];
 			if (!acc || acc.password !== password)
@@ -354,6 +356,26 @@ const rpc = async (env, token, message) => {
 	check("ambos limitados -> 429", res.status === 429);
 	check("el mensaje desaconseja reintentar en bucle",
 		(await res.text()).includes("no reintentes en bucle"));
+}
+
+// ── 4d-bis. Respuesta desconocida del movil: cae al portal y, si falla, dice que ha contestado Garmin ──
+{
+	mockGarmin({ "ana@x.com": { password: "a", data: { displayName: "ana", hrv: 50 } } }, { mobileRaro: true });
+	const { tokens } = await connect(makeEnv(), "ana@x.com", "a");
+	check("respuesta rara del movil -> el portal salva el login", Boolean(tokens.access_token));
+
+	mockGarmin({ "ana@x.com": { password: "a", data: { displayName: "ana", hrv: 50 } } },
+		{ mobileRaro: true, portalRaro: true });
+	const env = makeEnv();
+	const reg = await (await postJson(env, "/oauth/register", { redirect_uris: [REDIRECT] })).json();
+	const res = await postForm(env, "/oauth/authorize", {
+		client_id: reg.client_id, redirect_uri: REDIRECT, code_challenge: CHALLENGE,
+		code_challenge_method: "S256", email: "ana@x.com", password: "a",
+	});
+	const html = await res.text();
+	check("ambos raros -> 502", res.status === 502);
+	check("el error dice el tipo que devolvio cada flujo",
+		html.includes("ios: ACCOUNT_LOCKED_X") && html.includes("portal: CAPTCHA_REQUIRED"));
 }
 
 // ── 4e. Una contrasena mala no reintenta por el otro flujo ──
