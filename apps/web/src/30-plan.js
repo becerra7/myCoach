@@ -57,6 +57,7 @@ function tabPlan() {
       <div class="b-hero stack" style="gap:12px">
         ${w !== PROX ? `<div class="card"><div class="card-h"><span class="grow">Lo que dice tu semana</span><span class="xs" style="text-transform:none">reglas, sin IA</span></div><ul class="insights">${ins.map(([k, i, t]) => `<li class="ins-${k}"><span class="ic">${ic(i, 16)}</span><span>${esc(t)}</span></li>`).join('')}</ul></div>` : `<div class="card"><div class="card-h"><span class="grow">Afinar</span></div><div class="btns"><button class="btn tonal" type="button" data-a="claude" data-v="Revisa mi plan de la semana que viene y mejóralo">${ic('claude', 18)} Afinar con Claude</button><button class="btn plain" type="button" data-a="goal-edit">Ajustar objetivo</button></div></div>`}
         <div class="list split">${listaDias(w)}</div>
+        ${w !== PROX && w !== SEM ? '' : `<div class="list"><button type="button" class="li" data-a="push" data-v="entrenos">${ic('dumbbell')}<span class="main"><b>Tus entrenos de fuerza</b><span>Edítalos y ponlos en un día de la semana</span></span>${ic('chev', 18, 'chev')}</button></div>`}
       </div></div>`;
   }
   const sub = w === SEM ? `${rangoSem(SEM)} · en curso` : w === PROX ? `${rangoSem(PROX)} · planificar` : `Semana del ${fDia(w)} · revisión`;
@@ -105,6 +106,7 @@ function sheetDia(f) {
       <div class="list">
         ${pasado ? `<button class="li" type="button" data-a="mark-done" data-v="${f}">${ic('check')}<span class="main"><b>Marcar como hecha</b></span></button>` : `<button class="li" type="button" data-a="move" data-v="${f}">${ic('move')}<span class="main"><b>Mover a otro día</b></span>${ic('chev', 18, 'chev')}</button>`}
         <button class="li" type="button" data-a="otro" data-v="${f}">${ic('edit')}<span class="main"><b>Cambiar por otra cosa</b></span>${ic('chev', 18, 'chev')}</button>
+        ${pasado ? '' : `<button class="li" type="button" data-a="ent-elegir" data-v="${f}">${ic('dumbbell')}<span class="main"><b>${s.dep === 'fuerza' ? 'Cambiar el entreno de fuerza' : 'Poner un entreno de fuerza'}</b></span>${ic('chev', 18, 'chev')}</button>`}
         ${fuerzaDelDia(f) ? '' : `<button class="li" type="button" data-a="watch" data-v="${f}">${ic('watch')}<span class="main"><b>Enviar al reloj</b><span>Por validar con Garmin</span></span></button>`}
       </div>`;
   } });

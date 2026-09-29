@@ -398,7 +398,7 @@ function renderOnboarding() {
   if (st !== 5) delete ob.dataset.anim;
 }
 const TABSCR = { hoy: tabHoy, plan: tabPlan, forma: tabForma, pueblos: tabPueblos };
-const SCREENS = { actividad: scrActividad, test: scrTest, objetivo: scrObjetivo, compartir: scrCompartir, ajustes: scrAjustes, evo: scrEvo, nutri: scrNutri };
+const SCREENS = { entrenos: scrEntrenos, entreno: scrEntreno, actividad: scrActividad, test: scrTest, objetivo: scrObjetivo, compartir: scrCompartir, ajustes: scrAjustes, evo: scrEvo, nutri: scrNutri };
 
 /* ===== Panel de prototipo ===== */
 const FLOWS = [

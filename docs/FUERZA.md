@@ -9,6 +9,8 @@ Versión sencilla, liderada por Claude con el conector:
 - **Histórico** por ejercicio (`fuerza_historial`), sume de qué entreno sume.
 - **En la app** (Hoy y la hoja del día en Plan): antes, cada ejercicio con su objetivo y lo que hiciste la última vez, y el botón "Enviar al reloj". Después, plan frente a lo hecho. Tocando un ejercicio, su histórico. No se marcan series en la app, por decisión.
 
+- **Tus entrenos** (Plan › Tus entrenos de fuerza): la librería, como la de Garmin. Cada entreno se puede editar (nombre, casa o gimnasio, series, reps o segundos, kg y descanso de cada ejercicio), quitar ejercicios, añadirlos del catálogo de Garmin, duplicarlo y borrarlo. Al planificar, en la hoja de un día: "Poner un entreno de fuerza", que enlaza el día con el entreno (con deshacer).
+
 Lo de abajo es la investigación y la propuesta más ambiciosa, que queda para más adelante.
 
 ## Investigación y propuesta

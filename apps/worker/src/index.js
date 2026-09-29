@@ -29,6 +29,8 @@ export const TOOLS = new Set([
   'intervals_actividades', 'intervals_actividad', 'intervals_bienestar', 'intervals_curvas',
   // Fuerza: el entreno del día, su histórico y mandarlo al reloj (con confirmación en la app).
   'fuerza_dia', 'fuerza_historial', 'fuerza_enviar_garmin',
+  // La librería de entrenos: verlos, editarlos y añadir ejercicios del catálogo de Garmin.
+  'fuerza_entrenos', 'fuerza_entreno_guardar', 'fuerza_ejercicios_garmin',
 ]);
 
 const json = (data, status = 200, headers = {}) =>
