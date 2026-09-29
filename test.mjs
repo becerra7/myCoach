@@ -1716,6 +1716,13 @@ const rpc = async (env, token, message) => {
 	check("leer el recurso da el HTML de la app", c.mimeType === "text/html;profile=mcp-app" && c.text.includes("myCoach") && pedidas[0] === "/mcp-app");
 	await rpc(env, tok, { jsonrpc: "2.0", id: 5, method: "resources/read", params: { uri: "ui://mycoach/app" } });
 	check("cada apertura trae la version recien desplegada", pedidas.length === 2);
+	check("la pantalla no se cachea (ttlMs 0)", leido.body.result.ttlMs === 0 && leido.body.result.resultType === "complete");
+	const lista2 = (await rpc(env, tok, { jsonrpc: "2.0", id: 7, method: "tools/list" })).body.result;
+	check("la lista de herramientas se cachea como mucho un minuto", lista2.ttlMs === 60000 && lista2.cacheScope === "public");
+	const desc = (await rpc(env, tok, { jsonrpc: "2.0", id: 8, method: "server/discover", params: { _meta: { "io.modelcontextprotocol/protocolVersion": "2026-07-28" } } })).body.result;
+	check("server/discover responde con versiones, capacidades e instrucciones",
+		desc.supportedVersions.includes("2026-07-28") && Boolean(desc.capabilities.resources) &&
+		desc.instructions.includes("mycoach_abrir") && desc.cacheScope === "private");
 	const bien = env.MYCOACH.fetch;
 	env.MYCOACH = { fetch: async () => new Response("caida", { status: 503 }) };
 	const caida = await rpc(env, tok, { jsonrpc: "2.0", id: 6, method: "resources/read", params: { uri: "ui://mycoach/app" } });

@@ -1709,18 +1709,17 @@ const DEFAULT_PROTOCOL = "2025-06-18";
 const SUPPORTED_PROTOCOLS = ["2026-07-28", "2025-06-18", "2025-03-26", "2024-11-05"];
 
 const rpcResult = (id, result) => ({ jsonrpc: "2.0", id, result });
+// Cache de MCP (2026-07-28): sin ttlMs, cada cliente decide y Claude guardaba
+// la lista y la pantalla hasta reconectar. Un minuto basta para no repetir
+// peticiones y deja ver un despliegue enseguida.
+const CACHE_LISTA = { ttlMs: 60 * 1000, cacheScope: "public" };
 const rpcError = (id, code, message) => ({ jsonrpc: "2.0", id, error: { code, message } });
 
 async function handleRpc(message, env, userId) {
 	const { id, method, params } = message;
 
-	if (method === "initialize") {
-		const asked = params?.protocolVersion;
-		return rpcResult(id, {
-			protocolVersion: SUPPORTED_PROTOCOLS.includes(asked) ? asked : DEFAULT_PROTOCOL,
-			capabilities: { tools: { listChanged: false }, resources: { listChanged: false } },
-			serverInfo: SERVER_INFO,
-			instructions:
+	const capacidades = { tools: { listChanged: false }, resources: { listChanged: false } };
+	const instrucciones = async () =>
 				"Datos de Garmin Connect del usuario que ha autorizado este conector. Las fechas van en " +
 				"YYYY-MM-DD y por defecto es hoy. Para preguntas sobre descanso use garmin_sleep y garmin_hrv; " +
 				"para carga y rendimiento, garmin_activities y garmin_training_readiness. Si una herramienta " +
@@ -1733,13 +1732,36 @@ async function handleRpc(message, env, userId) {
 				"Los recorridos ya guardados se leen con garmin_courses y garmin_course_detail: mirelos antes " +
 				"de proponer una ruta nueva, para no repetir una que el usuario ya tiene. " +
 				"escribe en su cuenta: pida permiso antes." +
-				instruccionesCoach(await nombreEntrenador(env, userId).catch(() => NOMBRE_COACH)),
+				instruccionesCoach(await nombreEntrenador(env, userId).catch(() => NOMBRE_COACH));
+
+	if (method === "initialize") {
+		const asked = params?.protocolVersion;
+		return rpcResult(id, {
+			protocolVersion: SUPPORTED_PROTOCOLS.includes(asked) ? asked : DEFAULT_PROTOCOL,
+			capabilities: capacidades,
+			serverInfo: SERVER_INFO,
+			instructions: await instrucciones(),
 		});
 	}
+
+	// MCP 2026-07-28: descubrimiento sin sesion. Las instrucciones llevan el
+	// nombre del entrenador de cada usuario: privado.
+	if (method === "server/discover")
+		return rpcResult(id, {
+			resultType: "complete",
+			supportedVersions: SUPPORTED_PROTOCOLS,
+			capabilities: capacidades,
+			_meta: { "io.modelcontextprotocol/serverInfo": SERVER_INFO },
+			instructions: await instrucciones(),
+			...CACHE_LISTA,
+			cacheScope: "private",
+		});
 
 	if (method === "tools/list") {
 		const ui = await uriApp(env);
 		return rpcResult(id, {
+			resultType: "complete",
+			...CACHE_LISTA,
 			tools: Object.entries(TOOLS).map(([name, t]) => ({
 				name,
 				title: t.title,
@@ -1754,7 +1776,7 @@ async function handleRpc(message, env, userId) {
 
 	if (method === "resources/list") {
 		const ui = await uriApp(env);
-		return rpcResult(id, { resources: RECURSOS_UI.map((r) => ({ ...r, uri: ui })) });
+		return rpcResult(id, { resultType: "complete", ...CACHE_LISTA, resources: RECURSOS_UI.map((r) => ({ ...r, uri: ui })) });
 	}
 
 	if (method === "resources/read") {
@@ -1762,7 +1784,13 @@ async function handleRpc(message, env, userId) {
 		const uri = String(params?.uri || "");
 		const recurso = RECURSOS_UI.find((r) => uri === r.uri || uri.startsWith(`${r.uri}?v=`));
 		if (!recurso) return rpcError(id, -32602, `Recurso desconocido: ${params?.uri}`);
-		return rpcResult(id, { contents: [{ uri, mimeType: recurso.mimeType, text: await htmlDeLaApp(env), _meta: recurso._meta }] });
+		// ttlMs 0: la pantalla se pide fresca cada vez, para ver lo recien desplegado.
+		return rpcResult(id, {
+			resultType: "complete",
+			ttlMs: 0,
+			cacheScope: "public",
+			contents: [{ uri, mimeType: recurso.mimeType, text: await htmlDeLaApp(env), _meta: recurso._meta }],
+		});
 	}
 
 	if (method === "tools/call") {
