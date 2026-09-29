@@ -1715,7 +1715,12 @@ const rpc = async (env, token, message) => {
 	const c = leido.body.result.contents[0];
 	check("leer el recurso da el HTML de la app", c.mimeType === "text/html;profile=mcp-app" && c.text.includes("myCoach") && pedidas[0] === "/mcp-app");
 	await rpc(env, tok, { jsonrpc: "2.0", id: 5, method: "resources/read", params: { uri: "ui://mycoach/app" } });
-	check("el HTML se guarda unos minutos: no se pide cada vez", pedidas.length === 1);
+	check("cada apertura trae la version recien desplegada", pedidas.length === 2);
+	const bien = env.MYCOACH.fetch;
+	env.MYCOACH = { fetch: async () => new Response("caida", { status: 503 }) };
+	const caida = await rpc(env, tok, { jsonrpc: "2.0", id: 6, method: "resources/read", params: { uri: "ui://mycoach/app" } });
+	check("si la web no responde, se sirve la ultima copia buena", caida.body.result.contents[0].text.includes("<body>myCoach"));
+	env.MYCOACH = { fetch: bien };
 	check("un recurso que no existe da error", Boolean((await rpc(env, tok, { jsonrpc: "2.0", id: 6, method: "resources/read", params: { uri: "ui://otra" } })).body.error));
 	const r = JSON.parse((await rpc(env, tok, { jsonrpc: "2.0", id: 7, method: "tools/call", params: { name: "mycoach_abrir", arguments: { pantalla: "plan" } } })).body.result.content[0].text);
 	check("mycoach_abrir devuelve la pantalla pedida", r.abierta === true && r.pantalla === "plan");

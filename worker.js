@@ -4218,21 +4218,23 @@ const RECURSOS_UI = [{
 	},
 }];
 
-let cacheApp = { html: null, hasta: 0 };
+// La ultima copia buena, solo por si la web no responde.
+let cacheApp = { html: null };
 
 async function htmlDeLaApp(env) {
-	if (cacheApp.html && cacheApp.hasta > Date.now()) return cacheApp.html;
+	// Siempre la version recien desplegada: por el service binding cuesta nada.
 	const url = `${env.MYCOACH_URL || "https://mycoach.albertbecervas.workers.dev"}/mcp-app`;
 	try {
 		const r = await (env.MYCOACH ? env.MYCOACH.fetch(new Request(url)) : fetch(url));
 		const html = r.ok ? await r.text() : null;
 		if (html && html.includes("<html")) {
-			cacheApp = { html, hasta: Date.now() + 10 * 60 * 1000 };
+			cacheApp = { html };
 			return html;
 		}
 	} catch {
-		// Sin la web, una pagina que lo diga en vez de un error mudo.
+		// Sin la web, la ultima copia buena o una pagina que lo diga.
 	}
+	if (cacheApp.html) return cacheApp.html;
 	return `<!doctype html><html lang="es"><meta charset="utf-8"><body style="font:16px system-ui;padding:24px">
 <h1 style="font-size:20px">No he podido abrir myCoach</h1><p>La app no responde ahora mismo. Prueba en un momento o abre
 <b>mycoach.albertbecervas.workers.dev</b> en el navegador.</p></body></html>`;
