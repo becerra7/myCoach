@@ -780,6 +780,199 @@ function analizarActividad(details) {
 	};
 }
 
+// ──────────── Todas las metricas de una actividad, por deporte ────────────
+//
+// Garmin manda dos cosas: un resumen (summaryDTO) y las series segundo a
+// segundo (details). Antes solo se usaban pulso y altitud; ahora se ensenan
+// todas las que traiga, con nombre y unidad, y un perfil resumido de las
+// principales para que Claude "vea" el grafico (stamina incluida) sin pedir
+// capturas. Lo que no se reconoce tambien sale, con su clave de Garmin.
+
+const kmh = (ms) => (typeof ms === "number" ? round(ms * 3.6, 1) : null);
+const ritmoKm = (ms) => {
+	if (typeof ms !== "number" || ms <= 0.3) return null;
+	const s = Math.round(1000 / ms);
+	return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")} /km`;
+};
+const esCarrera = (tipo) => /run/.test(String(tipo || ""));
+const esSkimo = (tipo) => /backcountry|ski_touring|skimo/.test(String(tipo || ""));
+
+// Series de details: [nombre, unidad, conversion]. Las claves son las de Garmin.
+const SERIES_GARMIN = {
+	directSpeed: ["Velocidad", "km/h", (v) => v * 3.6],
+	directGradeAdjustedSpeed: ["Velocidad ajustada a la pendiente", "km/h", (v) => v * 3.6],
+	directHeartRate: ["Pulso", "ppm"],
+	directPower: ["Potencia", "W"],
+	directBikeCadence: ["Cadencia", "rpm"],
+	directRunCadence: ["Cadencia", "pasos/min"],
+	directDoubleCadence: ["Cadencia", "pasos/min"],
+	directFractionalCadence: ["Cadencia (fracción)", ""],
+	directElevation: ["Altitud", "m"],
+	directCorrectedElevation: ["Altitud corregida", "m"],
+	directVerticalSpeed: ["Velocidad vertical", "m/h", (v) => v * 3600],
+	directGrade: ["Pendiente", "%"],
+	directAirTemperature: ["Temperatura", "°C"],
+	directStrideLength: ["Longitud de zancada", "cm"],
+	directGroundContactTime: ["Contacto con el suelo", "ms"],
+	directGroundContactBalanceLeft: ["Balance de contacto (izq.)", "%"],
+	directVerticalOscillation: ["Oscilación vertical", "cm"],
+	directVerticalRatio: ["Ratio vertical", "%"],
+	directPerformanceCondition: ["Condición de rendimiento", ""],
+	directRespirationRate: ["Respiración", "rpm"],
+	directAvailableStamina: ["Stamina disponible", "%"],
+	directPotentialStamina: ["Stamina potencial", "%"],
+	directLeftBalance: ["Balance de potencia (izq.)", "%"],
+	directBodyBattery: ["Body Battery", ""],
+};
+// Lo que no es una medida: posicion, tiempo y acumulados.
+const SERIES_IGNORADAS = /^(directTimestamp|directLatitude|directLongitude|sum|directUncorrected)/;
+const SERIES_PERFIL = [
+	"directSpeed", "directGradeAdjustedSpeed", "directHeartRate", "directPower", "directBikeCadence", "directRunCadence",
+	"directDoubleCadence", "directElevation", "directVerticalSpeed", "directAvailableStamina", "directPotentialStamina",
+];
+
+function nombreSerie(clave) {
+	if (SERIES_GARMIN[clave]) return SERIES_GARMIN[clave];
+	// Garmin a veces cambia el nombre exacto: la stamina se reconoce igual.
+	if (/stamina/i.test(clave)) return [/potential/i.test(clave) ? "Stamina potencial" : "Stamina disponible", "%"];
+	return [clave, ""];
+}
+
+/**
+ * Resumen de cada serie (min, media, max, inicio y final) y un perfil de
+ * `n` puntos por distancia (o por tiempo si no hay distancia) con las
+ * principales. Es lo que responde a "enseñame la grafica de...".
+ */
+function seriesCompletas(details, n = 24) {
+	const desc = details?.metricDescriptors || [];
+	const filas = (details?.activityDetailMetrics || []).map((m) => m.metrics || []);
+	if (!filas.length) return { series: [], perfil: null };
+	const iDist = desc.find((x) => x.key === "sumDistance")?.metricsIndex ?? -1;
+	const iDur = desc.find((x) => ["sumMovingDuration", "sumDuration", "sumElapsedDuration"].includes(x.key))?.metricsIndex ?? -1;
+
+	const series = [];
+	for (const { key, metricsIndex } of desc) {
+		if (SERIES_IGNORADAS.test(key)) continue;
+		const [nombre, unidad, conv = (v) => v] = nombreSerie(key);
+		const vals = filas.map((f) => f[metricsIndex]).filter((v) => typeof v === "number" && Number.isFinite(v)).map(conv);
+		// Un pulso de 0 o una cadencia de 0 parado no son medidas: fuera de la media.
+		const utiles = /HeartRate|Cadence|Power|Speed/.test(key) ? vals.filter((v) => v > 0) : vals;
+		if (!utiles.length) continue;
+		series.push({
+			clave: key, nombre, unidad,
+			min: round(Math.min(...utiles), 1), media: round(utiles.reduce((a, b) => a + b, 0) / utiles.length, 1),
+			max: round(Math.max(...utiles), 1), inicio: round(utiles[0], 1), final: round(utiles.at(-1), 1),
+		});
+	}
+
+	// Perfil: n tramos iguales, media de cada serie principal en cada tramo.
+	const eje = iDist >= 0 ? iDist : iDur;
+	const presentes = SERIES_PERFIL.map((k) => desc.find((x) => x.key === k)).filter(Boolean)
+		.concat(desc.filter((x) => /stamina/i.test(x.key) && !SERIES_PERFIL.includes(x.key)));
+	let perfil = null;
+	if (eje >= 0 && presentes.length) {
+		const conEje = filas.filter((f) => typeof f[eje] === "number");
+		const total = Math.max(...conEje.map((f) => f[eje]), 0);
+		if (total > 0) {
+			const tramos = Array.from({ length: n }, () => ({}));
+			for (const f of conEje) {
+				const i = Math.min(n - 1, Math.floor((f[eje] / total) * n));
+				for (const { key, metricsIndex } of presentes) {
+					const v = f[metricsIndex];
+					if (typeof v !== "number" || !Number.isFinite(v) || (/HeartRate|Cadence|Power/.test(key) && v <= 0)) continue;
+					(tramos[i][key] ||= []).push(v);
+				}
+			}
+			perfil = {
+				eje: iDist >= 0 ? "km" : "min",
+				columnas: presentes.map((x) => `${nombreSerie(x.key)[0]}${nombreSerie(x.key)[1] ? ` (${nombreSerie(x.key)[1]})` : ""}`),
+				puntos: tramos.map((t, i) => [
+					iDist >= 0 ? round(((i + 1) * total) / n / 1000, 2) : round(((i + 1) * total) / n / 60, 1),
+					...presentes.map(({ key }) => {
+						const xs = t[key];
+						if (!xs?.length) return null;
+						const [, , conv = (v) => v] = nombreSerie(key);
+						return round(conv(xs.reduce((a, b) => a + b, 0) / xs.length), 1);
+					}),
+				]),
+			};
+		}
+	}
+	return { series, perfil };
+}
+
+// Resumen de Garmin: [campo, nombre, conversion]. Todo lo demas numerico va a "otros".
+const RESUMEN_GARMIN = [
+	["duration", "duracion_min", (v) => round(v / 60, 1)],
+	["movingDuration", "en_movimiento_min", (v) => round(v / 60, 1)],
+	["elapsedDuration", "total_min", (v) => round(v / 60, 1)],
+	["distance", "distancia_km", (v) => round(v / 1000, 2)],
+	["averageSpeed", "velocidad_media_kmh", kmh],
+	["averageMovingSpeed", "velocidad_en_movimiento_kmh", kmh],
+	["maxSpeed", "velocidad_max_kmh", kmh],
+	["avgGradeAdjustedSpeed", "velocidad_ajustada_pendiente_kmh", kmh],
+	["elevationGain", "desnivel_positivo_m", (v) => Math.round(v)],
+	["elevationLoss", "desnivel_negativo_m", (v) => Math.round(v)],
+	["minElevation", "altitud_min_m", (v) => Math.round(v)],
+	["maxElevation", "altitud_max_m", (v) => Math.round(v)],
+	["maxVerticalSpeed", "velocidad_vertical_max_mh", (v) => Math.round(v * 3600)],
+	["averageHR", "fc_media", (v) => Math.round(v)],
+	["maxHR", "fc_max", (v) => Math.round(v)],
+	["minHR", "fc_min", (v) => Math.round(v)],
+	["averagePower", "potencia_media_w", (v) => Math.round(v)],
+	["maxPower", "potencia_max_w", (v) => Math.round(v)],
+	["normalizedPower", "potencia_normalizada_w", (v) => Math.round(v)],
+	["intensityFactor", "factor_intensidad", (v) => round(v, 2)],
+	["trainingStressScore", "tss", (v) => Math.round(v)],
+	["functionalThresholdPower", "ftp_w", (v) => Math.round(v)],
+	["averageBikeCadence", "cadencia_media_rpm", (v) => Math.round(v)],
+	["maxBikeCadence", "cadencia_max_rpm", (v) => Math.round(v)],
+	["averageRunCadence", "cadencia_media_pasos", (v) => Math.round(v)],
+	["maxRunCadence", "cadencia_max_pasos", (v) => Math.round(v)],
+	["strideLength", "zancada_cm", (v) => round(v, 1)],
+	["groundContactTime", "contacto_suelo_ms", (v) => Math.round(v)],
+	["verticalOscillation", "oscilacion_vertical_cm", (v) => round(v, 1)],
+	["verticalRatio", "ratio_vertical_pct", (v) => round(v, 1)],
+	["averageTemperature", "temperatura_media_c", (v) => round(v, 1)],
+	["minTemperature", "temperatura_min_c", (v) => round(v, 1)],
+	["maxTemperature", "temperatura_max_c", (v) => round(v, 1)],
+	["calories", "calorias", (v) => Math.round(v)],
+	["trainingEffect", "efecto_aerobico", (v) => round(v, 1)],
+	["anaerobicTrainingEffect", "efecto_anaerobico", (v) => round(v, 1)],
+	["activityTrainingLoad", "carga_garmin", (v) => Math.round(v)],
+	["beginPotentialStamina", "stamina_potencial_inicio_pct", (v) => Math.round(v)],
+	["endPotentialStamina", "stamina_potencial_final_pct", (v) => Math.round(v)],
+	["minAvailableStamina", "stamina_disponible_min_pct", (v) => Math.round(v)],
+	["avgRespirationRate", "respiracion_media", (v) => round(v, 1)],
+	["maxRespirationRate", "respiracion_max", (v) => round(v, 1)],
+];
+
+function metricasGarmin(s = {}, tipo) {
+	const m = {};
+	const usados = new Set();
+	for (const [campo, nombre, conv] of RESUMEN_GARMIN) {
+		if (typeof s[campo] === "number" && Number.isFinite(s[campo])) { m[nombre] = conv(s[campo]); usados.add(campo); }
+	}
+	// Lo propio de cada deporte, calculado cuando Garmin no lo da hecho.
+	if (esCarrera(tipo)) {
+		m.ritmo_medio = ritmoKm(s.averageMovingSpeed ?? s.averageSpeed);
+		if (s.avgGradeAdjustedSpeed) m.ritmo_ajustado_pendiente = ritmoKm(s.avgGradeAdjustedSpeed);
+		if (s.maxSpeed) m.ritmo_max = ritmoKm(s.maxSpeed);
+	}
+	const mov = s.movingDuration || s.duration;
+	if ((esSkimo(tipo) || DEPORTES_BICI.has(tipo) || /hik|mountain/.test(tipo || "")) && s.elevationGain > 50 && mov > 0)
+		m.vam_media_mh = Math.round(s.elevationGain / (mov / 3600)); // metros de subida por hora de actividad
+	if (s.averageHR && (s.averageMovingSpeed ?? s.averageSpeed))
+		m.metros_por_latido = round((s.averageMovingSpeed ?? s.averageSpeed) * 60 / s.averageHR, 2);
+	if (s.averagePower && s.averageHR) m.vatios_por_latido = round(s.averagePower / s.averageHR, 2);
+
+	const otros = {};
+	for (const [k, v] of Object.entries(s)) {
+		if (!usados.has(k) && typeof v === "number" && Number.isFinite(v) && !/Id$|^start|^end(?!PotentialStamina)|Latitude|Longitude/.test(k)) otros[k] = round(v, 2);
+	}
+	return Object.fromEntries(Object.entries({ ...m, otros_campos_garmin: Object.keys(otros).length ? otros : null }).filter(([, v]) => v != null));
+}
+
 /** Recorta un JSON para poder ver su forma sin llenar la conversación. */
 const muestraCruda = (x, n = 700) => {
 	try { return JSON.stringify(x).slice(0, n); } catch { return null; }
@@ -1036,7 +1229,10 @@ const TOOLS = {
 	garmin_activity_detail: {
 		title: "Detalle de una actividad",
 		description:
-			"Metricas completas de UNA actividad concreta, identificada por su activity_id (obtenido con garmin_activities). Incluye ritmo, elevacion, zonas de frecuencia cardiaca y potencia cuando existan.",
+			"Todas las metricas de UNA actividad (activity_id de garmin_activities): velocidad, ritmo, potencia, cadencia, pulso, " +
+			"desnivel, velocidad vertical, dinamicas de carrera, temperatura, efecto de entrenamiento y stamina de Garmin cuando " +
+			"existan. 'series' resume cada grafica (min, media, max, inicio, final) y 'perfil' da sus valores a lo largo de la " +
+			"actividad (24 tramos): uselo para contestar sobre graficas (stamina, pulso, potencia...) en vez de pedir capturas.",
 		schema: {
 			type: "object",
 			properties: { activity_id: { type: "string", description: "El activity_id devuelto por garmin_activities." } },
@@ -1070,6 +1266,8 @@ const TOOLS = {
 				training_effect: s.trainingEffect ?? null,
 				anaerobic_training_effect: s.anaerobicTrainingEffect ?? null,
 				tipo_sesion_garmin: s.trainingEffectLabel ?? a?.trainingEffectLabel ?? null,
+				metricas: metricasGarmin(s, a?.activityTypeDTO?.typeKey),
+				...(() => { try { return details ? seriesCompletas(details) : { series: [], perfil: null }; } catch (err) { return { series: [], perfil: null, error_series: String(err) }; } })(),
 				zonas_fc: Array.isArray(zonas)
 					? zonas.map((z) => ({ zona: z.zoneNumber, desde_ppm: z.zoneLowBoundary, minutos: round((z.secsInZone ?? 0) / 60, 1) }))
 					: null,
@@ -2913,7 +3111,7 @@ function resumenSemana(lunes, plan, actividades, hist, objetivo, hoy) {
 		const prevista = plan[f] || null;
 		const hecho = actividades
 			.filter((a) => a.start_date === f)
-			.map((a) => ({ deporte: deporteApp(a.type), min: Math.round((a.duration_s || 0) / 60), intensidad: intensidadHecha(a), nombre: a.name }));
+			.map(metricasFila);
 		let estado;
 		if (prevista?.t === "descanso") estado = hecho.length ? "extra" : "descanso";
 		else if (prevista) estado = hecho.length ? "hecho" : f < hoy ? "saltado" : "pendiente";
@@ -3197,6 +3395,136 @@ const COACH_TOOLS = {
 	},
 };
 
+/**
+ * Metricas de una actividad guardada en D1, segun su deporte. Velocidad
+ * siempre; ritmo en carrera; VAM (metros de subida por hora) cuando hay
+ * desnivel; potencia y cadencia cuando el aparato las graba; y la
+ * eficiencia (metros por latido), que es la forma de ver mejora sin
+ * potenciometro: mas distancia con el mismo pulso.
+ */
+function metricasFila(a) {
+	const dep = deporteApp(a.type);
+	const mov = a.moving_duration_s || a.duration_s || 0;
+	const v = a.avg_speed_ms || (a.distance_m && mov ? a.distance_m / mov : null);
+	const m = {
+		deporte: dep,
+		nombre: a.name,
+		min: Math.round((a.duration_s || 0) / 60),
+		km: a.distance_m ? round(a.distance_m / 1000, 1) : null,
+		velocidad_kmh: v ? round(v * 3.6, 1) : null,
+		ritmo: dep === "correr" ? ritmoKm(v) : null,
+		desnivel_m: a.elevation_gain_m ? Math.round(a.elevation_gain_m) : null,
+		vam_mh: a.elevation_gain_m > 100 && mov > 0 ? Math.round(a.elevation_gain_m / (mov / 3600)) : null,
+		fc_media: a.avg_hr ? Math.round(a.avg_hr) : null,
+		fc_max: a.max_hr ? Math.round(a.max_hr) : null,
+		potencia_media_w: a.avg_power ? Math.round(a.avg_power) : null,
+		potencia_normalizada_w: a.norm_power ? Math.round(a.norm_power) : null,
+		cadencia_media: a.avg_cadence ? Math.round(a.avg_cadence) : null,
+		metros_por_latido: v && a.avg_hr ? round((v * 60) / a.avg_hr, 2) : null,
+		intensidad: intensidadHecha(a),
+	};
+	return Object.fromEntries(Object.entries(m).filter(([, x]) => x != null));
+}
+
+const pesoMedio = (filas, valor, peso) => {
+	let s = 0, w = 0;
+	for (const f of filas) {
+		const x = valor(f), p = peso(f);
+		if (typeof x === "number" && x > 0 && p > 0) { s += x * p; w += p; }
+	}
+	return w ? s / w : null;
+};
+
+/** Agregado de un grupo de actividades del mismo deporte. */
+function agregado(filas, dep) {
+	const mov = (a) => a.moving_duration_s || a.duration_s || 0;
+	const dist = filas.reduce((s, a) => s + (a.distance_m || 0), 0);
+	const tMov = filas.filter((a) => a.distance_m).reduce((s, a) => s + mov(a), 0);
+	const v = tMov ? dist / tMov : null;
+	const subidas = filas.filter((a) => (a.elevation_gain_m || 0) > 100);
+	const conPulso = filas.filter((a) => a.avg_hr && a.distance_m);
+	const latidos = conPulso.reduce((s, a) => s + a.avg_hr * (mov(a) / 60), 0);
+	const x = {
+		sesiones: filas.length,
+		horas: round(filas.reduce((s, a) => s + (a.duration_s || 0), 0) / 3600, 1),
+		km: round(dist / 1000, 1),
+		desnivel_m: Math.round(filas.reduce((s, a) => s + (a.elevation_gain_m || 0), 0)),
+		velocidad_kmh: v ? round(v * 3.6, 1) : null,
+		ritmo: dep === "correr" ? ritmoKm(v) : null,
+		vam_mh: subidas.length ? Math.round(subidas.reduce((s, a) => s + a.elevation_gain_m, 0) / (subidas.reduce((s, a) => s + mov(a), 0) / 3600)) : null,
+		fc_media: round(pesoMedio(filas, (a) => a.avg_hr, mov), 0),
+		potencia_media_w: round(pesoMedio(filas, (a) => a.avg_power, mov), 0),
+		cadencia_media: round(pesoMedio(filas, (a) => a.avg_cadence, mov), 0),
+		metros_por_latido: latidos ? round(conPulso.reduce((s, a) => s + a.distance_m, 0) / latidos, 2) : null,
+	};
+	return Object.fromEntries(Object.entries(x).filter(([, y]) => y != null));
+}
+
+const variacion = (ahora, antes) => (typeof ahora === "number" && typeof antes === "number" && antes > 0 ? round(((ahora - antes) / antes) * 100, 1) : null);
+
+function progresoDeporte(actividades, dep, semanas, hoy) {
+	const desde = sumaDias(lunesDe(hoy), -7 * (semanas - 1));
+	const propias = actividades.filter((a) => deporteApp(a.type) === dep && a.start_date >= desde && a.start_date <= hoy);
+	const porSemana = Array.from({ length: semanas }, (_, i) => sumaDias(desde, 7 * i)).map((l) => ({
+		semana: l,
+		...agregado(propias.filter((a) => lunesDe(a.start_date) === l), dep),
+	}));
+	const corte = sumaDias(lunesDe(hoy), -21); // ultimas 4 semanas frente a las 4 anteriores
+	const ult = agregado(propias.filter((a) => a.start_date >= corte), dep);
+	const ant = agregado(propias.filter((a) => a.start_date < corte && a.start_date >= sumaDias(corte, -28)), dep);
+	const mov = (a) => a.moving_duration_s || a.duration_s || 0;
+	const mejor = (filtro, clave, etiqueta) => {
+		const c = propias.filter(filtro).map((a) => ({ a, m: metricasFila(a) })).filter((x) => x.m[clave] != null)
+			.sort((x, y) => (clave === "ritmo" ? 0 : y.m[clave] - x.m[clave]))[0];
+		return c ? { que: etiqueta, fecha: c.a.start_date, valor: c.m[clave], nombre: c.a.name } : null;
+	};
+	return {
+		deporte: dep,
+		semanas: porSemana,
+		ultimas_4_semanas: ult,
+		semanas_anteriores_4: ant,
+		tendencia_pct: {
+			velocidad: variacion(ult.velocidad_kmh, ant.velocidad_kmh),
+			metros_por_latido: variacion(ult.metros_por_latido, ant.metros_por_latido),
+			fc_media: variacion(ult.fc_media, ant.fc_media),
+			potencia: variacion(ult.potencia_media_w, ant.potencia_media_w),
+			vam: variacion(ult.vam_mh, ant.vam_mh),
+			horas: variacion(ult.horas, ant.horas),
+		},
+		mejores: [
+			mejor((a) => mov(a) >= 2700, "velocidad_kmh", "Sesión más rápida (45 min o más)"),
+			mejor(() => true, "desnivel_m", "Más desnivel"),
+			mejor((a) => (a.elevation_gain_m || 0) >= 300, "vam_mh", "Mejor VAM (300 m o más de subida)"),
+			mejor((a) => mov(a) >= 1200, "potencia_normalizada_w", "Más potencia normalizada (20 min o más)"),
+			mejor((a) => mov(a) >= 2700, "metros_por_latido", "Más eficiente (45 min o más)"),
+		].filter(Boolean),
+		nota: "Velocidad y eficiencia dependen del terreno, el viento y el desnivel: lo que cuenta es la tendencia, no una sesión suelta.",
+	};
+}
+
+Object.assign(COACH_TOOLS, {
+	coach_progreso: {
+		title: "Entrenador: progreso por deporte",
+		description:
+			"Evolucion de un deporte (bici, correr o skimo) semana a semana: sesiones, horas, km, desnivel, velocidad media, " +
+			"ritmo (correr), VAM (subida), pulso, potencia, cadencia y eficiencia (metros por latido). Compara las ultimas 4 " +
+			"semanas con las 4 anteriores y da los mejores registros del periodo. Uselo para '¿estoy mejorando?' o '¿como voy en bici?'.",
+		schema: {
+			type: "object",
+			properties: {
+				deporte: { type: "string", enum: ["bici", "correr", "skimo"] },
+				semanas: { type: "integer", minimum: 4, maximum: 52, description: "Cuantas semanas mirar (por defecto 12)." },
+			},
+			required: ["deporte"],
+		},
+		run: async (env, userId, { deporte, semanas = 12 } = {}) => {
+			if (!DEPORTES_ENTRENABLES.has(deporte)) throw new HttpError(400, "deporte: bici, correr o skimo");
+			const hist = await historico(env, userId);
+			return progresoDeporte(hist.actividades, deporte, Math.min(52, Math.max(4, Math.round(semanas))), fechaLocal());
+		},
+	},
+});
+
 Object.assign(TOOLS, COACH_TOOLS);
 
 /** Instrucciones del entrenador: como habla y como decide, sea quien sea el que lo llame. */
@@ -3212,10 +3540,352 @@ const instruccionesCoach = (nombre = NOMBRE_COACH) =>
 	"diga que un dato es estimado cuando lo sea; sin calorias ni culpa con la comida; ante dolor o sintomas raros, baje la " +
 	"carga y recomiende un profesional, nunca diagnostique." +
 	" Planifique solo bici, correr y skimo (y fuerza como complemento); el resto de deportes cuenta como carga pero no se " +
-	"planifica. Si el usuario quiere cambiar el nombre del entrenador, guardelo con coach_perfil_guardar en entrenador.nombre.";
+	"planifica. Si el usuario quiere cambiar el nombre del entrenador, guardelo con coach_perfil_guardar en entrenador.nombre." +
+	" Para '¿estoy mejorando?' use coach_progreso (velocidad, ritmo, VAM, potencia, cadencia, pulso y eficiencia por deporte)." +
+	" DATOS Y GRAFICAS: nunca pida capturas de pantalla. garmin_activity_detail trae todas las metricas y las series de la " +
+	"actividad (stamina incluida si el reloj la graba) con un perfil de 24 tramos; si intervals_estado dice que Intervals.icu " +
+	"esta conectado, intervals_actividades, intervals_actividad (intervalos y series), intervals_bienestar e intervals_curvas " +
+	"(mejores marcas) dan aun mas detalle: eficiencia, desacople, W', zonas de potencia y ritmo, dinamicas de carrera y clima.";
 const limpio_entrenador_invalido = (c) =>
 	c.entrenador !== undefined &&
 	(typeof c.entrenador !== "object" || !String(c.entrenador?.nombre || "").trim() || String(c.entrenador.nombre).trim().length > 24);
+
+// ───────────────────────────── Intervals.icu ─────────────────────────────
+//
+// Segunda fuente de datos, oficial: Intervals.icu es socio de Garmin y
+// recibe cada actividad y el bienestar al sincronizar el reloj. Aporta lo
+// que Garmin no ensena por su API: eficiencia, desacople, W', tiempo en
+// zonas de potencia y ritmo, dinamicas de carrera, clima, curvas de mejores
+// marcas y las series completas de cada actividad.
+//
+// Se conecta con la clave personal del usuario (Intervals.icu → Settings →
+// Developer Settings). La clave se guarda cifrada (AES-GCM con una clave
+// derivada de SIGNING_KEY): quien lea el KV no puede usarla.
+
+const ICU = "https://intervals.icu";
+const icuKey = (userId) => `intervals:${userId}`;
+
+async function claveIcu(env) {
+	const bruto = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${env.SIGNING_KEY}|intervals-icu`));
+	return crypto.subtle.importKey("raw", bruto, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
+}
+
+async function cifrar(env, texto) {
+	const iv = crypto.getRandomValues(new Uint8Array(12));
+	const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await claveIcu(env), new TextEncoder().encode(texto)));
+	const todo = new Uint8Array(iv.length + ct.length);
+	todo.set(iv);
+	todo.set(ct, iv.length);
+	return base64url(todo);
+}
+
+async function descifrar(env, blob) {
+	const todo = bytesFromBase64url(blob);
+	const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: todo.slice(0, 12) }, await claveIcu(env), todo.slice(12));
+	return new TextDecoder().decode(pt);
+}
+
+async function credencialesIcu(env, userId) {
+	const guardado = await env.GARMIN.get(icuKey(userId), "json");
+	if (!guardado) throw new HttpError(400, "Intervals.icu no está conectado. Se conecta en myCoach → Ajustes → Intervals.icu.");
+	return { atleta: guardado.athlete_id, clave: await descifrar(env, guardado.key), nombre: guardado.nombre };
+}
+
+async function icuFetch(atleta, clave, ruta, params) {
+	const url = new URL(`${ICU}/api/v1${ruta.replace("{id}", encodeURIComponent(atleta))}`);
+	for (const [k, v] of Object.entries(params || {})) if (v != null) url.searchParams.set(k, String(v));
+	const r = await fetch(url, { headers: { Authorization: `Basic ${btoa(`API_KEY:${clave}`)}`, Accept: "application/json" } });
+	if (r.status === 401 || r.status === 403) throw new HttpError(401, "Intervals.icu no acepta la clave: vuelve a conectarlo en myCoach → Ajustes.");
+	if (r.status === 404) throw new HttpError(404, "Intervals.icu no encuentra eso (¿id correcto?).");
+	if (r.status === 429) throw new HttpError(429, "Intervals.icu pide esperar un poco (demasiadas peticiones).");
+	if (!r.ok) throw new HttpError(502, `Intervals.icu ha respondido ${r.status}.`);
+	return r.json();
+}
+
+async function icuGet(env, userId, ruta, params) {
+	const { atleta, clave } = await credencialesIcu(env, userId);
+	return icuFetch(atleta, clave, ruta, params);
+}
+
+const sinNulos = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v != null && v !== "" && !(Array.isArray(v) && !v.length)));
+const minutos = (s) => (typeof s === "number" ? round(s / 60, 1) : null);
+const esCarreraIcu = (t) => /Run/.test(String(t || ""));
+
+/** Tiempo en zonas: Intervals lo da como segundos por zona (o {id, secs}). */
+function zonasIcu(z) {
+	if (!Array.isArray(z) || !z.length) return null;
+	return z.map((x, i) => (typeof x === "number" ? { zona: `Z${i + 1}`, min: minutos(x) } : { zona: x.id, min: minutos(x.secs) }))
+		.filter((x) => x.min > 0);
+}
+
+// Campos de la actividad de Intervals.icu → nombre en castellano (y conversion).
+const CAMPOS_ICU = [
+	["moving_time", "en_movimiento_min", minutos], ["elapsed_time", "total_min", minutos],
+	["distance", "distancia_km", (v) => round(v / 1000, 2)], ["average_speed", "velocidad_media_kmh", kmh],
+	["max_speed", "velocidad_max_kmh", kmh], ["total_elevation_gain", "desnivel_positivo_m", Math.round],
+	["total_elevation_loss", "desnivel_negativo_m", Math.round], ["average_altitude", "altitud_media_m", Math.round],
+	["max_altitude", "altitud_max_m", Math.round], ["average_heartrate", "fc_media", Math.round], ["max_heartrate", "fc_max", Math.round],
+	["icu_average_watts", "potencia_media_w", Math.round], ["icu_weighted_avg_watts", "potencia_normalizada_w", Math.round],
+	["p_max", "potencia_max_w", Math.round], ["icu_ftp", "ftp_w", Math.round], ["icu_intensity", "intensidad_pct", (v) => round(v, 1)],
+	["icu_variability_index", "indice_variabilidad", (v) => round(v, 2)], ["icu_efficiency_factor", "factor_eficiencia", (v) => round(v, 2)],
+	["icu_power_hr", "vatios_por_latido", (v) => round(v, 2)], ["decoupling", "desacople_pct", (v) => round(v, 1)],
+	["icu_training_load", "carga", Math.round], ["hr_load", "carga_pulso", Math.round], ["power_load", "carga_potencia", Math.round],
+	["pace_load", "carga_ritmo", Math.round], ["trimp", "trimp", Math.round], ["strain_score", "strain", (v) => round(v, 1)],
+	["icu_joules", "trabajo_kj", (v) => Math.round(v / 1000)], ["icu_joules_above_ftp", "trabajo_sobre_ftp_kj", (v) => Math.round(v / 1000)],
+	["icu_max_wbal_depletion", "wprime_max_gastado_j", Math.round], ["icu_w_prime", "wprime_j", Math.round],
+	["icu_pm_ftp", "ftp_estimado_w", Math.round], ["icu_pm_cp", "potencia_critica_estimada_w", Math.round],
+	["average_cadence", "cadencia_media", Math.round], ["average_stride", "zancada_m", (v) => round(v, 2)],
+	["average_step_length", "longitud_paso_m", (v) => round(v, 2)], ["average_stance_time", "contacto_suelo_ms", Math.round],
+	["average_vertical_oscillation", "oscilacion_vertical_cm", (v) => round(v, 1)], ["average_vertical_ratio", "ratio_vertical_pct", (v) => round(v, 1)],
+	["average_leg_spring_stiffness", "rigidez_pierna", (v) => round(v, 1)], ["avg_lr_balance", "balance_izq_pct", (v) => round(v, 1)],
+	["polarization_index", "indice_polarizacion", (v) => round(v, 2)], ["icu_rpe", "rpe", Math.round], ["feel", "sensacion", Math.round],
+	["calories", "calorias", Math.round], ["carbs_used", "hidratos_usados_g", Math.round], ["carbs_ingested", "hidratos_tomados_g", Math.round],
+	["average_temp", "temperatura_media_c", (v) => round(v, 1)], ["average_weather_temp", "temperatura_clima_c", (v) => round(v, 1)],
+	["average_feels_like", "sensacion_termica_c", (v) => round(v, 1)], ["average_wind_speed", "viento_medio_kmh", kmh],
+	["headwind_percent", "viento_en_contra_pct", Math.round], ["icu_ctl", "forma_ctl_ese_dia", (v) => round(v, 1)],
+	["icu_atl", "fatiga_atl_ese_dia", (v) => round(v, 1)], ["icu_hrr", "recuperacion_fc", (v) => (typeof v === "object" ? v : round(v, 1))],
+];
+
+function resumirActividadIcu(a) {
+	const m = { id: a.id, fecha: a.start_date_local, tipo: a.type, nombre: a.name, dispositivo: a.device_name };
+	for (const [campo, nombre, conv] of CAMPOS_ICU) {
+		const v = a[campo];
+		if (v != null && (typeof v === "number" ? Number.isFinite(v) : true)) m[nombre] = conv(v);
+	}
+	const v = a.average_speed;
+	if (esCarreraIcu(a.type)) {
+		m.ritmo_medio = ritmoKm(v);
+		if (a.gap) m.ritmo_ajustado_pendiente = ritmoKm(a.gap);
+	}
+	if (a.total_elevation_gain > 100 && a.moving_time > 0) m.vam_mh = Math.round(a.total_elevation_gain / (a.moving_time / 3600));
+	if (v && a.average_heartrate) m.metros_por_latido = round((v * 60) / a.average_heartrate, 2);
+	m.zonas_fc_min = zonasIcu(a.icu_hr_zone_times);
+	m.zonas_potencia_min = zonasIcu(a.icu_zone_times);
+	m.zonas_ritmo_min = zonasIcu(a.pace_zone_times);
+	m.series_disponibles = a.stream_types;
+	for (const k of ["trainer", "race", "commute"]) if (a[k]) m[k === "trainer" ? "rodillo" : k === "race" ? "competicion" : "desplazamiento"] = true;
+	return sinNulos(m);
+}
+
+function resumirIntervaloIcu(x) {
+	return sinNulos({
+		etiqueta: x.label, tipo: x.type, min: minutos(x.moving_time ?? x.elapsed_time), km: x.distance ? round(x.distance / 1000, 2) : null,
+		potencia_w: x.average_watts ? Math.round(x.average_watts) : null, potencia_normalizada_w: x.weighted_average_watts ? Math.round(x.weighted_average_watts) : null,
+		intensidad_pct: x.intensity ? Math.round(x.intensity) : null, fc_media: x.average_heartrate ? Math.round(x.average_heartrate) : null,
+		fc_max: x.max_heartrate ? Math.round(x.max_heartrate) : null, velocidad_kmh: kmh(x.average_speed), ritmo: x.average_speed ? ritmoKm(x.average_speed) : null,
+		cadencia: x.average_cadence ? Math.round(x.average_cadence) : null, desnivel_m: x.total_elevation_gain ? Math.round(x.total_elevation_gain) : null,
+		pendiente_pct: x.average_gradient != null ? round(x.average_gradient * (Math.abs(x.average_gradient) < 1 ? 100 : 1), 1) : null,
+		desacople_pct: x.decoupling != null ? round(x.decoupling, 1) : null, zona: x.zone, wbal_final_j: x.wbal_end != null ? Math.round(x.wbal_end) : null,
+	});
+}
+
+// Nombres de las series de Intervals.icu.
+const SERIES_ICU = {
+	watts: ["Potencia", "W"], heartrate: ["Pulso", "ppm"], cadence: ["Cadencia", ""], velocity_smooth: ["Velocidad", "km/h", (v) => v * 3.6],
+	altitude: ["Altitud", "m"], grade_smooth: ["Pendiente", "%"], temp: ["Temperatura", "°C"], w_bal: ["W' restante", "J"],
+	respiration: ["Respiración", "rpm"], vertical_oscillation: ["Oscilación vertical", "cm"], stance_time: ["Contacto con el suelo", "ms"],
+	fixed_heartrate: ["Pulso (corregido)", "ppm"], smo2: ["SmO2", "%"], core_temperature: ["Temperatura corporal", "°C"],
+};
+const SERIES_ICU_IGNORADAS = new Set(["time", "distance", "latlng", "moving", "fixed_watts", "raw_watts", "torque"]);
+
+function resumirSeriesIcu(streams, n = 24) {
+	const lista = Array.isArray(streams) ? streams : [];
+	const eje = lista.find((s) => s.type === "distance") || lista.find((s) => s.type === "time");
+	const series = [];
+	const cols = [];
+	for (const st of lista) {
+		if (SERIES_ICU_IGNORADAS.has(st.type) || !Array.isArray(st.data)) continue;
+		const [nombre, unidad, conv = (v) => v] = SERIES_ICU[st.type] || [st.name || st.type, ""];
+		const vals = st.data.filter((v) => typeof v === "number" && Number.isFinite(v)).map(conv);
+		const utiles = /watts|heartrate|cadence|velocity/.test(st.type) ? vals.filter((v) => v > 0) : vals;
+		if (!utiles.length) continue;
+		series.push({ tipo: st.type, nombre, unidad, min: round(Math.min(...utiles), 1), media: round(utiles.reduce((a, b) => a + b, 0) / utiles.length, 1), max: round(Math.max(...utiles), 1), inicio: round(utiles[0], 1), final: round(utiles.at(-1), 1) });
+		if (eje && st.data.length === eje.data.length) cols.push({ st, nombre, unidad, conv });
+	}
+	let perfil = null;
+	if (eje && cols.length) {
+		const total = Math.max(...eje.data.filter((v) => typeof v === "number"), 0);
+		if (total > 0) {
+			const tramos = Array.from({ length: n }, () => cols.map(() => []));
+			eje.data.forEach((x, i) => {
+				if (typeof x !== "number") return;
+				const t = Math.min(n - 1, Math.floor((x / total) * n));
+				cols.forEach((c, j) => { const v = c.st.data[i]; if (typeof v === "number" && Number.isFinite(v) && !(/watts|heartrate|cadence/.test(c.st.type) && v <= 0)) tramos[t][j].push(v); });
+			});
+			perfil = {
+				eje: eje.type === "distance" ? "km" : "min",
+				columnas: cols.map((c) => `${c.nombre}${c.unidad ? ` (${c.unidad})` : ""}`),
+				puntos: tramos.map((t, i) => [
+					eje.type === "distance" ? round(((i + 1) * total) / n / 1000, 2) : round(((i + 1) * total) / n / 60, 1),
+					...t.map((xs, j) => (xs.length ? round(cols[j].conv(xs.reduce((a, b) => a + b, 0) / xs.length), 1) : null)),
+				]),
+			};
+		}
+	}
+	return { series, perfil };
+}
+
+const TIPO_ICU = { bici: "Ride", correr: "Run", skimo: "BackcountrySki" };
+const DURACIONES = [[5, "5 s"], [15, "15 s"], [30, "30 s"], [60, "1 min"], [300, "5 min"], [600, "10 min"], [1200, "20 min"], [3600, "60 min"]];
+const DISTANCIAS = [[400, "400 m"], [1000, "1 km"], [5000, "5 km"], [10000, "10 km"], [21097, "media maratón"], [42195, "maratón"]];
+
+function resumirCurva(c, tipo) {
+	const valor = (xs, ys, objetivo) => {
+		const i = (xs || []).findIndex((x) => x >= objetivo);
+		return i >= 0 && ys?.[i] != null ? ys[i] : null;
+	};
+	const puntos = tipo === "ritmo"
+		? DISTANCIAS.map(([d, etq]) => {
+			const seg = valor(c.distance, c.values, d);
+			return seg ? { distancia: etq, tiempo: `${Math.floor(seg / 60)}:${String(Math.round(seg % 60)).padStart(2, "0")}`, ritmo: ritmoKm(d / seg) } : null;
+		})
+		: DURACIONES.map(([s, etq]) => {
+			const v = valor(c.secs, c.values, s);
+			return v ? { duracion: etq, [tipo === "pulso" ? "ppm" : "vatios"]: Math.round(v) } : null;
+		});
+	return { periodo: c.label || c.id, desde: c.start_date_local, hasta: c.end_date_local, mejores: puntos.filter(Boolean) };
+}
+
+function resumirBienestarIcu(w) {
+	return sinNulos({
+		fecha: w.id, forma_ctl: w.ctl != null ? round(w.ctl, 1) : null, fatiga_atl: w.atl != null ? round(w.atl, 1) : null,
+		rampa: w.rampRate != null ? round(w.rampRate, 1) : null, fc_reposo: w.restingHR, vfc: w.hrv, vfc_sdnn: w.hrvSDNN,
+		sueno_h: w.sleepSecs ? round(w.sleepSecs / 3600, 2) : null, sueno_puntuacion: w.sleepScore, sueno_calidad: w.sleepQuality,
+		fc_media_sueno: w.avgSleepingHR, readiness: w.readiness, peso_kg: w.weight, grasa_pct: w.bodyFat, vo2max: w.vo2max,
+		spo2: w.spO2, respiracion: w.respiration, pasos: w.steps, estres: w.stress, fatiga: w.fatigue, agujetas: w.soreness,
+		animo: w.mood, motivacion: w.motivation, lesion: w.injury, comentarios: w.comments,
+	});
+}
+
+const fechaIso = (v, porDefecto) => (/^\d{4}-\d{2}-\d{2}$/.test(v || "") ? v : porDefecto);
+
+const INTERVALS_TOOLS = {
+	intervals_estado: {
+		title: "Intervals.icu: estado",
+		description: "Dice si el usuario tiene Intervals.icu conectado a myCoach y con que atleta.",
+		schema: { type: "object", properties: {} },
+		run: async (env, userId) => {
+			const g = await env.GARMIN.get(icuKey(userId), "json");
+			return g ? { conectado: true, atleta: g.athlete_id, nombre: g.nombre ?? null, desde: g.at } : { conectado: false, como: "myCoach → Ajustes → Intervals.icu" };
+		},
+	},
+
+	intervals_conectar: {
+		title: "Intervals.icu: conectar",
+		write: true,
+		description:
+			"Conecta Intervals.icu con el id de atleta y la clave personal (Intervals.icu → Settings → Developer Settings). " +
+			"Lo normal es hacerlo desde myCoach → Ajustes: si el usuario pega la clave en el chat, conectelo pero recuerdele " +
+			"que la clave es como una contrasena.",
+		schema: {
+			type: "object",
+			properties: { athlete_id: { type: "string", description: "p. ej. i123456" }, api_key: { type: "string" } },
+			required: ["athlete_id", "api_key"],
+		},
+		run: async (env, userId, { athlete_id, api_key } = {}) => {
+			const atleta = String(athlete_id || "").trim();
+			const clave = String(api_key || "").trim();
+			if (!/^i?\d{1,12}$/.test(atleta)) throw new HttpError(400, "El id de atleta es como i123456 (en Intervals.icu → Settings).");
+			if (clave.length < 8 || clave.length > 200 || /\s/.test(clave)) throw new HttpError(400, "La clave no tiene buena pinta: cópiala entera de Developer Settings.");
+			const perfil = await icuFetch(atleta, clave, "/athlete/{id}");
+			const nombre = perfil?.name || [perfil?.firstname, perfil?.lastname].filter(Boolean).join(" ") || null;
+			await env.GARMIN.put(icuKey(userId), JSON.stringify({ athlete_id: atleta, key: await cifrar(env, clave), nombre, at: new Date().toISOString() }));
+			return { conectado: true, atleta, nombre };
+		},
+	},
+
+	intervals_desconectar: {
+		title: "Intervals.icu: desconectar",
+		write: true,
+		description: "Borra la clave de Intervals.icu guardada para este usuario.",
+		schema: { type: "object", properties: {} },
+		run: async (env, userId) => {
+			await env.GARMIN.delete(icuKey(userId));
+			return { conectado: false };
+		},
+	},
+
+	intervals_actividades: {
+		title: "Intervals.icu: actividades",
+		description:
+			"Actividades de Intervals.icu con todas sus metricas: velocidad, ritmo y ritmo ajustado a la pendiente, potencia " +
+			"media y normalizada, intensidad, variabilidad, factor de eficiencia, desacople, carga, W' gastado, cadencia, " +
+			"dinamicas de carrera, tiempo en zonas de pulso, potencia y ritmo, RPE, clima y viento. Por defecto, 14 dias.",
+		schema: {
+			type: "object",
+			properties: {
+				desde: { type: "string", description: "YYYY-MM-DD" }, hasta: { type: "string", description: "YYYY-MM-DD" },
+				limite: { type: "integer", minimum: 1, maximum: 100 },
+			},
+		},
+		run: async (env, userId, { desde, hasta, limite = 30 } = {}) => {
+			const hoy = fechaLocal();
+			const lista = await icuGet(env, userId, "/athlete/{id}/activities", {
+				oldest: fechaIso(desde, sumaDias(hoy, -14)), newest: fechaIso(hasta, hoy), limit: Math.min(100, Math.max(1, limite)),
+			});
+			return (lista || []).filter((a) => a && a.id && a.type).map(resumirActividadIcu);
+		},
+	},
+
+	intervals_actividad: {
+		title: "Intervals.icu: una actividad a fondo",
+		description:
+			"Una actividad de Intervals.icu con sus metricas, sus intervalos (cada serie o vuelta con potencia, pulso, " +
+			"velocidad, cadencia y desacople) y todas sus series resumidas (min, media, max) con un perfil de 24 tramos: " +
+			"sirve para contestar sobre graficas sin pedir capturas.",
+		schema: { type: "object", properties: { id: { type: "string", description: "id de Intervals.icu, p. ej. i12345678" } }, required: ["id"] },
+		run: async (env, userId, { id } = {}) => {
+			if (!/^[\w-]{1,40}$/.test(String(id || ""))) throw new HttpError(400, "id no válido");
+			const { atleta, clave } = await credencialesIcu(env, userId);
+			const ruta = `/activity/${encodeURIComponent(id)}`;
+			const [a, intervalos, streams] = await Promise.all([
+				icuFetch(atleta, clave, ruta),
+				icuFetch(atleta, clave, `${ruta}/intervals`).catch(() => null),
+				icuFetch(atleta, clave, `${ruta}/streams.json`).catch(() => null),
+			]);
+			return {
+				...resumirActividadIcu(a),
+				intervalos: (intervalos?.icu_intervals || []).map(resumirIntervaloIcu),
+				...resumirSeriesIcu(streams),
+			};
+		},
+	},
+
+	intervals_bienestar: {
+		title: "Intervals.icu: bienestar",
+		description: "Datos diarios de Intervals.icu: forma y fatiga, rampa, pulso en reposo, VFC, sueno, readiness, peso, VO2max, animo... Por defecto, 14 dias.",
+		schema: { type: "object", properties: { desde: { type: "string" }, hasta: { type: "string" } } },
+		run: async (env, userId, { desde, hasta } = {}) => {
+			const hoy = fechaLocal();
+			const filas = await icuGet(env, userId, "/athlete/{id}/wellness.json", { oldest: fechaIso(desde, sumaDias(hoy, -14)), newest: fechaIso(hasta, hoy) });
+			return (filas || []).map(resumirBienestarIcu);
+		},
+	},
+
+	intervals_curvas: {
+		title: "Intervals.icu: mejores marcas",
+		description:
+			"Mejores marcas del deportista: potencia (bici: 5 s a 60 min), ritmo (correr: 400 m a maraton) o pulso, en las " +
+			"ultimas 6 semanas y en el ultimo ano. Uselo para zonas, objetivos realistas o '¿he mejorado?'.",
+		schema: {
+			type: "object",
+			properties: {
+				deporte: { type: "string", enum: ["bici", "correr", "skimo"] },
+				tipo: { type: "string", enum: ["potencia", "ritmo", "pulso"] },
+			},
+			required: ["deporte", "tipo"],
+		},
+		run: async (env, userId, { deporte, tipo } = {}) => {
+			if (!TIPO_ICU[deporte]) throw new HttpError(400, "deporte: bici, correr o skimo");
+			const ruta = { potencia: "/athlete/{id}/power-curves.json", ritmo: "/athlete/{id}/pace-curves.json", pulso: "/athlete/{id}/hr-curves.json" }[tipo];
+			if (!ruta) throw new HttpError(400, "tipo: potencia, ritmo o pulso");
+			const r = await icuGet(env, userId, ruta, { type: TIPO_ICU[deporte], curves: "42d,1y" });
+			return { deporte, tipo, curvas: (r?.list || []).map((c) => resumirCurva(c, tipo)) };
+		},
+	},
+};
+
+Object.assign(TOOLS, INTERVALS_TOOLS);
 
 // ──────────────────── Panel: sesion y endpoints ────────────────────
 

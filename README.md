@@ -57,10 +57,43 @@ negocia. Así da igual con quién hables: la lógica es la misma.
 | `coach_proponer` | Valida cambios de plan (máximo de intensos, nada de intensos seguidos, semáforo, horas, fuerza, lesiones). Sin `guardar` solo valida; con errores no guarda y ofrece una versión corregida. Deja el porqué en `coach/decisiones`. |
 | `coach_perfil` / `coach_perfil_guardar` | Objetivo con fecha, disponibilidad, lesiones, preferencias y material. |
 | `coach_anotar` | Sensaciones (1-5), dolores y notas. Un dolor en las últimas 36 h pone el día en rojo. |
+| `coach_progreso` | Evolución de bici, correr o skimo semana a semana: velocidad, ritmo, VAM, pulso, potencia, cadencia y eficiencia (metros por latido); últimas 4 semanas frente a las 4 anteriores y mejores registros. |
 
 Las instrucciones del servidor (`initialize`) incluyen la voz y el método,
-así que cualquier Claude con este conector habla como el entrenador. Cada
+así que cualquier Claude con este conector habla como el entrenador. El
+entrenador tiene el nombre que le ponga cada usuario (por defecto myCoach) y
+solo planifica bici, correr y skimo, con la fuerza como complemento. Cada
 mañana el cron deja `coach/hoy` calculado para quien usa myCoach.
+
+## Todas las métricas de una actividad
+
+`garmin_activity_detail` devuelve el resumen de Garmin entero, con nombre y
+unidad: velocidad media y máxima, ritmo y ritmo ajustado a la pendiente,
+potencia media, normalizada, IF y TSS, cadencia, dinámicas de carrera,
+velocidad vertical, temperatura, efecto de entrenamiento y stamina. Lo que
+no reconoce lo devuelve igualmente en `otros_campos_garmin`. Además, `series`
+resume cada gráfica de la actividad (mínimo, media, máximo, inicio y final)
+y `perfil` da las principales en 24 tramos. Así Claude contesta sobre la
+gráfica de stamina o de potencia sin pedir capturas.
+
+## Intervals.icu
+
+Segunda fuente, oficial: Intervals.icu es socio de Garmin y recibe cada
+actividad y el bienestar al sincronizar el reloj. Se conecta con la clave
+personal del usuario (Intervals.icu → Settings → Developer Settings) desde
+Ajustes de myCoach. La clave se guarda **cifrada** (AES-GCM, clave derivada
+de `SIGNING_KEY`) en `intervals:<usuario>`.
+
+| Herramienta | Qué hace |
+|---|---|
+| `intervals_estado` / `intervals_conectar` / `intervals_desconectar` | Conexión. Conectar valida la clave contra Intervals.icu antes de guardarla. |
+| `intervals_actividades` | Actividades con todas sus métricas: eficiencia, desacople, IF, VI, W' gastado, carga, tiempo en zonas de pulso, potencia y ritmo, dinámicas de carrera, RPE, clima y viento. |
+| `intervals_actividad` | Una actividad a fondo: intervalos (cada serie o vuelta) y todas sus series resumidas, con un perfil de 24 tramos. |
+| `intervals_bienestar` | Forma, fatiga, rampa, pulso en reposo, VFC, sueño, readiness, peso, VO2máx, ánimo… |
+| `intervals_curvas` | Mejores marcas: potencia de 5 s a 60 min, ritmo de 400 m a maratón o pulso, en 6 semanas y en un año. |
+
+La stamina de Garmin no llega por Intervals.icu (no la importa): sale de
+`garmin_activity_detail` si el reloj la graba.
 
 ## Worker de pruebas
 

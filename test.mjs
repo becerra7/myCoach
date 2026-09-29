@@ -451,7 +451,7 @@ const rpc = async (env, token, message) => {
 	check("initialize con token valido", init.body.result?.serverInfo?.name === "garmin");
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("tools/list devuelve 21 herramientas", list.body.result.tools.length === 21);
+	check("tools/list devuelve 29 herramientas", list.body.result.tools.length === 29);
 	check("app_guardar se anuncia como escritura", anot0(list).app_guardar.readOnlyHint === false);
 	{
 		const call = (name, args) => rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name, arguments: args } });
@@ -467,6 +467,63 @@ const rpc = async (env, token, message) => {
 	const anot = Object.fromEntries(list.body.result.tools.map((t) => [t.name, t.annotations]));
 	check("las lecturas se anuncian como tales", anot.garmin_courses.readOnlyHint === true);
 	check("la subida no se anuncia como lectura", anot.garmin_save_course.readOnlyHint === false);
+}
+
+// ── 8b quater. Todas las metricas: carrera con stamina, cadencia y dinamicas ──
+{
+	mockGarmin({ "ana@x.com": { password: "a", data: { displayName: "ana", hrv: 50 } } });
+	const env = makeEnv();
+	const { tokens } = await connect(env, "ana@x.com", "a");
+	const call = async (name, args) => JSON.parse((await rpc(env, tokens.access_token, {
+		jsonrpc: "2.0", id: 12, method: "tools/call", params: { name, arguments: args } })).body.result.content[0].text);
+
+	// 10 km a 12 km/h (3,33 m/s), una muestra cada 100 m. La stamina baja de 100 a 60.
+	const filas = [];
+	for (let i = 1; i <= 100; i++) {
+		filas.push({ metrics: [i * 100, i * 30, 3.333, 150 + (i > 50 ? 8 : 0), 170, 100 - i * 0.4, 88 - i * 0.2, 1234567, 41.4, 2.1] });
+	}
+	const details = {
+		metricDescriptors: [
+			{ key: "sumDistance", metricsIndex: 0 }, { key: "sumDuration", metricsIndex: 1 }, { key: "directSpeed", metricsIndex: 2 },
+			{ key: "directHeartRate", metricsIndex: 3 }, { key: "directRunCadence", metricsIndex: 4 },
+			{ key: "directAvailableStamina", metricsIndex: 5 }, { key: "directPotentialStamina", metricsIndex: 6 },
+			{ key: "directTimestamp", metricsIndex: 7 }, { key: "directLatitude", metricsIndex: 8 }, { key: "directMisterio", metricsIndex: 9 },
+		],
+		activityDetailMetrics: filas,
+	};
+	const summaryDTO = {
+		distance: 10000, duration: 3000, movingDuration: 3000, averageSpeed: 3.333, averageMovingSpeed: 3.333, maxSpeed: 4.2,
+		averageHR: 154, maxHR: 171, averageRunCadence: 170, strideLength: 118, groundContactTime: 245, verticalOscillation: 8.4,
+		verticalRatio: 7.1, elevationGain: 80, beginPotentialStamina: 100, endPotentialStamina: 70, minAvailableStamina: 60,
+		trainingEffect: 3.4, algoNuevoDeGarmin: 12.345, startLatitude: 41.4,
+	};
+	globalThis.fetch = async (url) => {
+		const u = new URL(url);
+		if (u.pathname.endsWith("/details")) return new Response(JSON.stringify(details));
+		if (u.pathname.endsWith("/hrTimeInZones")) return new Response("[]");
+		if (u.pathname.startsWith("/activity-service/activity/"))
+			return new Response(JSON.stringify({ activityName: "Rodaje", activityTypeDTO: { typeKey: "running" }, summaryDTO }));
+		if (u.pathname === "/userprofile-service/socialProfile") return new Response(JSON.stringify({ displayName: "ana" }));
+		return new Response("{}", { status: 404 });
+	};
+	const r = await call("garmin_activity_detail", { activity_id: "9" });
+	const m = r.metricas;
+	check("velocidad media y maxima en km/h", m.velocidad_media_kmh === 12 && m.velocidad_max_kmh === 15.1, JSON.stringify(m));
+	check("en carrera, ritmo por km", m.ritmo_medio === "5:00 /km" && m.ritmo_max === "3:58 /km", `${m.ritmo_medio} ${m.ritmo_max}`);
+	check("cadencia, zancada, contacto y oscilacion", m.cadencia_media_pasos === 170 && m.zancada_cm === 118 && m.contacto_suelo_ms === 245 && m.oscilacion_vertical_cm === 8.4);
+	check("stamina del resumen", m.stamina_potencial_inicio_pct === 100 && m.stamina_potencial_final_pct === 70 && m.stamina_disponible_min_pct === 60);
+	check("eficiencia: metros por latido", m.metros_por_latido === 1.3, String(m.metros_por_latido));
+	check("lo que no se reconoce no se pierde", m.otros_campos_garmin?.algoNuevoDeGarmin === 12.35 && !("startLatitude" in m.otros_campos_garmin));
+	const serie = Object.fromEntries(r.series.map((x) => [x.clave, x]));
+	check("cada serie con nombre, unidad y min/media/max", serie.directSpeed?.nombre === "Velocidad" && serie.directSpeed.media === 12 && serie.directSpeed.unidad === "km/h");
+	check("la stamina como serie: empieza y acaba", serie.directAvailableStamina?.inicio === 99.6 && serie.directAvailableStamina.final === 60);
+	check("posicion y tiempo no son series", !serie.directLatitude && !serie.directTimestamp && !serie.sumDistance);
+	check("una serie desconocida sale con su clave", serie.directMisterio?.nombre === "directMisterio");
+	check("perfil de 24 tramos por km con la stamina", r.perfil?.eje === "km" && r.perfil.puntos.length === 24 &&
+		r.perfil.columnas.includes("Stamina disponible (%)") && r.perfil.puntos.at(-1)[0] === 10, JSON.stringify(r.perfil?.columnas));
+	const iSt = r.perfil.columnas.indexOf("Stamina disponible (%)") + 1;
+	check("la stamina baja a lo largo del perfil", r.perfil.puntos[0][iSt] > r.perfil.puntos.at(-1)[iSt]);
+	check("el analisis de siempre sigue", r.analisis?.muestras === 100);
 }
 
 // ── 8. AISLAMIENTO: cada usuario ve solo lo suyo ──
@@ -904,7 +961,7 @@ const rpc = async (env, token, message) => {
 	check("el token de acceso vale sin leer del KV", init.body.result?.serverInfo?.name === "garmin");
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("las herramientas se listan igualmente", list.body.result.tools.length === 21);
+	check("las herramientas se listan igualmente", list.body.result.tools.length === 29);
 
 	// Y el dato que si vive en KV avisa en vez de mentir
 	const call = await rpc(env, tokens.access_token, {
@@ -1380,6 +1437,19 @@ const rpc = async (env, token, message) => {
 	const sig = await llamar(ana, "coach_semana", { semana: "siguiente" });
 	check("se puede pedir la semana siguiente", sig.lunes === proxLunes && sig.dias[1].prevista?.t === "int");
 
+	// Metricas por deporte: velocidad siempre, ritmo en carrera, eficiencia
+	const prog = await llamar(ana, "coach_progreso", { deporte: "bici", semanas: 8 });
+	check("progreso: una fila por semana", prog.semanas?.length === 8, JSON.stringify(prog).slice(0, 200));
+	check("progreso: velocidad media en km/h", prog.ultimas_4_semanas.velocidad_kmh === 30.9, JSON.stringify(prog.ultimas_4_semanas));
+	check("progreso: pulso y eficiencia (metros por latido)", prog.ultimas_4_semanas.fc_media === 135 && prog.ultimas_4_semanas.metros_por_latido === 3.81);
+	check("progreso: tendencia y mejores registros", "velocidad" in prog.tendencia_pct && prog.mejores.some((x) => x.que.startsWith("Sesión más rápida")));
+	const run = await llamar(ana, "coach_progreso", { deporte: "correr" });
+	check("progreso en carrera da el ritmo", /^\d:\d\d \/km$/.test(run.ultimas_4_semanas.ritmo || ""), run.ultimas_4_semanas.ritmo);
+	check("progreso solo de deportes que planifica", Boolean((await llamar(ana, "coach_progreso", { deporte: "raqueta" })).error));
+	const semPasada = await llamar(ana, "coach_semana", { semana: "anterior" });
+	const hecha = semPasada.dias.flatMap((d) => d.hecho)[0];
+	check("lo hecho en la semana trae velocidad, pulso y eficiencia", hecha && hecha.velocidad_kmh > 0 && hecha.fc_media === 135 && hecha.metros_por_latido > 0, JSON.stringify(hecha));
+
 	// Perfil
 	check("el perfil empieza vacio", (await llamar(ana, "coach_perfil")).vacio === true);
 	await llamar(ana, "coach_perfil_guardar", { cambios: { objetivo: { evento: "Quebrantahuesos", fecha: "2027-06-19" }, lesiones: [{ zona: "rodilla", estado: "activa" }], hackeo: 1 } });
@@ -1414,6 +1484,92 @@ const rpc = async (env, token, message) => {
 	const conSemaforo = [...env._store.keys()].filter((k) => k.endsWith(":coach/hoy"));
 	check("el cron calcula el semaforo de quien usa myCoach, y solo de ellos", conSemaforo.length === 1, conSemaforo.join(","));
 
+	globalThis.fetch = abajo;
+}
+
+// ── 13. Intervals.icu: clave cifrada, actividades, series, bienestar y curvas ──
+{
+	mockGarmin({ "ana@x.com": { password: "a", data: { displayName: "ana", hrv: 50 } }, "bob@x.com": { password: "b", data: { displayName: "bob", hrv: 60 } } });
+	const abajo = globalThis.fetch;
+	const vistas = [];
+	const CLAVE = "clave-secreta-de-intervals-123";
+	globalThis.fetch = async (url, init) => {
+		const u = new URL(url);
+		if (u.hostname !== "intervals.icu") return abajo(url, init);
+		vistas.push(u.pathname + u.search);
+		if (init?.headers?.Authorization !== `Basic ${btoa(`API_KEY:${CLAVE}`)}`) return new Response("{}", { status: 401 });
+		const json = (o) => new Response(JSON.stringify(o));
+		if (u.pathname === "/api/v1/athlete/i77") return json({ id: "i77", name: "Ana" });
+		if (u.pathname === "/api/v1/athlete/i77/activities") return json([
+			{ id: "i1", start_date_local: "2026-09-27T09:00:00", type: "Ride", name: "Fondo", moving_time: 7200, elapsed_time: 7500, distance: 60000,
+				average_speed: 8.333, max_speed: 16, total_elevation_gain: 900, average_heartrate: 138, max_heartrate: 172, icu_average_watts: 190,
+				icu_weighted_avg_watts: 210, icu_intensity: 76.4, icu_efficiency_factor: 1.52, decoupling: 3.2, icu_training_load: 120,
+				icu_hr_zone_times: [600, 3600, 2400, 600, 0], icu_zone_times: [{ id: "Z1", secs: 1800 }, { id: "Z2", secs: 5400 }],
+				average_cadence: 86, stream_types: ["watts", "heartrate", "cadence"], nada: null },
+			{ id: "i2", start_date_local: "2026-09-26T08:00:00", type: "Run", name: "Series", moving_time: 3000, distance: 10000, average_speed: 3.333,
+				gap: 3.45, average_heartrate: 155, average_cadence: 172, average_stride: 1.16, average_stance_time: 240, average_vertical_oscillation: 8.1 },
+		]);
+		if (u.pathname === "/api/v1/activity/i1") return json({ id: "i1", type: "Ride", name: "Fondo", average_speed: 8.333, average_heartrate: 138 });
+		if (u.pathname === "/api/v1/activity/i1/intervals") return json({ icu_intervals: [
+			{ label: "Umbral 1", type: "WORK", moving_time: 600, distance: 6000, average_watts: 260, average_heartrate: 162, average_speed: 10, average_cadence: 90, decoupling: 1.5 },
+		] });
+		if (u.pathname === "/api/v1/activity/i1/streams.json") return json([
+			{ type: "distance", data: Array.from({ length: 48 }, (_, i) => (i + 1) * 1250) },
+			{ type: "watts", name: "Power", data: Array.from({ length: 48 }, (_, i) => 150 + i) },
+			{ type: "heartrate", data: Array.from({ length: 48 }, () => 140) },
+			{ type: "velocity_smooth", data: Array.from({ length: 48 }, () => 8.333) },
+			{ type: "latlng", data: [[1, 2]] },
+		]);
+		if (u.pathname === "/api/v1/athlete/i77/wellness.json") return json([{ id: "2026-09-28", ctl: 55.12, atl: 60.3, restingHR: 47, hrv: 58, sleepSecs: 27000, readiness: 71, weight: 70.2 }]);
+		if (u.pathname === "/api/v1/athlete/i77/power-curves.json") return json({ list: [{ id: "42d", label: "42 dias", secs: [5, 15, 30, 60, 300, 600, 1200, 3600], values: [900, 700, 500, 400, 300, 280, 260, 230] }] });
+		if (u.pathname === "/api/v1/athlete/i77/pace-curves.json") return json({ list: [{ id: "1y", distance: [400, 1000, 5000, 10000], values: [80, 220, 1200, 2520] }] });
+		return new Response("{}", { status: 404 });
+	};
+
+	const env = makeEnv();
+	const ana = (await connect(env, "ana@x.com", "a")).tokens.access_token;
+	const bob = (await connect(env, "bob@x.com", "b")).tokens.access_token;
+	const llamar = async (token, name, args = {}) => {
+		const r = (await rpc(env, token, { jsonrpc: "2.0", id: 30, method: "tools/call", params: { name, arguments: args } })).body.result;
+		return r.isError ? { error: r.content[0].text } : JSON.parse(r.content[0].text);
+	};
+
+	check("sin conectar, lo dice y explica donde", (await llamar(ana, "intervals_actividades")).error?.includes("Ajustes"));
+	check("una clave mala no se guarda", Boolean((await llamar(ana, "intervals_conectar", { athlete_id: "i77", api_key: "otra-clave-cualquiera" })).error));
+	check("un id raro se rechaza sin llamar", Boolean((await llamar(ana, "intervals_conectar", { athlete_id: "../x", api_key: CLAVE })).error));
+	const con = await llamar(ana, "intervals_conectar", { athlete_id: "i77", api_key: CLAVE });
+	check("con la clave buena conecta", con.conectado === true && con.nombre === "Ana");
+	const guardado = [...env._store.entries()].find(([k]) => k.startsWith("intervals:"))?.[1] || "";
+	check("la clave se guarda cifrada, no en claro", guardado && !guardado.includes(CLAVE) && JSON.parse(guardado).athlete_id === "i77");
+	check("estado conectado", (await llamar(ana, "intervals_estado")).conectado === true);
+
+	const acts = await llamar(ana, "intervals_actividades", { desde: "2026-09-20", hasta: "2026-09-28" });
+	const [fondo, series] = acts;
+	check("actividades con velocidad, potencia, eficiencia y desacople",
+		fondo.velocidad_media_kmh === 30 && fondo.potencia_normalizada_w === 210 && fondo.factor_eficiencia === 1.52 && fondo.desacople_pct === 3.2, JSON.stringify(fondo));
+	check("VAM y metros por latido calculados", fondo.vam_mh === 450 && fondo.metros_por_latido === 3.62);
+	check("tiempo en zonas en minutos", fondo.zonas_fc_min[1].min === 60 && fondo.zonas_potencia_min[1].zona === "Z2");
+	check("sin campos vacios", !("nada" in fondo));
+	check("carrera: ritmo, GAP, zancada, contacto, oscilacion",
+		series.ritmo_medio === "5:00 /km" && series.ritmo_ajustado_pendiente === "4:50 /km" && series.zancada_m === 1.16 && series.contacto_suelo_ms === 240 && series.oscilacion_vertical_cm === 8.1, JSON.stringify(series));
+	check("las fechas llegan a la API", vistas.some((v) => v.includes("oldest=2026-09-20") && v.includes("newest=2026-09-28")));
+
+	const det = await llamar(ana, "intervals_actividad", { id: "i1" });
+	check("detalle con intervalos", det.intervalos?.[0]?.potencia_w === 260 && det.intervalos[0].velocidad_kmh === 36);
+	check("detalle con series resumidas", det.series?.find((x) => x.tipo === "watts")?.max === 197 && !det.series.some((x) => x.tipo === "latlng"));
+	check("detalle con perfil por km", det.perfil?.eje === "km" && det.perfil.puntos.length === 24 && det.perfil.puntos.at(-1)[0] === 60);
+
+	const bien = await llamar(ana, "intervals_bienestar");
+	check("bienestar: forma, VFC, sueno, peso", bien[0].forma_ctl === 55.1 && bien[0].vfc === 58 && bien[0].sueno_h === 7.5 && bien[0].peso_kg === 70.2);
+	const pot = await llamar(ana, "intervals_curvas", { deporte: "bici", tipo: "potencia" });
+	check("curva de potencia en duraciones claras", pot.curvas[0].mejores.find((x) => x.duracion === "20 min")?.vatios === 260);
+	check("pide el tipo de deporte de Intervals", vistas.some((v) => v.startsWith("/api/v1/athlete/i77/power-curves.json") && v.includes("type=Ride")));
+	const rit = await llamar(ana, "intervals_curvas", { deporte: "correr", tipo: "ritmo" });
+	check("curva de ritmo por distancias", rit.curvas[0].mejores.find((x) => x.distancia === "5 km")?.ritmo === "4:00 /km", JSON.stringify(rit.curvas[0]));
+
+	check("otro usuario no ve el Intervals de ana", (await llamar(bob, "intervals_estado")).conectado === false);
+	await llamar(ana, "intervals_desconectar");
+	check("desconectar borra la clave", ![...env._store.keys()].some((k) => k.startsWith("intervals:")));
 	globalThis.fetch = abajo;
 }
 
