@@ -5,14 +5,21 @@
    MCP Apps 2026-01-26) y Claude llama a las herramientas del conector en su nombre.
      mcp    → tools/call a garmin_* y coach_*
      db     → tools/call a app_leer / app_guardar (el mismo estado que la web y tu Claude)
-     sample → no hay: el chat de la app y "Hablarlo con Claude" escriben en la conversación (ui/message)
-     y la pantalla que ves se le cuenta a Claude (ui/update-model-context) */
+     sample → no hay. Aquí se habla en la conversación de Claude, no en la app: el chat de la app y
+     los botones "Hablarlo con Claude" no se enseñan (mandar texto a la conversación lo deja en la
+     caja de Claude con un aviso de seguridad). Lo que sí se hace es contarle a Claude qué pantalla
+     tienes delante (ui/update-model-context), para que la entienda sin explicársela. */
 (() => {
   let n = 0; const pendientes = new Map();
   const aClaude = m => parent.postMessage({ jsonrpc: '2.0', ...m }, '*');
   const pedir = (method, params) => new Promise((ok, ko) => { const id = ++n; pendientes.set(id, { ok, ko }); aClaude({ id, method, params }); });
   const avisar = (method, params) => aClaude({ method, params });
   let contexto = {}, entrada = null;
+
+  // En Claude se habla en la conversación: fuera el botón del chat y los atajos que escribían en ella.
+  const st = document.createElement('style');
+  st.textContent = '#claude-btn,[data-a="claude"],[data-a="claude-ext"],[data-a="coach-claude"],[data-a="meal-claude"]{display:none!important}';
+  document.head.append(st);
 
   // Si ya usas myCoach, la app lo sabe por tu estado en el conector (sin onboarding); aquí solo se quita el marco de móvil.
   try { const s = JSON.parse(localStorage.getItem('trazo-v3') || 'null'); if (!s) localStorage.setItem('trazo-v3', JSON.stringify({ v: 6, framed: false })); } catch (e) { }
@@ -91,10 +98,6 @@
 
   window.PLATFORM = {
     name: 'claude-app',
-    // Lo que en la web copia un encargo, aquí lo escribe en la conversación.
-    // content es una lista de bloques (especificación actual); un objeto suelto lo rechaza Claude por formato.
-    enClaude: texto => pedir('ui/message', { role: 'user', content: [{ type: 'text', text: texto }] })
-      .then(r => { if (r && r.isError) throw new Error('Claude no ha aceptado el mensaje'); return r; }),
     abrirEnlace: url => pedir('ui/open-link', { url }),
     pantallaCompleta: () => pedir('ui/request-display-mode', { mode: 'fullscreen' }).then(r => { contexto.displayMode = r && r.mode; return r; }),
     puedePantallaCompleta: () => (contexto.availableDisplayModes || []).includes('fullscreen') && contexto.displayMode !== 'fullscreen',
