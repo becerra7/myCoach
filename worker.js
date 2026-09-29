@@ -1708,7 +1708,13 @@ const SERVER_INFO = { name: "garmin", title: "Garmin Connect", version: "1.0.0" 
 const DEFAULT_PROTOCOL = "2025-06-18";
 const SUPPORTED_PROTOCOLS = ["2026-07-28", "2025-06-18", "2025-03-26", "2024-11-05"];
 
-const rpcResult = (id, result) => ({ jsonrpc: "2.0", id, result });
+// resultType lo exige la revision 2026-07-28 en todos los resultados; para las
+// anteriores es un campo mas. Sin el, un cliente nuevo rechaza la respuesta.
+const rpcResult = (id, result) => ({ jsonrpc: "2.0", id, result: { resultType: "complete", ...result } });
+// Versiones que se anuncian en server/discover: solo las que el servidor cumple
+// entero. Anunciar 2026-07-28 hizo que Claude validara con sus reglas y
+// rechazara las respuestas; con estas, el cliente sigue con initialize.
+const VERSIONES_DESCUBRIMIENTO = SUPPORTED_PROTOCOLS.filter((v) => v !== "2026-07-28");
 // Cache de MCP (2026-07-28): sin ttlMs, cada cliente decide y Claude guardaba
 // la lista y la pantalla hasta reconectar. Un minuto basta para no repetir
 // peticiones y deja ver un despliegue enseguida.
@@ -1749,7 +1755,7 @@ async function handleRpc(message, env, userId) {
 	if (method === "server/discover")
 		return rpcResult(id, {
 			resultType: "complete",
-			supportedVersions: SUPPORTED_PROTOCOLS,
+			supportedVersions: VERSIONES_DESCUBRIMIENTO,
 			capabilities: capacidades,
 			_meta: { "io.modelcontextprotocol/serverInfo": SERVER_INFO },
 			instructions: await instrucciones(),

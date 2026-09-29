@@ -1718,12 +1718,14 @@ const rpc = async (env, token, message) => {
 	check("cada apertura trae la version recien desplegada", pedidas.length === 2);
 	check("la pantalla puede cargar el codigo de la web (CSP)",
 		c._meta.ui.csp.resourceDomains.includes("https://mycoach.albertbecervas.workers.dev"));
+	const llamada = await rpc(env, tok, { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name: "coach_hoy", arguments: {} } });
+	check("toda respuesta lleva resultType (lo exige MCP 2026-07-28)", llamada.body.result.resultType === "complete");
 	check("la pantalla no se cachea (ttlMs 0)", leido.body.result.ttlMs === 0 && leido.body.result.resultType === "complete");
 	const lista2 = (await rpc(env, tok, { jsonrpc: "2.0", id: 7, method: "tools/list" })).body.result;
 	check("la lista de herramientas se cachea como mucho un minuto", lista2.ttlMs === 60000 && lista2.cacheScope === "public");
 	const desc = (await rpc(env, tok, { jsonrpc: "2.0", id: 8, method: "server/discover", params: { _meta: { "io.modelcontextprotocol/protocolVersion": "2026-07-28" } } })).body.result;
 	check("server/discover responde con versiones, capacidades e instrucciones",
-		desc.supportedVersions.includes("2026-07-28") && Boolean(desc.capabilities.resources) &&
+		desc.supportedVersions.includes("2025-06-18") && !desc.supportedVersions.includes("2026-07-28") && Boolean(desc.capabilities.resources) &&
 		desc.instructions.includes("mycoach_abrir") && desc.cacheScope === "private");
 	const bien = env.MYCOACH.fetch;
 	env.MYCOACH = { fetch: async () => new Response("caida", { status: 503 }) };
