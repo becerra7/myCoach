@@ -4,7 +4,9 @@
    Después: plan frente a lo hecho (lo cuenta el reloj o se lo dices a Claude). Sin marcar series aquí. */
 const FZ = {}; // fecha → undefined (sin pedir) · 'cargando' · null (nada) · { entreno, hecha, cambios_frente_al_plan }
 
-const fuerzaDelDia = f => { const s = sesion(f); return s && s.dep === 'fuerza' && s.entreno ? s : null; };
+// Cualquier día de fuerza: aunque el plan no diga qué entreno es, el conector lo busca por lo que se mandó
+// al reloj o se hizo ese día. Si no hay ninguno, el bloque no sale.
+const fuerzaDelDia = f => { const s = sesion(f); return s && s.dep === 'fuerza' && s.t !== 'descanso' ? s : null; };
 
 async function cargarFuerza(f, fresco) {
   if (!LIVE || S.modo !== 'vivo' || FZ[f] === 'cargando') return;
@@ -31,7 +33,7 @@ function bloqueFuerza(f) {
   if (FZ[f] === undefined) { cargarFuerza(f); return '<p class="small muted" role="status">Cargando el entreno…</p>'; }
   if (FZ[f] === 'cargando') return '<p class="small muted" role="status">Cargando el entreno…</p>';
   const d = FZ[f]; const e = d && d.entreno;
-  if (!e) return `<p class="small">Este día apunta al entreno <b>${esc(s.entreno)}</b>, que ya no existe. Pídele a Claude que lo vuelva a crear.</p>`;
+  if (!e) return s.entreno ? `<p class="small">Este día apunta al entreno <b>${esc(s.entreno)}</b>, que ya no existe. Pídele a Claude que lo vuelva a crear.</p>` : '';
   const cambios = Object.fromEntries((d.cambios_frente_al_plan || []).map(c => [c.ejercicio, c]));
   const filas = e.ejercicios.map(x => {
     const c = d.hecha && cambios[x.nombre]; const est = c && ESTADO_EJ[c.estado];
@@ -55,8 +57,9 @@ function bloqueFuerza(f) {
 /** Hoy: la tarjeta del entreno de fuerza, si toca. */
 function cardFuerzaHoy() {
   const s = fuerzaDelDia(HOY); if (!s) return '';
+  const bloque = bloqueFuerza(HOY); if (!bloque) return '';
   const e = FZ[HOY] && FZ[HOY].entreno;
-  return `<div class="b-full"><section class="card stack" style="gap:12px" aria-labelledby="fz-h"><div class="card-h">${ic('dumbbell', 18)}<h2 class="grow" id="fz-h" style="font:inherit;margin:0">Fuerza · ${esc(e ? e.nombre : s.d)}</h2></div>${bloqueFuerza(HOY)}</section></div>`;
+  return `<div class="b-full"><section class="card stack" style="gap:12px" aria-labelledby="fz-h"><div class="card-h">${ic('dumbbell', 18)}<h2 class="grow" id="fz-h" style="font:inherit;margin:0">Fuerza · ${esc(e ? e.nombre : s.d)}</h2></div>${bloque}</section></div>`;
 }
 
 function hojaHistorialFuerza(nombre) {
