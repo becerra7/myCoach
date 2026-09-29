@@ -148,11 +148,16 @@ setTimeout(() => { if (SAMPLE === undefined) SAMPLE = null; if (DB === undefined
 const CHAT = { turns: [], busy: false, ctl: null, pending: null, draft: '', fallback: !!(window.PLATFORM && PLATFORM.name === 'web') };
 const SUGS = ['¿Cómo voy esta semana?', 'Prepárame la semana que viene', '¿Qué me falta para estar más sano?', '¿Qué como antes del largo?'];
 const claudeReal = () => !!SAMPLE && !CHAT.fallback && S.ai === 'claude';
+// Dentro de Claude (MCP Apps) la conversación está al lado: lo que escribes va allí y Claude contesta con tus datos.
+const enConversacion = () => !!(window.PLATFORM && PLATFORM.enClaude) && S.ai === 'claude';
 function openClaude(pre) {
   if (S.ai === 'off') { openSheet({ title: 'Claude', size: 'auto', id: 'claude-off', body: () => `<p>Tienes la IA desactivada. Todo lo básico funciona con reglas. Si la activas, se usa tu propia cuenta de Claude: la app no paga nada.</p><button class="btn fill" type="button" data-a="ai-on">Activar con mi Claude</button>` }); return; }
-  openSheet({ title: 'Claude', size: 'large', id: 'claude', body: bodyClaude }); if (pre) setTimeout(() => claudeSend(pre), 250);
+  openSheet({ title: enConversacion() ? `Pregúntale a ${S.coachNombre || 'myCoach'}` : 'Claude', size: enConversacion() ? 'auto' : 'large', id: 'claude', body: bodyClaude }); if (pre) setTimeout(() => claudeSend(pre), 250);
 }
 function bodyClaude() {
+  if (enConversacion()) return `<p class="small muted">Te contesta aquí mismo, en la conversación, con tus datos y tu plan. Si propone cambios, te los enseña antes de guardarlos.</p>
+    <div class="sugs">${SUGS.map(s => `<button type="button" class="sug" data-a="chat-sug" data-v="${esc(s)}">${esc(s)}</button>`).join('')}</div>
+    <div class="composer" style="position:sticky;bottom:-20px;margin:0 -20px -20px"><label class="vh" for="chat-in">Mensaje</label><textarea id="chat-in" rows="1" placeholder="Pregunta o pide un cambio" data-a="chat-draft">${esc(CHAT.draft)}</textarea><button class="send" type="button" aria-label="Enviar a la conversación" data-a="chat-send">${ic('send', 20)}</button></div>`;
   const msgs = CHAT.turns.map((t, i) => `<div class="msg ${t.role === 'user' ? 'me' : 'cl'}" ${i === CHAT.turns.length - 1 && t.role === 'assistant' ? 'id="last-cl"' : ''}>${esc(t.content)}</div>`).join('');
   return `<div class="claude-mode ${claudeReal() ? 'real' : ''}"><i></i>${SAMPLE === undefined ? 'Conectando…' : claudeReal() ? 'Tu Claude, con tus datos de la app' : 'Respuestas de ejemplo (aquí no hay Claude)'}</div>
     <div class="chat">${!CHAT.turns.length ? '<div class="msg cl">Veo tu plan, tus deportes, tu forma, tu comida y tus pueblos. Pregúntame o pídeme cambios: nunca toco nada sin tu sí.</div>' : ''}${msgs}${CHAT.busy && CHAT.turns[CHAT.turns.length - 1]?.role === 'user' ? '<div class="msg cl think" id="last-cl">Pensando…</div>' : ''}${CHAT.pending ? propCard() : ''}</div>
@@ -203,6 +208,10 @@ function guion(q) {
 }
 async function claudeSend(text) {
   text = String(text || '').trim(); if (!text || CHAT.busy) return;
+  if (enConversacion()) {
+    PLATFORM.enClaude(text).then(() => { CHAT.draft = ''; closeSheet(); toast('Enviado. Te contesto en la conversación'); }, () => toast('No he podido enviarlo a la conversación. Escríbelo directamente en Claude'));
+    return;
+  }
   CHAT.turns.push({ role: 'user', content: text }); CHAT.draft = ''; CHAT.busy = true; CHAT.pending = null; fillSheet(); scrollChat();
   if (!claudeReal()) { await new Promise(r => setTimeout(r, 600)); const g = guion(text); if (g.cambios) CHAT.pending = validarPropuesta(g.cambios); CHAT.turns.push({ role: 'assistant', content: g.text }); CHAT.busy = false; fillSheet(); scrollChat(); return; }
   const RULES = `Eres el asistente de myCoach, una app que lee el Garmin de ${S.nombre || 'un deportista'}${M.perfil.edad ? ` (${M.perfil.edad} años` + (M.perfil.peso ? `, ${M.perfil.peso} kg` : '') + ')' : ''}, deportes: ${S.sports.join(', ')}. ${M.fuente === 'vivo' ? 'Datos reales de Garmin' : 'Modo demo con datos de ejemplo'}. Responde en español de España, tuteando, frases cortas, máximo 90 palabras, sin markdown. Usa solo los DATOS. Nunca cambies el plan por tu cuenta: si pide cambios o una semana, llama UNA vez a proponer_cambios con todos los días que cambian y explica en 1-2 frases; la app pide confirmación. Topes: intensos por semana según el objetivo, nada intenso hoy con readiness < 40, fuerza 2 veces por semana recomendada. Tipos: rec, fondo, tempo, int, otros, descanso. Deportes: bici, correr, skimo, montana, raqueta, fuerza. Hoy es ${HOY}, ${DS[dte(HOY).getDay()]}.\n\nDATOS:\n${JSON.stringify(estadoParaClaude())}`;

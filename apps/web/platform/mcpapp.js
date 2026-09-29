@@ -5,7 +5,8 @@
    MCP Apps 2026-01-26) y Claude llama a las herramientas del conector en su nombre.
      mcp    → tools/call a garmin_* y coach_*
      db     → tools/call a app_leer / app_guardar (el mismo estado que la web y tu Claude)
-     sample → no hay: "Hablarlo con Claude" escribe directamente en la conversación */
+     sample → no hay: el chat de la app y "Hablarlo con Claude" escriben en la conversación (ui/message)
+     y la pantalla que ves se le cuenta a Claude (ui/update-model-context) */
 (() => {
   let n = 0; const pendientes = new Map();
   const aClaude = m => parent.postMessage({ jsonrpc: '2.0', ...m }, '*');
@@ -60,6 +61,20 @@
       barra.prepend(b);
     }
     return r;
+  });
+
+  // Claude sabe qué pantalla tienes delante: "¿y esto qué significa?" se entiende sin explicarlo.
+  let ultimoContexto = '', espera = 0;
+  const contarPantalla = () => {
+    const scr = document.getElementById('scroller'); if (!scr || typeof S === 'undefined') return;
+    const pantalla = S.stack && S.stack.length ? S.stack[S.stack.length - 1].s : S.tab;
+    const texto = scr.innerText.replace(/\n{2,}/g, '\n').trim().slice(0, 2000);
+    if (!texto || pantalla + texto === ultimoContexto) return; ultimoContexto = pantalla + texto;
+    pedir('ui/update-model-context', { content: [{ type: 'text', text: `El usuario tiene abierta la pantalla "${pantalla}" de myCoach. Lo que ve:\n${texto}` }] }).catch(() => { });
+  };
+  listo.then(() => {
+    new MutationObserver(() => { clearTimeout(espera); espera = setTimeout(contarPantalla, 1200); }).observe(document.body, { subtree: true, childList: true, characterData: true });
+    espera = setTimeout(contarPantalla, 1200);
   });
 
   const herramienta = async (name, args) => {

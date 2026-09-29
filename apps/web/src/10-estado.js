@@ -105,7 +105,8 @@ let saveTimer; function save() { try { localStorage.setItem('trazo-v3', JSON.str
 /* Plan y comidas de ejemplo: solo en modo demo */
 function demoSeed() { S.plan = planInicial(); S.meals = comidasIniciales(); }
 if (!S.os) S.os = /Android/i.test(navigator.userAgent) ? 'android' : 'ios';
-if (S.framed === null) S.framed = matchMedia('(min-width: 900px)').matches;
+// El marco de móvil es cosa del prototipo (?proto): la app usa la pantalla entera.
+if (!/[?&]proto\b/.test(location.search)) S.framed = false; else if (S.framed === null) S.framed = matchMedia('(min-width: 900px)').matches;
 
 /* ===== Cálculos ===== */
 function acts() { return actsAll(); }
