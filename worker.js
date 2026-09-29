@@ -326,17 +326,21 @@ async function refreshGarminTokens(tokens) {
 	};
 }
 
+/** Tu cuenta de myCoach no tiene Garmin: se dice como arreglarlo. */
+const sinGarmin = () =>
+	new HttpError(
+		401,
+		"Garmin no está vinculado a tu cuenta de myCoach. Vincúlalo en la app: Ajustes, Conexiones, Garmin. " +
+			"Si acabas de vincularlo, espera un minuto y vuelve a probar.",
+	);
+
 /** GET contra connectapi con el Bearer del usuario, renovando si hace falta. */
 async function apiGet(env, userId, path, params) {
 	let user = await env.GARMIN.get(userKey(userId), "json");
 	// Si el usuario acaba de conectar, su registro puede tardar hasta un
 	// minuto en propagarse por el KV: conviene decirlo en vez de dar a
 	// entender que la conexion ha fallado.
-	if (!user?.di_token)
-		throw new HttpError(
-			401,
-			"No hay sesion de Garmin para este usuario. Si acabas de conectar el conector, espera un minuto y reintenta.",
-		);
+	if (!user?.di_token) throw sinGarmin();
 
 	const url = `${API}${path}${params ? `?${new URLSearchParams(params)}` : ""}`;
 	const call = (u) =>
@@ -366,11 +370,7 @@ async function apiPost(env, userId, path, payload) {
 	// Si el usuario acaba de conectar, su registro puede tardar hasta un
 	// minuto en propagarse por el KV: conviene decirlo en vez de dar a
 	// entender que la conexion ha fallado.
-	if (!user?.di_token)
-		throw new HttpError(
-			401,
-			"No hay sesion de Garmin para este usuario. Si acabas de conectar el conector, espera un minuto y reintenta.",
-		);
+	if (!user?.di_token) throw sinGarmin();
 
 	const call = (u) =>
 		fetch(`${API}${path}`, {
@@ -1124,7 +1124,7 @@ const TOOLS = {
 		schema: { type: "object", properties: {} },
 		run: async (env, userId) => {
 			const user = await env.GARMIN.get(userKey(userId), "json");
-			if (!user) return { connected: false, reason: "Este usuario todavia no ha conectado su cuenta de Garmin." };
+			if (!user) return { connected: false, reason: sinGarmin().message };
 
 			// Se comprueba contra Garmin de verdad: que exista un token guardado
 			// no significa que siga siendo valido, y eso es justo lo que se
@@ -1977,13 +1977,148 @@ async function issueCodeAndRedirect(env, params, userId) {
 	return new Response(null, { status: 302, headers: { Location: location.toString() } });
 }
 
+// ───────────────────────── Cuentas de myCoach ─────────────────────────
+//
+// Entras en myCoach con tu email y tu contrasena de myCoach; Garmin e
+// Intervals.icu son fuentes que vinculas desde la app. Asi conectar Claude no
+// depende del login de Garmin (que a veces pide captcha a los servidores), y
+// cuando haya acceso oficial a Garmin solo cambia como se vincula.
+// El id sigue siendo el hash del email: quien ya entraba con Garmin conserva
+// sus datos al crear su contrasena.
+
+const cuentaKey = (id) => `cuenta:${id}`;
+const intentosKey = (id) => `intentos:${id}`;
+// El maximo que permite Workers.
+const PBKDF2_ITER = 100000;
+const MAX_INTENTOS = 10;
+const INTENTOS_TTL = 60 * 15;
+const MODOS = new Set(["entrar", "crear", "garmin"]);
+
+async function derivarClave(password, salt, iter) {
+	const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
+	const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations: iter }, base, 256);
+	return base64url(new Uint8Array(bits));
+}
+
+async function guardarContrasena(env, userId, password) {
+	if (typeof password !== "string" || password.length < 8)
+		throw new HttpError(400, "La contraseña necesita al menos 8 caracteres.");
+	if (password.length > 200) throw new HttpError(400, "La contraseña es demasiado larga.");
+	const salt = crypto.getRandomValues(new Uint8Array(16));
+	await env.GARMIN.put(
+		cuentaKey(userId),
+		JSON.stringify({
+			salt: base64url(salt),
+			hash: await derivarClave(password, salt, PBKDF2_ITER),
+			iter: PBKDF2_ITER,
+			at: new Date().toISOString(),
+		}),
+	);
+}
+
+const igualSeguro = (a, b) => {
+	if (a.length !== b.length) return false;
+	let d = 0;
+	for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
+	return d === 0;
+};
+
+/** Lanza 401 si no cuadra y 429 tras demasiados fallos seguidos. */
+async function comprobarContrasena(env, userId, cuenta, password) {
+	const fallos = Number(await env.GARMIN.get(intentosKey(userId))) || 0;
+	if (fallos >= MAX_INTENTOS) throw new HttpError(429, "Demasiados intentos. Espera 15 minutos y vuelve a probar.");
+	const hash = await derivarClave(String(password || ""), bytesFromBase64url(cuenta.salt), cuenta.iter);
+	if (!igualSeguro(hash, cuenta.hash)) {
+		await env.GARMIN.put(intentosKey(userId), String(fallos + 1), { expirationTtl: INTENTOS_TTL });
+		throw new HttpError(401, "Email o contraseña incorrectos.");
+	}
+	if (fallos) await env.GARMIN.delete(intentosKey(userId));
+}
+
+/** Vincula Garmin a una cuenta: con el login de Garmin (y MFA si lo pide). */
+async function vincularGarmin(env, userId, body) {
+	if (body.pendiente) {
+		const pending = await env.GARMIN.get(mfaKey(String(body.pendiente)), "json");
+		if (!pending || pending.userId !== userId) throw new HttpError(400, "La verificación ha caducado. Empieza de nuevo.");
+		const ticket = await ssoVerifyMfa(String(body.codigo || ""), pending.method, pending.cookie, pending.flowName);
+		await env.GARMIN.put(userKey(userId), JSON.stringify(await exchangeTicket(ticket, pending.flowName)));
+		await env.GARMIN.delete(mfaKey(String(body.pendiente)));
+		return { ok: true };
+	}
+	const email = String(body.email || "").trim();
+	const password = String(body.password || "");
+	if (!email || !password) throw new HttpError(400, "Pon el email y la contraseña de Garmin.");
+	const result = await ssoLogin(email, password);
+	if (result.mfaRequired) {
+		const id = randomToken();
+		await env.GARMIN.put(
+			mfaKey(id),
+			JSON.stringify({ method: result.mfaMethod, cookie: result.cookie, userId, flowName: result.flowName }),
+			{ expirationTtl: MFA_TTL },
+		);
+		return { mfa: true, pendiente: id, metodo: result.mfaMethod };
+	}
+	await env.GARMIN.put(userKey(userId), JSON.stringify(await exchangeTicket(result.ticket, result.flowName)));
+	return { ok: true };
+}
+
+/**
+ * La cuenta, para la app (con el Bearer del usuario). No son herramientas MCP
+ * a proposito: las contrasenas no deben pasar por el chat.
+ *   GET    /cuenta             → { contrasena, garmin: { vinculado, desde } }
+ *   POST   /cuenta/contrasena  → { nueva, actual? }
+ *   POST   /cuenta/garmin      → { email, password } | { pendiente, codigo }
+ *   DELETE /cuenta/garmin
+ */
+async function handleCuenta(request, env, pathname) {
+	const userId = await userForRequest(request, env);
+	if (!userId) return json({ error: "unauthorized" }, 401);
+	const body = request.method === "POST" ? await request.json().catch(() => ({})) : {};
+	try {
+		if (pathname === "/cuenta" && request.method === "GET") {
+			const [cuenta, garmin] = await Promise.all([
+				env.GARMIN.get(cuentaKey(userId), "json"),
+				env.GARMIN.get(userKey(userId), "json"),
+			]);
+			return json({
+				contrasena: Boolean(cuenta),
+				garmin: garmin?.di_token ? { vinculado: true, desde: garmin.obtained_at || null } : { vinculado: false },
+			});
+		}
+		if (pathname === "/cuenta/contrasena" && request.method === "POST") {
+			const cuenta = await env.GARMIN.get(cuentaKey(userId), "json");
+			// Cambiarla pide la actual; crearla basta con la sesion abierta.
+			if (cuenta) await comprobarContrasena(env, userId, cuenta, body.actual);
+			await guardarContrasena(env, userId, body.nueva);
+			return json({ ok: true });
+		}
+		if (pathname === "/cuenta/garmin" && request.method === "POST") return json(await vincularGarmin(env, userId, body));
+		if (pathname === "/cuenta/garmin" && request.method === "DELETE") {
+			await env.GARMIN.delete(userKey(userId));
+			return json({ ok: true });
+		}
+		return json({ error: "not_found" }, 404);
+	} catch (err) {
+		if (err instanceof HttpError) return json({ error: err.message }, err.status);
+		throw err;
+	}
+}
+
+const pagina = (html, status = 200) =>
+	new Response(html, {
+		status,
+		// Que nadie la meta en un iframe para hacer pulsar "Entrar".
+		headers: { ...HTML, "Content-Security-Policy": "frame-ancestors 'none'", "X-Frame-Options": "DENY" },
+	});
+
 async function handleAuthorize(request, env) {
 	if (request.method === "GET") {
 		const params = readAuthorizeParams(new URL(request.url).searchParams);
 		if (!params) return new Response(errorPage("Faltan parametros de OAuth o PKCE."), { status: 400, headers: HTML });
 		if (!(await clientAllows(env, params.clientId, params.redirectUri)))
 			return new Response(errorPage("Cliente o redirect_uri no reconocido."), { status: 400, headers: HTML });
-		return new Response(loginPage(params), { headers: HTML });
+		const modo = new URL(request.url).searchParams.get("modo");
+		return pagina(loginPage(params, null, MODOS.has(modo) ? modo : "entrar"));
 	}
 
 	const form = new URLSearchParams(await request.text());
@@ -1991,6 +2126,9 @@ async function handleAuthorize(request, env) {
 	if (!params) return new Response(errorPage("Faltan parametros de OAuth o PKCE."), { status: 400, headers: HTML });
 	if (!(await clientAllows(env, params.clientId, params.redirectUri)))
 		return new Response(errorPage("Cliente o redirect_uri no reconocido."), { status: 400, headers: HTML });
+
+	// Sin modo es un formulario de antes (o el de MFA): el login de Garmin.
+	const modo = MODOS.has(form.get("modo")) ? form.get("modo") : "garmin";
 
 	try {
 		// Segunda pantalla: el usuario ya paso la contrasena y vuelve con el codigo MFA.
@@ -2012,10 +2150,35 @@ async function handleAuthorize(request, env) {
 
 		const email = (form.get("email") || "").trim();
 		const password = form.get("password") || "";
-		if (!email || !password)
-			return new Response(loginPage(params, "Rellena email y contrasena."), { status: 400, headers: HTML });
+		if (!email || !password) return pagina(loginPage(params, "Rellena email y contrasena.", modo), 400);
 
 		const userId = await userIdFor(email);
+
+		if (modo === "entrar") {
+			const cuenta = await env.GARMIN.get(cuentaKey(userId), "json");
+			if (!cuenta)
+				throw new HttpError(
+					401,
+					(await env.GARMIN.get(userKey(userId)))
+						? "Aún no tienes contraseña de myCoach. Créala en la app (Ajustes, Tu cuenta) o entra esta vez con Garmin."
+						: "Email o contraseña incorrectos.",
+				);
+			await comprobarContrasena(env, userId, cuenta, password);
+			return issueCodeAndRedirect(env, params, userId);
+		}
+
+		if (modo === "crear") {
+			// Si ya existe (tambien quien entraba solo con Garmin), no se pisa:
+			// su contrasena se crea desde la app, con su sesion abierta.
+			if ((await env.GARMIN.get(cuentaKey(userId))) || (await env.GARMIN.get(userKey(userId))))
+				throw new HttpError(
+					409,
+					"Ya hay una cuenta con ese email. Entra con tu contraseña o, si aún no tienes, entra con Garmin y créala en la app.",
+				);
+			await guardarContrasena(env, userId, password);
+			return issueCodeAndRedirect(env, params, userId);
+		}
+
 		const result = await ssoLogin(email, password);
 
 		if (result.mfaRequired) {
@@ -2030,7 +2193,7 @@ async function handleAuthorize(request, env) {
 				}),
 				{ expirationTtl: MFA_TTL },
 			);
-			return new Response(mfaPage(params, id, result.mfaMethod), { headers: HTML });
+			return pagina(mfaPage(params, id, result.mfaMethod));
 		}
 
 		const tokens = await exchangeTicket(result.ticket, result.flowName);
@@ -2039,7 +2202,7 @@ async function handleAuthorize(request, env) {
 	} catch (err) {
 		const message = err instanceof HttpError ? err.message : "No se pudo completar la conexion.";
 		const status = err instanceof HttpError ? err.status : 500;
-		return new Response(loginPage(params, message), { status, headers: HTML });
+		return pagina(loginPage(params, message, modo), status);
 	}
 }
 
@@ -2121,6 +2284,8 @@ async function userForRequest(request, env) {
 	const header = request.headers.get("Authorization") || "";
 	if (!header.startsWith("Bearer ")) return null;
 	const payload = await readBlob(env, header.slice(7));
+	// El codigo de autorizacion tambien lleva userId, pero no es un token.
+	if (payload?.codeChallenge) return null;
 	return payload?.userId ?? null;
 }
 
@@ -2141,6 +2306,7 @@ const PAGE_STYLE = `
   @media (prefers-color-scheme: dark) { p { color: #a8a29e; } }
   label { display: block; font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
           color: #57534e; margin: 0 0 6px; }
+  @media (prefers-color-scheme: dark) { label { color: #a8a29e; } }
   input { width: 100%; box-sizing: border-box; font-size: 16px; padding: 14px;
           border-radius: 12px; border: 1px solid #d6d3d1; background: #fff; color: inherit;
           margin: 0 0 16px; }
@@ -2152,6 +2318,11 @@ const PAGE_STYLE = `
          font-size: 14px; margin: 0 0 16px; }
   @media (prefers-color-scheme: dark) { .err { background: #3a1e1c; color: #ffb4ad; } }
   .note { font-size: 12px; color: #78716c; margin-top: 18px; }
+  .links { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; }
+  .links a { display: block; text-align: center; font-size: 15px; font-weight: 600; padding: 12px;
+             min-height: 44px; box-sizing: border-box; color: #4338ca; text-decoration: none; border-radius: 12px; }
+  @media (prefers-color-scheme: dark) { .links a { color: #c7d2fe; } }
+  a:focus-visible, button:focus-visible, input:focus-visible { outline: 3px solid #6366f1; outline-offset: 2px; }
 `;
 
 const hiddenFields = (params, extra = {}) =>
@@ -2170,26 +2341,60 @@ const page = (title, inner) => `<!doctype html><html lang="es"><head><meta chars
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title}</title><style>${PAGE_STYLE}</style></head><body><main>${inner}</main></body></html>`;
 
-const loginPage = (params, error) =>
-	page(
-		"Conectar Garmin",
-		`<h1>Conectar Garmin</h1>
-<p>Inicia sesion con tu cuenta de Garmin para que Claude pueda leer tus datos.
-Ni tu contrasena ni tu email se almacenan.</p>
-<p>Para poder dibujar tu progreso, este servidor guarda tus actividades y tus
-datos diarios de Garmin, y los actualiza una vez al dia.</p>
-${error ? `<div class="err">${escapeHtml(error)}</div>` : ""}
+/** Enlace a la misma autorizacion en otro modo (entrar, crear, garmin). */
+const enlaceModo = (params, modo) =>
+	`/oauth/authorize?${escapeHtml(
+		new URLSearchParams({
+			response_type: "code", client_id: params.clientId, redirect_uri: params.redirectUri,
+			code_challenge: params.codeChallenge, code_challenge_method: "S256", modo,
+			...(params.state ? { state: params.state } : {}),
+		}).toString(),
+	)}`;
+
+const TEXTOS_LOGIN = {
+	entrar: {
+		titulo: "Entra en myCoach",
+		intro: "Con tu cuenta de myCoach, Claude ve tu plan, tu entrenador y los datos que tengas vinculados (Garmin, Intervals.icu).",
+		boton: "Entrar",
+		auto: "current-password",
+		otros: [["crear", "Crear una cuenta"], ["garmin", "Aún no tengo contraseña: entrar con Garmin"]],
+	},
+	crear: {
+		titulo: "Crea tu cuenta de myCoach",
+		intro: "Después vinculas Garmin o Intervals.icu desde la app, en Ajustes. La contraseña necesita al menos 8 caracteres.",
+		boton: "Crear cuenta",
+		auto: "new-password",
+		otros: [["entrar", "Ya tengo cuenta"]],
+	},
+	garmin: {
+		titulo: "Entrar con Garmin",
+		intro: "Solo si aún no tienes contraseña de myCoach. Luego créala en la app (Ajustes, Tu cuenta) y no volverás a necesitar este paso. Tu contraseña de Garmin no se guarda.",
+		boton: "Entrar con Garmin",
+		auto: "current-password",
+		otros: [["entrar", "Entrar con mi cuenta de myCoach"]],
+	},
+};
+
+const loginPage = (params, error, modo = "entrar") => {
+	const t = TEXTOS_LOGIN[modo] || TEXTOS_LOGIN.entrar;
+	return page(
+		t.titulo,
+		`<h1>${t.titulo}</h1>
+<p>${t.intro}</p>
+${error ? `<div class="err" role="alert">${escapeHtml(error)}</div>` : ""}
 <form method="post" action="/oauth/authorize">
-  ${hiddenFields(params)}
-  <label for="email">Email de Garmin</label>
+  ${hiddenFields(params, { modo })}
+  <label for="email">Email${modo === "garmin" ? " de Garmin" : ""}</label>
   <input id="email" name="email" type="email" autocomplete="username" required autofocus>
-  <label for="password">Contrasena</label>
-  <input id="password" name="password" type="password" autocomplete="current-password" required>
-  <button type="submit">Autorizar</button>
+  <label for="password">Contraseña${modo === "garmin" ? " de Garmin" : ""}</label>
+  <input id="password" name="password" type="password" autocomplete="${t.auto}" required${modo === "crear" ? ' minlength="8"' : ""}>
+  <button type="submit">${t.boton}</button>
 </form>
-<p class="note">Puedes revocar el acceso borrando el conector en Claude o
-cambiando tu contrasena de Garmin.</p>`,
+<nav class="links">${t.otros.map(([m, txt]) => `<a href="${enlaceModo(params, m)}">${txt}</a>`).join("")}</nav>
+<p class="note">Para dibujar tu progreso, este servidor guarda tus actividades y tus datos diarios, y los actualiza una vez al día.
+Puedes revocar el acceso borrando el conector en Claude.</p>`,
 	);
+};
 
 const mfaPage = (params, pendingId, method) =>
 	page(
@@ -4801,6 +5006,8 @@ export default {
 			if (pathname === "/oauth/authorize") return handleAuthorize(request, env);
 
 			if (pathname === "/oauth/token" && request.method === "POST") return handleToken(request, env);
+
+			if (pathname === "/cuenta" || pathname.startsWith("/cuenta/")) return handleCuenta(request, env, pathname);
 
 			// Descarga del GPX. El id es un token aleatorio, asi que hace de
 			// credencial: permite importar la ruta a mano sin exponer nada mas.

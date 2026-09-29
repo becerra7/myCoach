@@ -203,7 +203,7 @@ function mockGarmin(accounts, { mobileLimited = false, portalLimited = false, mo
 }
 
 /** Recorre el flujo OAuth completo y devuelve el access token. */
-async function connect(env, email, password, mfaCode) {
+async function connect(env, email, password, mfaCode, extra = {}) {
 	const reg = await (await postJson(env, "/oauth/register", {
 		redirect_uris: [REDIRECT], client_name: "Claude",
 	})).json();
@@ -213,7 +213,7 @@ async function connect(env, email, password, mfaCode) {
 		code_challenge: CHALLENGE, code_challenge_method: "S256",
 	};
 
-	let res = await postForm(env, "/oauth/authorize", { ...params, email, password });
+	let res = await postForm(env, "/oauth/authorize", { ...params, email, password, ...extra });
 
 	if (res.status === 200 && mfaCode) {
 		const html = await res.text();
@@ -286,7 +286,9 @@ const rpc = async (env, token, message) => {
 	check("redirect_uri no registrado -> 400", otherRedirect.status === 400);
 
 	const good = await get(env, `/oauth/authorize?client_id=${reg.client_id}&redirect_uri=${encodeURIComponent(REDIRECT)}&code_challenge=${CHALLENGE}`);
-	check("authorize valido muestra el login", good.status === 200 && (await good.text()).includes("Conectar Garmin"));
+	check("authorize valido muestra el login de myCoach", good.status === 200 && (await good.text()).includes("Entra en myCoach"));
+	check("la pagina de login no se deja meter en un iframe",
+		(good.headers.get("Content-Security-Policy") || "").includes("frame-ancestors 'none'"));
 }
 
 // ── 4. Login fallido ──
@@ -376,6 +378,77 @@ const rpc = async (env, token, message) => {
 	check("ambos raros -> 502", res.status === 502);
 	check("el error dice el tipo que devolvio cada flujo",
 		html.includes("ios: ACCOUNT_LOCKED_X") && html.includes("portal: CAPTCHA_REQUIRED"));
+}
+
+// ── 4f. Cuentas de myCoach: contrasena propia y Garmin como fuente vinculada ──
+{
+	mockGarmin({ "ana@x.com": { password: "a", data: { displayName: "ana", hrv: 50 } } });
+	const env = makeEnv();
+	const auth = (t) => ({ Authorization: `Bearer ${t}` });
+	const cuenta = async (t) => (await get(env, "/cuenta", auth(t))).json();
+	const entrar = (email, password) => connect(env, email, password, null, { modo: "entrar" });
+	const intentar = async (modo, email, password) => {
+		const reg = await (await postJson(env, "/oauth/register", { redirect_uris: [REDIRECT] })).json();
+		return postForm(env, "/oauth/authorize", {
+			client_id: reg.client_id, redirect_uri: REDIRECT, code_challenge: CHALLENGE,
+			code_challenge_method: "S256", email, password, modo,
+		});
+	};
+
+	// Ana ya usaba el conector entrando con Garmin.
+	const { tokens: viejo } = await connect(env, "ana@x.com", "a");
+	const sinPass = await intentar("entrar", "ana@x.com", "loquesea");
+	check("sin contrasena de myCoach, entrar lo explica",
+		sinPass.status === 401 && (await sinPass.text()).includes("Aún no tienes contraseña"));
+	const antes = await cuenta(viejo.access_token);
+	check("la cuenta dice que tiene Garmin y no contrasena", antes.contrasena === false && antes.garmin.vinculado === true);
+
+	const corta = await postJson(env, "/cuenta/contrasena", { nueva: "corta" }, auth(viejo.access_token));
+	check("contrasena de menos de 8 -> 400", corta.status === 400);
+	const crea = await postJson(env, "/cuenta/contrasena", { nueva: "supersecreta" }, auth(viejo.access_token));
+	check("con la sesion abierta se crea la contrasena", crea.status === 200);
+
+	const { tokens: nuevo } = await entrar("Ana@X.com ", "supersecreta");
+	const c = await cuenta(nuevo.access_token);
+	check("entrar con myCoach da la misma cuenta, con su Garmin", c.contrasena === true && c.garmin.vinculado === true);
+	const hrv = await rpc(env, nuevo.access_token, { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "garmin_hrv", arguments: {} } });
+	check("y las herramientas de Garmin siguen funcionando", !hrv.body.result.isError);
+
+	const mala = await intentar("entrar", "ana@x.com", "otracosa1");
+	check("contrasena mala -> 401", mala.status === 401 && (await mala.text()).includes("incorrectos"));
+	const cambio = await postJson(env, "/cuenta/contrasena", { nueva: "otraclave99" }, auth(nuevo.access_token));
+	check("cambiarla sin la actual -> 401", cambio.status === 401);
+	const cambioOk = await postJson(env, "/cuenta/contrasena", { nueva: "otraclave99", actual: "supersecreta" }, auth(nuevo.access_token));
+	check("cambiarla con la actual -> 200", cambioOk.status === 200);
+
+	const repetida = await intentar("crear", "ana@x.com", "cualquiera1");
+	check("crear con un email que ya existe -> 409", repetida.status === 409);
+
+	// Bea empieza en myCoach sin Garmin y lo vincula despues.
+	const { tokens: bea } = await connect(env, "bea@x.com", "clavedebea", null, { modo: "crear" });
+	check("una cuenta nueva empieza sin Garmin", (await cuenta(bea.access_token)).garmin.vinculado === false);
+	const sinG = await rpc(env, bea.access_token, { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "garmin_hrv", arguments: {} } });
+	check("sin Garmin, la herramienta dice donde vincularlo",
+		sinG.body.result.isError && sinG.body.result.content[0].text.includes("Ajustes, Conexiones"));
+	const malG = await postJson(env, "/cuenta/garmin", { email: "ana@x.com", password: "mal" }, auth(bea.access_token));
+	check("vincular Garmin con la contrasena mala -> 401", malG.status === 401);
+	const okG = await postJson(env, "/cuenta/garmin", { email: "ana@x.com", password: "a" }, auth(bea.access_token));
+	check("vincular Garmin -> ok", okG.status === 200 && (await cuenta(bea.access_token)).garmin.vinculado === true);
+	const fuera = await worker.fetch(new Request(`${ORIGIN}/cuenta/garmin`, { method: "DELETE", headers: auth(bea.access_token) }), env);
+	check("desvincular Garmin", fuera.status === 200 && (await cuenta(bea.access_token)).garmin.vinculado === false);
+
+	check("sin Bearer, /cuenta -> 401", (await get(env, "/cuenta")).status === 401);
+	const reg = await (await postJson(env, "/oauth/register", { redirect_uris: [REDIRECT] })).json();
+	const conCodigo = await postForm(env, "/oauth/authorize", {
+		client_id: reg.client_id, redirect_uri: REDIRECT, code_challenge: CHALLENGE,
+		code_challenge_method: "S256", email: "bea@x.com", password: "clavedebea", modo: "entrar",
+	});
+	const codigo = new URL(conCodigo.headers.get("Location")).searchParams.get("code");
+	check("un codigo de autorizacion no vale como Bearer", (await get(env, "/cuenta", auth(codigo))).status === 401);
+
+	for (let i = 0; i < 10; i++) await intentar("entrar", "bea@x.com", "noesesta1");
+	const bloqueo = await intentar("entrar", "bea@x.com", "clavedebea");
+	check("tras 10 fallos se bloquea un rato, aunque luego acierte", bloqueo.status === 429);
 }
 
 // ── 4e. Una contrasena mala no reintenta por el otro flujo ──

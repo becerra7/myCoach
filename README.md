@@ -17,12 +17,33 @@ limitada, cae automáticamente a la del portal web, que va en otro cubo de
 límites.
 
 Claude se registra solo (RFC 7591), el usuario autoriza en `/oauth/authorize`
-—que es la pantalla de login de Garmin— y recibe un token ligado a él.
+y recibe un token ligado a él.
+
+### Cuentas de myCoach: Garmin es una fuente vinculada
+
+En `/oauth/authorize` se entra con la **cuenta de myCoach** (email y
+contraseña propios), no con Garmin. Garmin se vincula aparte, desde la app
+(Ajustes › Conexiones), igual que Intervals.icu. Así conectar Claude no
+depende del login de Garmin, que a veces pide captcha a los servidores; y
+cuando haya acceso oficial a Garmin solo cambia cómo se vincula.
+
+- La contraseña se guarda con PBKDF2-SHA256 (100.000 iteraciones, sal
+  aleatoria) en `cuenta:<id>`. Tras 10 fallos seguidos, 15 minutos de espera.
+- El id sigue siendo el hash del email: quien ya entraba con Garmin conserva
+  sus datos. Crea su contraseña desde la app con su sesión abierta
+  (`POST /cuenta/contrasena`); crear cuenta con un email que ya existe se
+  rechaza.
+- "Entrar con Garmin" sigue en la misma página para quien aún no tiene
+  contraseña.
+- La app usa `/cuenta` con el token del usuario: `GET /cuenta`,
+  `POST /cuenta/contrasena`, `POST|DELETE /cuenta/garmin` (con MFA). No son
+  herramientas MCP a propósito: las contraseñas no pasan por el chat.
 
 ### Qué se guarda de cada persona
 
-Solo el token de Garmin y el `displayName` que exige su API. **Ni la
-contraseña ni el email**: el identificador de usuario es un hash del email.
+El token de Garmin, el `displayName` que exige su API y, si la creas, el hash
+de tu contraseña de myCoach. **Ni la contraseña de Garmin ni el email**: el
+identificador de usuario es un hash del email.
 
 Las credenciales OAuth (client_id, código de autorización, token de acceso)
 no se guardan: van **firmadas con HMAC**. Esto no es una optimización — el
