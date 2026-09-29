@@ -1865,6 +1865,14 @@ const rpc = async (env, token, message) => {
 	const todo = await llamar("fuerza_historial");
 	check("sin nada, cada ejercicio con su ultima vez", todo.ejercicios.some((e) => e.ejercicio === "Peso muerto rumano" && e.veces === 2));
 
+	check("cada entreno dice cuanto dura, aproximadamente", lista.entrenos[0].min_estimados >= 10 && detalle.min_estimados === lista.entrenos[0].min_estimados);
+	const dup = await llamar("fuerza_entreno_guardar", { nombre: "Pierna A", nuevo: true, ejercicios: pierna.ejercicios });
+	check("crear uno nuevo con un nombre que ya existe no lo pisa", /Ya tienes un entreno/.test(dup.error || ""));
+	const copia = await llamar("fuerza_entreno_guardar", { nombre: "Pierna A (copia)", nuevo: true, ejercicios: pierna.ejercicios });
+	check("duplicar con otro nombre crea otro entreno", copia.guardado?.id === "pierna-a-copia");
+	const renombrado = await llamar("fuerza_entreno_guardar", { id: "pierna-a-copia", nombre: "Pierna B", ejercicios: pierna.ejercicios });
+	check("renombrar conserva el id", renombrado.guardado.id === "pierna-a-copia" && renombrado.guardado.nombre === "Pierna B");
+	await llamar("fuerza_entreno_guardar", { id: "pierna-a-copia", nombre: "Pierna B", borrar: true });
 	const borrado = await llamar("fuerza_entreno_guardar", { nombre: "Pierna A", borrar: true });
 	check("un entreno se puede borrar", borrado.borrado === "pierna-a" && (await llamar("fuerza_entrenos")).entrenos.length === 0);
 	globalThis.fetch = base;

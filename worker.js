@@ -5157,6 +5157,12 @@ const seriesDelPlan = (e) => Array.from({ length: e.series }, () => ({
 	reps: e.segundos ? 0 : e.reps, ...(e.segundos ? { segundos: e.segundos } : {}), ...(e.peso_kg !== undefined ? { peso_kg: e.peso_kg } : {}),
 }));
 
+/** Minutos aproximados: cada serie (4 s por rep o sus segundos) mas su descanso, y medio minuto entre ejercicios. */
+const minutosEntreno = (e) => {
+	const s = e.ejercicios.reduce((t, x) => t + x.series * ((x.segundos || x.reps * 4) + (x.descanso_s ?? 90)) + 30, 0);
+	return Math.max(5, Math.round(s / 60 / 5) * 5);
+};
+
 async function leerFuerza(env, userId) {
 	const [entrenos, registro] = await Promise.all([leerDoc(env, userId, FUERZA_ENTRENOS), leerDoc(env, userId, FUERZA_REGISTRO)]);
 	return { entrenos: entrenos?.entrenos || {}, sesiones: Array.isArray(registro?.sesiones) ? registro.sesiones : [] };
@@ -5178,6 +5184,7 @@ function entrenoConUltima(entreno, sesiones) {
 		ejercicios: entreno.ejercicios.map((e) => ({ ...e, plan: textoSeries(seriesDelPlan(e)), ultima: ultima.get(claveEjercicio(e)) || null })),
 		ultima_sesion: suyas[0] ? { fecha: suyas[0].fecha, fuente: suyas[0].fuente } : null,
 		veces: suyas.length,
+		min_estimados: minutosEntreno(entreno),
 	};
 }
 
@@ -5375,7 +5382,7 @@ Object.assign(TOOLS, {
 			return {
 				entrenos: Object.values(entrenos).map((e) => {
 					const c = entrenoConUltima(e, sesiones);
-					return { id: e.id, nombre: e.nombre, lugar: e.lugar || null, ejercicios: e.ejercicios.map((x) => x.nombre), ultima_sesion: c.ultima_sesion, veces: c.veces };
+					return { id: e.id, nombre: e.nombre, lugar: e.lugar || null, ejercicios: e.ejercicios.map((x) => x.nombre), ultima_sesion: c.ultima_sesion, veces: c.veces, min_estimados: c.min_estimados };
 				}),
 				nombres_de_ejercicio: [...nombres],
 			};
@@ -5397,6 +5404,7 @@ Object.assign(TOOLS, {
 				nota: { type: "string" },
 				ejercicios: { type: "array", items: esquemaEjercicio },
 				borrar: { type: "boolean" },
+				nuevo: { type: "boolean", description: "true para crear uno nuevo (p. ej. al duplicar): falla si ya hay uno con ese nombre en vez de sustituirlo." },
 			},
 			required: ["nombre"],
 		},
@@ -5411,6 +5419,7 @@ Object.assign(TOOLS, {
 				return { borrado: id };
 			}
 			if (!Array.isArray(args.ejercicios) || !args.ejercicios.length) throw new HttpError(400, "El entreno necesita al menos un ejercicio.");
+			if (args.nuevo && entrenos[id]) throw new HttpError(409, `Ya tienes un entreno que se llama "${entrenos[id].nombre}". Ponle otro nombre.`);
 			const previo = entrenos[id];
 			const entreno = {
 				id, nombre: String(args.nombre).trim().slice(0, 60),
