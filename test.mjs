@@ -1706,12 +1706,12 @@ const rpc = async (env, token, message) => {
 	check("las instrucciones dicen cuando abrir la app", init.body.result.instructions.includes("mycoach_abrir"));
 	const lista = await rpc(env, tok, { jsonrpc: "2.0", id: 2, method: "resources/list" });
 	const rec = lista.body.result.resources[0];
-	check("la app es un recurso ui:// de tipo MCP App", rec?.uri === "ui://mycoach/app" && rec.mimeType === "text/html;profile=mcp-app");
+	check("la app es un recurso ui:// de tipo MCP App, con version", /^ui:\/\/mycoach\/app\?v=[0-9a-f]{12}$/.test(rec?.uri) && rec.mimeType === "text/html;profile=mcp-app");
 	const tools = (await rpc(env, tok, { jsonrpc: "2.0", id: 3, method: "tools/list" })).body.result.tools;
 	const abrir = tools.find((t) => t.name === "mycoach_abrir");
-	check("mycoach_abrir enlaza con la pantalla", abrir?._meta?.ui?.resourceUri === "ui://mycoach/app");
+	check("mycoach_abrir enlaza con la pantalla de la version actual", abrir?._meta?.ui?.resourceUri === rec.uri);
 	check("las demas herramientas no abren pantallas", !tools.find((t) => t.name === "coach_hoy")._meta);
-	const leido = await rpc(env, tok, { jsonrpc: "2.0", id: 4, method: "resources/read", params: { uri: "ui://mycoach/app" } });
+	const leido = await rpc(env, tok, { jsonrpc: "2.0", id: 4, method: "resources/read", params: { uri: rec.uri } });
 	const c = leido.body.result.contents[0];
 	check("leer el recurso da el HTML de la app", c.mimeType === "text/html;profile=mcp-app" && c.text.includes("myCoach") && pedidas[0] === "/mcp-app");
 	await rpc(env, tok, { jsonrpc: "2.0", id: 5, method: "resources/read", params: { uri: "ui://mycoach/app" } });

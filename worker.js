@@ -1737,7 +1737,8 @@ async function handleRpc(message, env, userId) {
 		});
 	}
 
-	if (method === "tools/list")
+	if (method === "tools/list") {
+		const ui = await uriApp(env);
 		return rpcResult(id, {
 			tools: Object.entries(TOOLS).map(([name, t]) => ({
 				name,
@@ -1746,16 +1747,22 @@ async function handleRpc(message, env, userId) {
 				inputSchema: t.schema,
 				annotations: { readOnlyHint: t.write !== true, destructiveHint: false },
 				// MCP Apps: la herramienta se enseña con una pantalla (ui://) si el cliente sabe.
-				...(t.ui ? { _meta: { ui: { resourceUri: t.ui }, "ui/resourceUri": t.ui } } : {}),
+				...(t.ui ? { _meta: { ui: { resourceUri: ui }, "ui/resourceUri": ui } } : {}),
 			})),
 		});
+	}
 
-	if (method === "resources/list") return rpcResult(id, { resources: RECURSOS_UI });
+	if (method === "resources/list") {
+		const ui = await uriApp(env);
+		return rpcResult(id, { resources: RECURSOS_UI.map((r) => ({ ...r, uri: ui })) });
+	}
 
 	if (method === "resources/read") {
-		const recurso = RECURSOS_UI.find((r) => r.uri === params?.uri);
+		// Vale cualquier version: se sirve siempre la ultima.
+		const uri = String(params?.uri || "");
+		const recurso = RECURSOS_UI.find((r) => uri === r.uri || uri.startsWith(`${r.uri}?v=`));
 		if (!recurso) return rpcError(id, -32602, `Recurso desconocido: ${params?.uri}`);
-		return rpcResult(id, { contents: [{ uri: recurso.uri, mimeType: recurso.mimeType, text: await htmlDeLaApp(env), _meta: recurso._meta }] });
+		return rpcResult(id, { contents: [{ uri, mimeType: recurso.mimeType, text: await htmlDeLaApp(env), _meta: recurso._meta }] });
 	}
 
 	if (method === "tools/call") {
@@ -4201,7 +4208,8 @@ Object.assign(TOOLS, INTERVALS_TOOLS);
 //
 // El HTML lo construye y lo sirve el Worker de la web (repo myCoach,
 // dist/mcp-app.html). Aqui se trae por service binding (entre Workers de la
-// misma cuenta la URL publica da 404) y se guarda unos minutos en memoria.
+// misma cuenta la URL publica da 404) en cada apertura; la direccion lleva la
+// version para que Claude no reutilice una copia vieja.
 
 const APP_UI = "ui://mycoach/app";
 const RECURSOS_UI = [{
@@ -4220,6 +4228,19 @@ const RECURSOS_UI = [{
 
 // La ultima copia buena, solo por si la web no responde.
 let cacheApp = { html: null };
+let versionMemo = { uri: null, hasta: 0 };
+
+/**
+ * La direccion de la pantalla lleva la version (hash del HTML). Claude guarda
+ * la pantalla por su direccion: si no cambiara, seguiria ensenando la vieja
+ * despues de desplegar. Se recalcula como mucho una vez por minuto.
+ */
+async function uriApp(env) {
+	if (versionMemo.uri && versionMemo.hasta > Date.now()) return versionMemo.uri;
+	const html = await htmlDeLaApp(env);
+	versionMemo = { uri: `${APP_UI}?v=${(await sha256Hex(html)).slice(0, 12)}`, hasta: Date.now() + 60 * 1000 };
+	return versionMemo.uri;
+}
 
 async function htmlDeLaApp(env) {
 	// Siempre la version recien desplegada: por el service binding cuesta nada.
@@ -4995,6 +5016,8 @@ export default {
 		// Un fallo de herramienta viaja como 200 con isError, asi que no lo
 		// pilla el registro por codigo de estado. Y es justo el que interesa.
 		let toolError = "";
+		// Que ha pedido Claude (metodo y herramienta o recurso), para el registro.
+		let llamada = "";
 
 		const response = await (async () => {
 		try {
@@ -5046,6 +5069,7 @@ export default {
 				if (message.id === undefined) return new Response(null, { status: 202 });
 
 				const rpc = await handleRpc(message, env, userId);
+				llamada = [message.method, message.params?.name || message.params?.uri].filter(Boolean).join(" ");
 				if (rpc.result?.isError)
 					toolError = `${message.params?.name}: ${rpc.result.content?.[0]?.text ?? ""}`;
 				return json(rpc);
@@ -5076,6 +5100,7 @@ esta URL como conector personalizado en Claude:</p>
 		let note = toolError;
 		if (!note && response.status >= 400) note = await response.clone().text().catch(() => "");
 		else if (!note && response.status === 302) note = "redirect";
+		else if (!note && llamada) note = llamada;
 
 		if (env.LOGS) ctx?.waitUntil?.(record(env, request, response.status, note));
 		return response;
