@@ -13,9 +13,8 @@
   const avisar = (method, params) => aClaude({ method, params });
   let contexto = {}, entrada = null;
 
-  // La primera vez en esta conversación no hay nada guardado: la app no pide onboarding
-  // (tu Garmin ya está conectado a Claude) y lee tu plan y objetivo del conector.
-  try { const s = JSON.parse(localStorage.getItem('trazo-v3') || 'null'); if (!s) localStorage.setItem('trazo-v3', JSON.stringify({ v: 6, onboarded: true, modo: 'vivo', framed: false, sports: [] })); } catch (e) { }
+  // Si ya usas myCoach, la app lo sabe por tu estado en el conector (sin onboarding); aquí solo se quita el marco de móvil.
+  try { const s = JSON.parse(localStorage.getItem('trazo-v3') || 'null'); if (!s) localStorage.setItem('trazo-v3', JSON.stringify({ v: 6, framed: false })); } catch (e) { }
 
   const tema = t => { if (t !== 'light' && t !== 'dark') return; document.documentElement.dataset.theme = t; if (typeof S !== 'undefined') { S.theme = t; if (typeof render === 'function') render(); } };
   const alto = () => {

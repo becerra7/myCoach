@@ -112,9 +112,38 @@ async function mealFoto(file) {
 var firstOpen = true; try { firstOpen = !sessionStorage.getItem('trazo-sync'); sessionStorage.setItem('trazo-sync', '1'); } catch (e) { }
 const cap = name => (window.claude && typeof window.claude.use === 'function') ? window.claude.use(name).catch(() => null) : Promise.resolve(null);
 let SAMPLE = undefined, DB = undefined;
+/* Mientras se mira si ya usas myCoach, ni onboarding ni pantallas vacías: "Abriendo tu myCoach…" */
+let COMPROBANDO = !S.onboarded && !!(window.claude && typeof window.claude.use === 'function');
+/* Tu estado (plan, objetivo, deportes…) vive en el conector: el mismo en la web, en Claude y en el chat.
+   Si hay conector, se lee y se guarda allí, también desde un artefacto de Claude (antes usaba su propio almacén). */
+const dbConector = m => ({
+  doc: path => ({
+    get: () => m.callTool('Garmin', 'app_leer', { doc: path }).then(r => r.payload),
+    set: (datos, opts = {}) => m.callTool('Garmin', 'app_guardar', { doc: path, datos, ...(typeof opts.version === 'number' ? { version: opts.version } : {}) }).then(r => r.payload),
+  }),
+  collection: c => ({ add: datos => m.callTool('Garmin', 'app_guardar', { doc: c, datos, anadir: true }).then(r => r.payload) }),
+});
+const capMcp = cap('mcp');
 cap('sample').then(s => { SAMPLE = s; renderProtoStatus(); if (sheetState && sheetState.id === 'claude') fillSheet(); });
-cap('db').then(d => { DB = d; renderProtoStatus(); if (d) cargarDeDB(); });
-let LIVE = undefined; const capListo = cap('mcp').then(m => { LIVE = m; renderProtoStatus(); if (!S.onboarded && m) { S.obConn = true; S.modo = 'vivo'; if (S.obStep <= 1) S.obStep = 2; save(); renderOnboarding(); sync(false); return; } if (S.onboarded && m && S.modo === 'vivo' && (firstOpen || !DSET || !DSET.acts.length || Date.now() - (S.lastSync || 0) > 15 * 60e3)) sync(false); else render(); });
+cap('db').then(async d => { const m = await capMcp; DB = m ? dbConector(m) : d; renderProtoStatus(); if (DB) cargarDeDB(); });
+let LIVE = undefined; const capListo = capMcp.then(async m => {
+  LIVE = m; renderProtoStatus();
+  // ¿Ya usas myCoach? Si el conector tiene tu estado, entras directo: el onboarding es solo para quien empieza.
+  if (!S.onboarded && m) {
+    const st = await m.callTool('Garmin', 'app_leer', { doc: 'estado/app' }).then(r => r.payload).catch(() => null);
+    if (st && (Object.keys(st.plan || {}).length || st.next || (st.sports || []).length || st.goal)) {
+      S.onboarded = true; S.modo = 'vivo'; if (!DB) DB = dbConector(m);
+      COMPROBANDO = false; await cargarDeDB(true); save();
+    }
+  }
+  COMPROBANDO = false;
+  if (!S.onboarded && m) { S.obConn = true; S.modo = 'vivo'; if (S.obStep <= 1) S.obStep = 2; save(); renderOnboarding(); sync(false); return; }
+  if (S.onboarded && m && S.modo === 'vivo' && (firstOpen || !DSET || !DSET.acts.length || Date.now() - (S.lastSync || 0) > 15 * 60e3)) sync(false); else render();
+});
+// Sin conector (o si no contesta), se deja de esperar: onboarding o demo, como siempre.
+setTimeout(() => { if (COMPROBANDO) { COMPROBANDO = false; render(); } }, 8000);
+// El panel de prototipo (flujos y notas) solo con ?proto en la URL, en todas las versiones de la app.
+if (!/[?&]proto\b/.test(location.search)) { const st = document.createElement('style'); st.textContent = '#proto-fab,#task{display:none!important}'; document.head.append(st); }
 setTimeout(() => { if (SAMPLE === undefined) SAMPLE = null; if (DB === undefined) DB = null; renderProtoStatus(); }, 11000);
 const CHAT = { turns: [], busy: false, ctl: null, pending: null, draft: '', fallback: !!(window.PLATFORM && PLATFORM.name === 'web') };
 const SUGS = ['¿Cómo voy esta semana?', 'Prepárame la semana que viene', '¿Qué me falta para estar más sano?', '¿Qué como antes del largo?'];
@@ -342,6 +371,7 @@ $('#claude-btn').addEventListener('click', () => openClaude());
 function renderOnboarding() {
   let ob = $('#ob'); if (S.onboarded) { ob && ob.remove(); return; }
   if (!ob) { ob = document.createElement('div'); ob.id = 'ob'; ob.className = 'ob'; app.append(ob); }
+  if (COMPROBANDO) { ob.innerHTML = `<span class="card-h">myCoach</span><p class="lead" role="status">${ic('sync', 20, 'spin')} Abriendo tu myCoach…</p>`; return; }
   const st = S.obStep; const steps = `<div class="steps">${[0, 1, 2, 3, 4, 5].map(i => `<i class="${i <= st ? 'on' : ''}"></i>`).join('')}</div>`; let h = '';
   const horas = horasPorDeporte(); const nA = M.acts.length, desde = nA ? fDia(M.acts[nA - 1].f) : '';
   if (st === 0) h = `<span class="card-h">myCoach</span><h1>Tu forma, fácil de entender</h1><p class="lead">Lee tu Garmin y te lo cuenta en claro: tu semana, tu forma y qué hacer, en todos tus deportes.</p><span class="spacer"></span><button class="btn fill wide" type="button" data-a="ob-next">Empezar</button>`;
