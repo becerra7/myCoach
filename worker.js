@@ -3278,7 +3278,8 @@ const COACH_TOOLS = {
 		description:
 			"Semana dia a dia: lo previsto en el plan de myCoach frente a lo hecho en Garmin (hecho, saltado, pendiente, extra), " +
 			"totales, carga de la semana frente a la media de 4 semanas, forma actual y avisos del metodo (rampa de carga, " +
-			"descarga, fuerza, intensidad). Uselo para revisar la semana o antes de planificar la siguiente.",
+			"descarga, fuerza, intensidad). Uselo para revisar la semana o antes de planificar la siguiente. Para ENSENAR la " +
+			"semana al usuario, abra la app con mycoach_abrir (pantalla plan) en vez de dibujarla.",
 		schema: {
 			type: "object",
 			properties: {
@@ -3637,7 +3638,8 @@ const instruccionesCoach = (nombre = NOMBRE_COACH) =>
 	"esta conectado, intervals_actividades, intervals_actividad (intervalos y series), intervals_bienestar e intervals_curvas " +
 	"(mejores marcas) dan aun mas detalle: eficiencia, desacople, W', zonas de potencia y ritmo, dinamicas de carrera y clima." +
 	" PANTALLAS: si el usuario quiere ver su app, su plan, su semana, su forma o sus pueblos, o acaba de cambiar el plan, " +
-	"abra la app dentro de la conversacion con mycoach_abrir (pantalla hoy, plan, forma, pueblos o ajustes).";
+	"abra la app dentro de la conversacion con mycoach_abrir (pantalla hoy, plan, forma, pueblos o ajustes). Es la app de " +
+	"verdad, con sus datos: no dibuje una tarjeta, un grafico ni un artefacto propio imitandola.";
 const limpio_entrenador_invalido = (c) =>
 	c.entrenador !== undefined &&
 	(typeof c.entrenador !== "object" || !String(c.entrenador?.nombre || "").trim() || String(c.entrenador.nombre).trim().length > 24);
