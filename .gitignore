@@ -5,3 +5,5 @@ apps/web/dist/
 
 # Impeccable: el binario (16 MB) lo descarga el lanzador la primera vez
 .claude/skills/impeccable/scripts/bin/
+# Impeccable: estado local del servidor de pruebas en vivo
+.impeccable/live/
