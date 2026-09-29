@@ -5214,6 +5214,21 @@ async function guardarSesionFuerza(env, userId, sesion) {
 	return sesion;
 }
 
+/**
+ * Une el dia de fuerza del plan a su entreno, si aun no lo esta. Asi la app lo enseña
+ * aunque al planificar no se dijera que entreno era. No toca un dia que ya apunta a otro.
+ */
+async function enlazarEnPlan(env, userId, fecha, entrenoId) {
+	if (!entrenoId) return false;
+	const estado = await leerDoc(env, userId, "estado/app");
+	const clave = estado?.plan?.[fecha] ? "plan" : estado?.next?.[fecha] ? "next" : null;
+	const dia = clave && estado[clave][fecha];
+	if (!dia || dia.dep !== "fuerza" || dia.entreno) return false;
+	estado[clave][fecha] = { ...dia, entreno: entrenoId };
+	await guardarDoc(env, userId, "estado/app", estado);
+	return true;
+}
+
 /** Cierra la sesion con las series que conto el reloj. null si ese dia no hay actividad de fuerza. */
 async function sesionDesdeGarmin(env, userId, { fecha, activity_id, entreno: entrenoId }) {
 	let actividad = activity_id ? { activityId: activity_id } : null;
@@ -5261,6 +5276,7 @@ async function sesionDesdeGarmin(env, userId, { fecha, activity_id, entreno: ent
 		const suyo = entreno?.ejercicios.find((x) => claveEjercicio(x) === h.clave);
 		if (suyo) { h.nombre = suyo.nombre; h.garmin = suyo.garmin || h.garmin; }
 	}
+	if (entreno) await enlazarEnPlan(env, userId, dia, entreno.id);
 	const sesion = await guardarSesionFuerza(env, userId, {
 		id: `${dia}-${entreno?.id || `garmin-${actividad.activityId}`}`,
 		fecha: dia, entreno: entreno?.id || null, nombre: entreno?.nombre || "Fuerza",
@@ -5475,6 +5491,7 @@ Object.assign(TOOLS, {
 				const e = { nombre: String(d.nombre).trim().slice(0, 60), ...(d.garmin && CATALOGO.has(`${d.garmin.categoria}/${d.garmin.ejercicio}`) ? { garmin: { categoria: d.garmin.categoria, ejercicio: d.garmin.ejercicio } } : {}) };
 				hechos.push({ clave: claveEjercicio(e), ...e, series: aSeries(d, null) });
 			}
+			if (entreno) await enlazarEnPlan(env, userId, fecha, entreno.id);
 			const sesion = await guardarSesionFuerza(env, userId, {
 				id: `${fecha}-${entreno?.id || "libre"}`, fecha, entreno: entreno?.id || null, nombre: entreno?.nombre || "Fuerza",
 				fuente: "claude", ejercicios: hechos, ...(typeof args.notas === "string" && args.notas.trim() ? { notas: args.notas.trim().slice(0, 300) } : {}),
@@ -5592,6 +5609,7 @@ Object.assign(TOOLS, {
 			if (entreno.garmin?.workout_id && String(entreno.garmin.workout_id) !== String(workoutId)) await borrarEntrenoGarmin(env, userId, entreno.garmin.workout_id);
 			entreno.garmin = { workout_id: String(workoutId), fecha, enviado: fechaLocal() };
 			await guardarDoc(env, userId, FUERZA_ENTRENOS, doc);
+			await enlazarEnPlan(env, userId, fecha, entreno.id);
 			return {
 				enviado: true, workout_id: String(workoutId), fecha, programado,
 				mensaje: programado
@@ -5633,12 +5651,16 @@ Object.assign(TOOLS, {
 			const plan = await leerDoc(env, userId, "estado/app");
 			const sesionPlan = plan?.plan?.[fecha] || plan?.next?.[fecha] || null;
 			let { entrenos, sesiones } = await leerFuerza(env, userId);
-			let hecha = sesiones.find((s) => s.fecha === fecha && (!sesionPlan?.entreno || s.entreno === sesionPlan.entreno)) || null;
+			// El entreno del dia: el del plan; si el plan no lo dice, el que se hizo o se mando al reloj ese dia.
+			const delDia = sesionPlan?.entreno || sesiones.find((s) => s.fecha === fecha && s.entreno)?.entreno ||
+				Object.values(entrenos).find((e) => e.garmin?.fecha === fecha)?.id || null;
+			let hecha = sesiones.find((s) => s.fecha === fecha && (!delDia || s.entreno === delDia)) || null;
 			if (!hecha && fecha <= fechaLocal()) {
-				const r = await sesionDesdeGarmin(env, userId, { fecha, entreno: sesionPlan?.entreno }).catch(() => null);
+				const r = await sesionDesdeGarmin(env, userId, { fecha, entreno: delDia }).catch(() => null);
 				if (r) { hecha = r.sesion; ({ entrenos, sesiones } = await leerFuerza(env, userId)); }
 			}
-			const entreno = entrenos[sesionPlan?.entreno] || (hecha?.entreno && entrenos[hecha.entreno]) || null;
+			const entreno = entrenos[delDia] || (hecha?.entreno && entrenos[hecha.entreno]) || null;
+			if (entreno && sesionPlan?.dep === "fuerza" && !sesionPlan.entreno) await enlazarEnPlan(env, userId, fecha, entreno.id);
 			return {
 				fecha,
 				entreno: entreno ? entrenoConUltima(entreno, sesiones.filter((s) => s.id !== hecha?.id)) : null,

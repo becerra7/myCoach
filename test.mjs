@@ -1835,6 +1835,15 @@ const rpc = async (env, token, message) => {
 	const detalle2 = await llamar("fuerza_entrenos", { id: "pierna-a" });
 	check("con actualizar_entreno, el peso hecho queda para la proxima", detalle2.ejercicios[0].peso_kg === 22 && detalle2.garmin?.desactualizado === true);
 
+	// Un dia de fuerza del plan sin entreno: al mandarlo al reloj para ese dia, queda enlazado.
+	await llamar("app_guardar", { doc: "estado/app", datos: { plan: { "2026-10-01": { dep: "fuerza", t: "otros", d: "Pierna en casa", min: 40 } } } });
+	await llamar("fuerza_enviar_garmin", { entreno: "pierna-a", fecha: "2026-10-01", confirm: true });
+	check("mandar al reloj enlaza el dia de fuerza del plan con su entreno", (await llamar("app_leer", { doc: "estado/app" })).plan["2026-10-01"].entreno === "pierna-a");
+	await llamar("app_guardar", { doc: "estado/app", datos: { plan: { "2026-10-01": { dep: "fuerza", t: "otros", d: "Pierna en casa", min: 40 } } } });
+	const sinEnlace = await llamar("fuerza_dia", { fecha: "2026-10-01" });
+	check("sin enlace en el plan, fuerza_dia encuentra el entreno mandado al reloj ese dia y lo enlaza",
+		sinEnlace.entreno?.id === "pierna-a" && (await llamar("app_leer", { doc: "estado/app" })).plan["2026-10-01"].entreno === "pierna-a");
+
 	// El dia de hoy, en el plan, apunta al entreno; el reloj conto las series.
 	await llamar("app_guardar", { doc: "estado/app", datos: { plan: { [HOY]: { deporte: "fuerza", titulo: "Pierna A", min: 45, entreno: "pierna-a" } } } });
 	const estado = await llamar("app_leer", { doc: "estado/app" });
