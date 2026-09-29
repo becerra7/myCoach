@@ -1716,6 +1716,8 @@ const rpc = async (env, token, message) => {
 	check("leer el recurso da el HTML de la app", c.mimeType === "text/html;profile=mcp-app" && c.text.includes("myCoach") && pedidas[0] === "/mcp-app");
 	await rpc(env, tok, { jsonrpc: "2.0", id: 5, method: "resources/read", params: { uri: "ui://mycoach/app" } });
 	check("cada apertura trae la version recien desplegada", pedidas.length === 2);
+	check("la pantalla puede cargar el codigo de la web (CSP)",
+		c._meta.ui.csp.resourceDomains.includes("https://mycoach.albertbecervas.workers.dev"));
 	check("la pantalla no se cachea (ttlMs 0)", leido.body.result.ttlMs === 0 && leido.body.result.resultType === "complete");
 	const lista2 = (await rpc(env, tok, { jsonrpc: "2.0", id: 7, method: "tools/list" })).body.result;
 	check("la lista de herramientas se cachea como mucho un minuto", lista2.ttlMs === 60000 && lista2.cacheScope === "public");

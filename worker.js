@@ -1776,7 +1776,7 @@ async function handleRpc(message, env, userId) {
 
 	if (method === "resources/list") {
 		const ui = await uriApp(env);
-		return rpcResult(id, { resultType: "complete", ...CACHE_LISTA, resources: RECURSOS_UI.map((r) => ({ ...r, uri: ui })) });
+		return rpcResult(id, { resultType: "complete", ...CACHE_LISTA, resources: RECURSOS_UI.map((r) => ({ ...r, uri: ui, _meta: metaApp(env, r._meta) })) });
 	}
 
 	if (method === "resources/read") {
@@ -1789,7 +1789,7 @@ async function handleRpc(message, env, userId) {
 			resultType: "complete",
 			ttlMs: 0,
 			cacheScope: "public",
-			contents: [{ uri, mimeType: recurso.mimeType, text: await htmlDeLaApp(env), _meta: recurso._meta }],
+			contents: [{ uri, mimeType: recurso.mimeType, text: await htmlDeLaApp(env), _meta: metaApp(env, recurso._meta) }],
 		});
 	}
 
@@ -4250,9 +4250,26 @@ const RECURSOS_UI = [{
 		ui: {
 			prefersBorder: true,
 			csp: { resourceDomains: ["https://fonts.googleapis.com", "https://fonts.gstatic.com"] },
+			// El codigo de la app se carga de la web (ver metaApp).
 		},
 	},
 }];
+
+const urlWeb = (env) => env.MYCOACH_URL || "https://mycoach.albertbecervas.workers.dev";
+
+/**
+ * El HTML que recibe Claude es pequeno: el codigo (2 MB, sobre todo el mapa de
+ * municipios) lo descarga la vista desde la web. Claude en el movil no cargaba
+ * la pantalla entera, y asi cada despliegue se ve al momento. Para eso la web
+ * tiene que estar en el CSP de la pantalla.
+ */
+const metaApp = (env, meta) => ({
+	...meta,
+	ui: {
+		...meta.ui,
+		csp: { ...meta.ui.csp, resourceDomains: [...meta.ui.csp.resourceDomains, new URL(urlWeb(env)).origin] },
+	},
+});
 
 // La ultima copia buena, solo por si la web no responde.
 let cacheApp = { html: null };
@@ -4272,7 +4289,7 @@ async function uriApp(env) {
 
 async function htmlDeLaApp(env) {
 	// Siempre la version recien desplegada: por el service binding cuesta nada.
-	const url = `${env.MYCOACH_URL || "https://mycoach.albertbecervas.workers.dev"}/mcp-app`;
+	const url = `${urlWeb(env)}/mcp-app`;
 	try {
 		const r = await (env.MYCOACH ? env.MYCOACH.fetch(new Request(url)) : fetch(url));
 		const html = r.ok ? await r.text() : null;
