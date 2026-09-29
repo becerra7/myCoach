@@ -451,16 +451,42 @@ const rpc = async (env, token, message) => {
 	check("initialize con token valido", init.body.result?.serverInfo?.name === "garmin");
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("tools/list devuelve 29 herramientas", list.body.result.tools.length === 29);
+	check("tools/list devuelve 30 herramientas", list.body.result.tools.length === 30);
 	check("app_guardar se anuncia como escritura", anot0(list).app_guardar.readOnlyHint === false);
 	{
 		const call = (name, args) => rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name, arguments: args } });
-		await call("app_guardar", { doc: "estado/app", datos: { plan: { "2026-09-28": { dep: "bici" } } } });
+		await call("app_guardar", { doc: "estado/app", datos: { plan: { "2026-09-28": { dep: "bici", t: "fondo", d: "Suave", min: 60 } } } });
 		await call("app_guardar", { doc: "estado/app", datos: { nombre: "A" }, fusionar: true });
 		const leido = JSON.parse((await call("app_leer", { doc: "estado/app" })).body.result.content[0].text);
 		check("myCoach: guardar, fusionar y leer", leido.nombre === "A" && leido.plan["2026-09-28"].dep === "bici");
 		const malo = await call("app_leer", { doc: "../user:x" });
 		check("myCoach: rutas de documento no validas se rechazan", malo.body.result.isError === true);
+
+		// Lo que paso de verdad: Claude subio el plan con sus propios nombres de campo.
+		const txt = (r) => r.body.result.content[0].text;
+		const subido = JSON.parse(txt(await call("app_guardar", { doc: "estado/app", fusionar: true, datos: { sports: ["bici"], plan: {
+			"2026-09-28": { tipo: "descanso", titulo: "Descanso", detalle: "Hecho" },
+			"2026-09-29": { tipo: "fuerza", titulo: "Fuerza cuerpo completo", detalle: "suave", duracion_min: 45 },
+			"2026-09-30": { tipo: "Z2", titulo: "Bici Z2", detalle: "60 min en Z2", duracion_min: 60, fc_max: 140 },
+			"2026-10-02": { tipo: "Z2", titulo: "Salida larga", detalle: "2 h en zona 2", duracion_min: 120 },
+		} } })));
+		const plan = JSON.parse(txt(await call("app_leer", { doc: "estado/app" }))).plan;
+		check("un plan con otros nombres de campo se traduce al formato de la app", subido.sesiones_normalizadas === 4 &&
+			plan["2026-09-28"].t === "descanso" && plan["2026-09-29"].dep === "fuerza" && plan["2026-09-29"].t === "otros" && plan["2026-09-29"].min === 45 &&
+			plan["2026-09-30"].dep === "bici" && plan["2026-09-30"].t === "fondo" && plan["2026-09-30"].min === 60 && plan["2026-09-30"].fc_max === 140,
+			JSON.stringify(plan));
+		check("sin deporte, usa el deporte principal del usuario", plan["2026-10-02"].dep === "bici" && plan["2026-10-02"].t === "fondo" && plan["2026-10-02"].d.includes("2 h"));
+		const raro = await call("app_guardar", { doc: "estado/app", datos: { plan: { "2026-10-01": { cosa: 1 } } } });
+		check("lo que no se entiende se rechaza explicando el formato", raro.body.result.isError === true && txt(raro).includes("coach_proponer"));
+
+		// La web no puede pisar lo que ha escrito Claude despues de que ella leyera.
+		const leida = JSON.parse(txt(await call("app_leer", { doc: "estado/app" })));
+		const vieja = leida.at - 1000;
+		const pisar = JSON.parse(txt(await call("app_guardar", { doc: "estado/app", version: vieja, datos: { plan: {}, sports: ["bici"] } })));
+		check("con una version vieja no se guarda: conflicto", pisar.ok === false && pisar.conflicto === true && pisar.at === leida.at);
+		check("y el plan sigue ahi", Object.keys(JSON.parse(txt(await call("app_leer", { doc: "estado/app" }))).plan).length === 4);
+		const buena = JSON.parse(txt(await call("app_guardar", { doc: "estado/app", version: leida.at, fusionar: true, datos: { nombre: "B" } })));
+		check("con la version al dia se guarda y devuelve la nueva", buena.ok === true && typeof buena.at === "number");
 	}
 	// Solo garmin_save_course escribe; anunciarlas todas como de solo
 	// lectura invitaba al cliente a llamarla sin preguntar.
@@ -961,7 +987,7 @@ const rpc = async (env, token, message) => {
 	check("el token de acceso vale sin leer del KV", init.body.result?.serverInfo?.name === "garmin");
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("las herramientas se listan igualmente", list.body.result.tools.length === 29);
+	check("las herramientas se listan igualmente", list.body.result.tools.length === 30);
 
 	// Y el dato que si vive en KV avisa en vez de mentir
 	const call = await rpc(env, tokens.access_token, {
@@ -1571,6 +1597,33 @@ const rpc = async (env, token, message) => {
 	await llamar(ana, "intervals_desconectar");
 	check("desconectar borra la clave", ![...env._store.keys()].some((k) => k.startsWith("intervals:")));
 	globalThis.fetch = abajo;
+}
+
+// ── 14. myCoach dentro de Claude (MCP Apps) ──
+{
+	mockGarmin({ "ana@x.com": { password: "a", data: { displayName: "ana", hrv: 50 } } });
+	const env = makeEnv();
+	const pedidas = [];
+	env.MYCOACH = { fetch: async (req) => { pedidas.push(new URL(req.url).pathname); return new Response("<!doctype html><html><body>myCoach</body></html>"); } };
+	const tok = (await connect(env, "ana@x.com", "a")).tokens.access_token;
+	const init = await rpc(env, tok, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } });
+	check("el servidor anuncia recursos", Boolean(init.body.result.capabilities.resources));
+	check("las instrucciones dicen cuando abrir la app", init.body.result.instructions.includes("mycoach_abrir"));
+	const lista = await rpc(env, tok, { jsonrpc: "2.0", id: 2, method: "resources/list" });
+	const rec = lista.body.result.resources[0];
+	check("la app es un recurso ui:// de tipo MCP App", rec?.uri === "ui://mycoach/app" && rec.mimeType === "text/html;profile=mcp-app");
+	const tools = (await rpc(env, tok, { jsonrpc: "2.0", id: 3, method: "tools/list" })).body.result.tools;
+	const abrir = tools.find((t) => t.name === "mycoach_abrir");
+	check("mycoach_abrir enlaza con la pantalla", abrir?._meta?.ui?.resourceUri === "ui://mycoach/app");
+	check("las demas herramientas no abren pantallas", !tools.find((t) => t.name === "coach_hoy")._meta);
+	const leido = await rpc(env, tok, { jsonrpc: "2.0", id: 4, method: "resources/read", params: { uri: "ui://mycoach/app" } });
+	const c = leido.body.result.contents[0];
+	check("leer el recurso da el HTML de la app", c.mimeType === "text/html;profile=mcp-app" && c.text.includes("myCoach") && pedidas[0] === "/mcp-app");
+	await rpc(env, tok, { jsonrpc: "2.0", id: 5, method: "resources/read", params: { uri: "ui://mycoach/app" } });
+	check("el HTML se guarda unos minutos: no se pide cada vez", pedidas.length === 1);
+	check("un recurso que no existe da error", Boolean((await rpc(env, tok, { jsonrpc: "2.0", id: 6, method: "resources/read", params: { uri: "ui://otra" } })).body.error));
+	const r = JSON.parse((await rpc(env, tok, { jsonrpc: "2.0", id: 7, method: "tools/call", params: { name: "mycoach_abrir", arguments: { pantalla: "plan" } } })).body.result.content[0].text);
+	check("mycoach_abrir devuelve la pantalla pedida", r.abierta === true && r.pantalla === "plan");
 }
 
 /** Firma un token como lo hace el worker, para poder fabricar uno en un test. */

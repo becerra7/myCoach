@@ -19,6 +19,13 @@ binding = "LOGS"
 database_name = "garmin-diag"
 database_id = "32c6dc43-3fb2-469e-85e8-6f503ea8a925"
 
+# La app myCoach dentro de Claude (MCP Apps): su HTML lo sirve el Worker de la
+# web y aqui se trae por service binding (por la URL publica, entre Workers de
+# la misma cuenta, Cloudflare devuelve 404).
+[[services]]
+binding = "MYCOACH"
+service = "mycoach"
+
 # Segundo Worker, identico salvo el nombre. Claude distingue los conectores
 # por URL, asi que dos URLs son dos conectores y permiten tener dos cuentas
 # de Garmin conectadas a la vez en la misma cuenta de Claude.
@@ -39,6 +46,10 @@ id = "7711af0372714afd942bf460cff02518"
 binding = "LOGS"
 database_name = "garmin-diag"
 database_id = "32c6dc43-3fb2-469e-85e8-6f503ea8a925"
+
+[[env.segundo.services]]
+binding = "MYCOACH"
+service = "mycoach"
 
 # Worker de pruebas: el codigo de una rama, en otra URL, sin tocar los
 # conectores de produccion. Se anade en Claude como un conector mas
@@ -61,6 +72,10 @@ id = "7711af0372714afd942bf460cff02518"
 binding = "LOGS"
 database_name = "garmin-diag"
 database_id = "32c6dc43-3fb2-469e-85e8-6f503ea8a925"
+
+[[env.pruebas.services]]
+binding = "MYCOACH"
+service = "mycoach"
 
 # SIGNING_KEY no se declara como requerido a proposito. Se sube en el propio
 # despliegue con --secrets-file, y exigirlo aqui podria hacer que wrangler

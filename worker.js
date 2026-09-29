@@ -1066,7 +1066,10 @@ const TOOLS = {
 		title: "Guardar datos en myCoach",
 		write: true,
 		description:
-			"Guarda un documento de la app myCoach para este usuario. Con 'fusionar' mezcla los campos de primer nivel con lo que ya hay (p. ej. solo 'plan' o solo 'meals' en estado/app); con 'anadir' agrega 'datos' al final de una lista (p. ej. notas). Escribe en la app del usuario: confirme con el antes los cambios de plan o de comidas.",
+			"Guarda un documento de la app myCoach para este usuario. Con 'fusionar' mezcla los campos de primer nivel con lo que ya hay (p. ej. solo 'meals' en estado/app); con 'anadir' agrega 'datos' al final de una lista (p. ej. notas). " +
+			"PARA CAMBIAR EL PLAN USE coach_proponer, no esta herramienta: valida las reglas y guarda en el sitio correcto. Si aun asi escribe " +
+			"'plan' (esta semana) o 'next' (la siguiente) en estado/app, el formato es { \"AAAA-MM-DD\": { dep, t, d, min } } con dep = bici|correr|skimo|fuerza, " +
+			"t = rec|fondo|tempo|int|otros|descanso, d = descripcion corta y min = minutos. Escribe en la app del usuario: confirme con el antes los cambios.",
 		schema: {
 			type: "object",
 			properties: {
@@ -1074,21 +1077,39 @@ const TOOLS = {
 				datos: { description: "Contenido JSON del documento" },
 				fusionar: { type: "boolean" },
 				anadir: { type: "boolean" },
+				version: { type: "number", description: "Solo para la app: el 'at' que conoce. Si el documento ha cambiado desde entonces, no se guarda." },
 			},
 			required: ["doc", "datos"],
 		},
-		run: async (env, userId, { doc, datos, fusionar, anadir }) => {
+		run: async (env, userId, { doc, datos, fusionar, anadir, version }) => {
 			if (!APP_DOC.test(doc || "")) throw new HttpError(400, "Documento no valido");
 			const key = appKey(userId, doc);
+			const actual = await env.GARMIN.get(key, "json");
+			// La app guarda el documento entero con lo que tiene en local. Si otro (tu Claude,
+			// el entrenador) lo ha cambiado despues de que ella lo leyera, no se pisa: se le
+			// dice que recargue. Asi un plan subido desde Claude no desaparece al abrir la web.
+			if (typeof version === "number" && actual && typeof actual.at === "number" && actual.at !== version)
+				return { ok: false, conflicto: true, doc, at: actual.at };
+			let normalizado = 0;
+			if (doc === "estado/app" && datos && typeof datos === "object" && !Array.isArray(datos)) {
+				datos = { ...datos };
+				for (const campo of ["plan", "next"]) {
+					if (datos[campo] && typeof datos[campo] === "object") {
+						const r = normalizarPlan(datos[campo], (datos.sports || actual?.sports || []).find((x) => DEPORTES_ENTRENABLES.has(x)));
+						datos[campo] = r.plan;
+						normalizado += r.cambiados;
+					}
+				}
+			}
 			let value = datos;
-			if (anadir) value = [...((await env.GARMIN.get(key, "json")) || []), datos].slice(-500);
-			else if (fusionar && datos && typeof datos === "object") value = { ...((await env.GARMIN.get(key, "json")) || {}), ...datos };
+			if (anadir) value = [...(actual || []), datos].slice(-500);
+			else if (fusionar && datos && typeof datos === "object") value = { ...(actual || {}), ...datos };
 			// Sello de tiempo: la app sabe asi que hay cambios hechos desde Claude.
 			if (value && typeof value === "object" && !Array.isArray(value)) value = { ...value, at: Date.now() };
 			const text = JSON.stringify(value);
 			if (text.length > 5_000_000) throw new HttpError(413, "Documento demasiado grande");
 			await env.GARMIN.put(key, text);
-			return { ok: true, doc, bytes: text.length };
+			return { ok: true, doc, bytes: text.length, at: value?.at ?? null, ...(normalizado ? { sesiones_normalizadas: normalizado } : {}) };
 		},
 	},
 	garmin_status: {
@@ -1692,7 +1713,7 @@ async function handleRpc(message, env, userId) {
 		const asked = params?.protocolVersion;
 		return rpcResult(id, {
 			protocolVersion: SUPPORTED_PROTOCOLS.includes(asked) ? asked : DEFAULT_PROTOCOL,
-			capabilities: { tools: { listChanged: false } },
+			capabilities: { tools: { listChanged: false }, resources: { listChanged: false } },
 			serverInfo: SERVER_INFO,
 			instructions:
 				"Datos de Garmin Connect del usuario que ha autorizado este conector. Las fechas van en " +
@@ -1719,8 +1740,18 @@ async function handleRpc(message, env, userId) {
 				description: t.description,
 				inputSchema: t.schema,
 				annotations: { readOnlyHint: t.write !== true, destructiveHint: false },
+				// MCP Apps: la herramienta se enseña con una pantalla (ui://) si el cliente sabe.
+				...(t.ui ? { _meta: { ui: { resourceUri: t.ui }, "ui/resourceUri": t.ui } } : {}),
 			})),
 		});
+
+	if (method === "resources/list") return rpcResult(id, { resources: RECURSOS_UI });
+
+	if (method === "resources/read") {
+		const recurso = RECURSOS_UI.find((r) => r.uri === params?.uri);
+		if (!recurso) return rpcError(id, -32602, `Recurso desconocido: ${params?.uri}`);
+		return rpcResult(id, { contents: [{ uri: recurso.uri, mimeType: recurso.mimeType, text: await htmlDeLaApp(env), _meta: recurso._meta }] });
+	}
 
 	if (method === "tools/call") {
 		const tool = TOOLS[params?.name];
@@ -2698,6 +2729,65 @@ async function nombreEntrenador(env, userId) {
 	return n || NOMBRE_COACH;
 }
 
+/**
+ * Un plan escrito a mano (por Claude con app_guardar, por ejemplo) puede
+ * llegar con otros nombres de campo: tipo, titulo, detalle, duracion_min…
+ * Se traduce al formato de la app ({ dep, t, d, min }) en vez de guardar
+ * algo que la app no sabe leer. Lo que no se puede entender, se rechaza
+ * explicando el formato.
+ */
+const ALIAS_TIPO = [
+	[/descans|rest|off|libre/, "descanso"],
+	[/recup|recover|regenera|muy suave/, "rec"],
+	[/serie|interval|vo2|int\b|intens|hiit|sprint|anaerob/, "int"],
+	[/tempo|umbral|threshold|sweet|ritmo/, "tempo"],
+	[/fondo|z2|zona 2|base|suave|endurance|resistencia|largo|rodaje|aerob/, "fondo"],
+	[/fuerza|gym|gimnas|core|pesas|strength|movilidad|otros/, "otros"],
+];
+const ALIAS_DEPORTE = [
+	[/bici|cicl|bike|cycl|ride|mtb|gravel|rodillo/, "bici"],
+	[/corr|run|carrera|trail/, "correr"],
+	[/skimo|travesia|ski.?touring|backcountry/, "skimo"],
+	[/fuerza|gym|gimnas|core|pesas|strength|movilidad|superior|inferior|cuerpo/, "fuerza"],
+];
+const buscar = (tabla, texto) => tabla.find(([re]) => re.test(texto))?.[1] ?? null;
+
+function normalizarSesion(s, deporteDefecto) {
+	if (!s || typeof s !== "object") return null;
+	if (DEPORTES_APP.has(s.dep) && TIPOS_SESION.has(s.t)) return null; // ya esta bien
+	const texto = [s.t, s.tipo, s.type, s.titulo, s.title, s.detalle, s.descripcion, s.d, s.dep, s.deporte, s.sport]
+		.filter((x) => typeof x === "string").join(" ").toLowerCase();
+	const t = TIPOS_SESION.has(s.t) ? s.t : buscar(ALIAS_TIPO, String(s.tipo ?? s.type ?? s.t ?? "").toLowerCase()) || buscar(ALIAS_TIPO, texto);
+	let dep = DEPORTES_APP.has(s.dep) ? s.dep : buscar(ALIAS_DEPORTE, String(s.deporte ?? s.sport ?? s.dep ?? "").toLowerCase()) || buscar(ALIAS_DEPORTE, texto);
+	if (!dep && t === "descanso") dep = "bici";
+	if (!dep && t === "otros") dep = "fuerza";
+	if (!dep && t && DEPORTES_ENTRENABLES.has(deporteDefecto)) dep = deporteDefecto; // "60 min Z2" sin deporte: el suyo
+	if (!t || !dep) throw new HttpError(400,
+		`No entiendo la sesion ${JSON.stringify(s).slice(0, 120)}. Formato del plan: { "AAAA-MM-DD": { "dep": "bici|correr|skimo|fuerza", ` +
+		`"t": "rec|fondo|tempo|int|otros|descanso", "d": "descripcion corta", "min": 60 } }. Mejor aun: use coach_proponer.`);
+	const titulo = [s.titulo ?? s.title, s.detalle ?? s.descripcion ?? s.d].filter((x) => typeof x === "string" && x.trim()).join(": ");
+	const minutos = [s.min, s.minutos, s.duracion_min, s.duracion, s.duration_min].find((x) => Number.isFinite(Number(x)) && x !== null && x !== "");
+	return {
+		dep: t === "otros" && dep !== "fuerza" && /fuerza|core|gym|superior|inferior/.test(texto) ? "fuerza" : dep,
+		t: dep === "fuerza" && t !== "descanso" ? "otros" : t,
+		d: (titulo || (t === "descanso" ? "Descanso" : t)).slice(0, 120),
+		min: t === "descanso" ? 0 : Math.round(Number(minutos) || 0),
+		...(Number.isFinite(Number(s.fc_max)) ? { fc_max: Math.round(Number(s.fc_max)) } : {}),
+	};
+}
+
+function normalizarPlan(plan, deporteDefecto) {
+	const salida = {};
+	let cambiados = 0;
+	for (const [fecha, s] of Object.entries(plan || {})) {
+		if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) throw new HttpError(400, `Fecha no valida en el plan: ${fecha} (use AAAA-MM-DD).`);
+		const n = normalizarSesion(s, deporteDefecto);
+		if (n) cambiados++;
+		salida[fecha] = n || s;
+	}
+	return { plan: salida, cambiados };
+}
+
 function objetivoDe(estadoApp) {
 	const goal = estadoApp?.goal || {};
 	const modo = MODOS_COACH[goal.modo] ? goal.modo : "forma";
@@ -3545,7 +3635,9 @@ const instruccionesCoach = (nombre = NOMBRE_COACH) =>
 	" DATOS Y GRAFICAS: nunca pida capturas de pantalla. garmin_activity_detail trae todas las metricas y las series de la " +
 	"actividad (stamina incluida si el reloj la graba) con un perfil de 24 tramos; si intervals_estado dice que Intervals.icu " +
 	"esta conectado, intervals_actividades, intervals_actividad (intervalos y series), intervals_bienestar e intervals_curvas " +
-	"(mejores marcas) dan aun mas detalle: eficiencia, desacople, W', zonas de potencia y ritmo, dinamicas de carrera y clima.";
+	"(mejores marcas) dan aun mas detalle: eficiencia, desacople, W', zonas de potencia y ritmo, dinamicas de carrera y clima." +
+	" PANTALLAS: si el usuario quiere ver su app, su plan, su semana, su forma o sus pueblos, o acaba de cambiar el plan, " +
+	"abra la app dentro de la conversacion con mycoach_abrir (pantalla hoy, plan, forma, pueblos o ajustes).";
 const limpio_entrenador_invalido = (c) =>
 	c.entrenador !== undefined &&
 	(typeof c.entrenador !== "object" || !String(c.entrenador?.nombre || "").trim() || String(c.entrenador.nombre).trim().length > 24);
@@ -3886,6 +3978,78 @@ const INTERVALS_TOOLS = {
 };
 
 Object.assign(TOOLS, INTERVALS_TOOLS);
+
+// ─────────────────── myCoach dentro de Claude (MCP Apps) ───────────────────
+//
+// La app entera se abre dentro de la conversacion como una vista del conector:
+// Claude lee el recurso ui://mycoach/app (el HTML de la app, version "mcpapp")
+// y lo pinta en un iframe aislado. La vista no tiene red: todo lo pide a Claude
+// por postMessage (tools/call), que llama a estas mismas herramientas. Asi la app
+// de Claude, la web y el chat comparten estado y metodo.
+//
+// El HTML lo construye y lo sirve el Worker de la web (repo myCoach,
+// dist/mcp-app.html). Aqui se trae por service binding (entre Workers de la
+// misma cuenta la URL publica da 404) y se guarda unos minutos en memoria.
+
+const APP_UI = "ui://mycoach/app";
+const RECURSOS_UI = [{
+	uri: APP_UI,
+	name: "myCoach",
+	title: "myCoach",
+	description: "La app myCoach: tu entrenador de hoy, tu semana y tu plan, tu forma y tus pueblos, con tus datos de Garmin.",
+	mimeType: "text/html;profile=mcp-app",
+	_meta: {
+		ui: {
+			prefersBorder: true,
+			csp: { resourceDomains: ["https://fonts.googleapis.com", "https://fonts.gstatic.com"] },
+		},
+	},
+}];
+
+let cacheApp = { html: null, hasta: 0 };
+
+async function htmlDeLaApp(env) {
+	if (cacheApp.html && cacheApp.hasta > Date.now()) return cacheApp.html;
+	const url = `${env.MYCOACH_URL || "https://mycoach.albertbecervas.workers.dev"}/mcp-app`;
+	try {
+		const r = await (env.MYCOACH ? env.MYCOACH.fetch(new Request(url)) : fetch(url));
+		const html = r.ok ? await r.text() : null;
+		if (html && html.includes("<html")) {
+			cacheApp = { html, hasta: Date.now() + 10 * 60 * 1000 };
+			return html;
+		}
+	} catch {
+		// Sin la web, una pagina que lo diga en vez de un error mudo.
+	}
+	return `<!doctype html><html lang="es"><meta charset="utf-8"><body style="font:16px system-ui;padding:24px">
+<h1 style="font-size:20px">No he podido abrir myCoach</h1><p>La app no responde ahora mismo. Prueba en un momento o abre
+<b>mycoach.albertbecervas.workers.dev</b> en el navegador.</p></body></html>`;
+}
+
+const PANTALLAS_APP = ["hoy", "plan", "forma", "pueblos", "ajustes"];
+
+Object.assign(TOOLS, {
+	mycoach_abrir: {
+		title: "Abrir myCoach",
+		ui: APP_UI,
+		description:
+			"Abre la app myCoach dentro de la conversacion, en la pantalla indicada: hoy (el entrenador y la semana), plan, " +
+			"forma, pueblos o ajustes. Uselo cuando el usuario quiera ver su app, su plan, su semana, su forma o sus pueblos, " +
+			"y despues de guardar un cambio de plan, para que lo vea. La app lee y guarda lo mismo que estas herramientas.",
+		schema: {
+			type: "object",
+			properties: { pantalla: { type: "string", enum: PANTALLAS_APP, description: "Por defecto, hoy." } },
+		},
+		run: async (env, userId, { pantalla = "hoy" } = {}) => {
+			const p = PANTALLAS_APP.includes(pantalla) ? pantalla : "hoy";
+			return {
+				abierta: true,
+				pantalla: p,
+				nota: "La app se muestra en la conversacion. Si el cliente no puede ensenar pantallas, el usuario puede abrir mycoach.albertbecervas.workers.dev.",
+			};
+		},
+	},
+});
 
 // ──────────────────── Panel: sesion y endpoints ────────────────────
 
