@@ -92,7 +92,9 @@
   window.PLATFORM = {
     name: 'claude-app',
     // Lo que en la web copia un encargo, aquí lo escribe en la conversación.
-    enClaude: texto => pedir('ui/message', { role: 'user', content: { type: 'text', text: texto } }),
+    // content es una lista de bloques (especificación actual); un objeto suelto lo rechaza Claude por formato.
+    enClaude: texto => pedir('ui/message', { role: 'user', content: [{ type: 'text', text: texto }] })
+      .then(r => { if (r && r.isError) throw new Error('Claude no ha aceptado el mensaje'); return r; }),
     abrirEnlace: url => pedir('ui/open-link', { url }),
     pantallaCompleta: () => pedir('ui/request-display-mode', { mode: 'fullscreen' }).then(r => { contexto.displayMode = r && r.mode; return r; }),
     puedePantallaCompleta: () => (contexto.availableDisplayModes || []).includes('fullscreen') && contexto.displayMode !== 'fullscreen',
