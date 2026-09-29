@@ -95,16 +95,17 @@ function sheetDia(f) {
     const s = sesion(f); const as = acts().filter(a => a.f === f);
     if (!s) return as.length ? as.map(a => `<button type="button" class="li" data-a="push-close" data-v="actividad" data-id="${a.id}"><span class="main"><b>${esc(a.lugar)}</b><span>${SPORTS[a.dep].n} · ${dur(a.min)}</span></span>${ic('chev', 18, 'chev')}</button>`).join('') : '<p class="muted">Sin actividad ni plan.</p>';
     const k = tipoSes(s);
+    if (s.a && fuerzaDelDia(f)) return `<p style="font-size:18px"><b>${esc(s.d)}</b></p>${bloqueFuerza(f)}<button class="btn text" type="button" data-a="push-close" data-v="actividad" data-id="${s.a.id}">Ver la actividad</button>`;
     if (s.a) return `<div class="row">${chip(k)}${s.a.sim ? simTag() : ''}</div><p><b>${esc(s.a.lugar)}</b> · ${s.a.km ? `${nf(s.a.km)} km · ` : ''}${dur(s.a.min)}${s.a.fc ? ` · ${s.a.fc} ppm` : ''}</p>${s.a.z ? distBar(s.a.z) : ''}
       ${s.t !== k && s.t !== 'otros' ? `<p class="small">Planeado: <b>${TIPOS[s.t].n}</b> (${esc(s.d)}).</p>` : ''}<button class="btn fill" type="button" data-a="push-close" data-v="actividad" data-id="${s.a.id}">Ver actividad</button>`;
     const pasado = f < HOY;
     return `<div class="row">${sportDot2(s.dep)} <b>${SPORTS[s.dep].n}</b> ${s.t !== 'otros' ? chip(s.t) : ''}${s.min ? `<span class="muted small">${dur(s.min)}</span>` : ''}</div>
-      <p style="font-size:18px"><b>${esc(s.d)}</b></p>${s.ruta ? `<p class="small muted">Ruta: ${esc(s.ruta)}</p>` : ''}
+      <p style="font-size:18px"><b>${esc(s.d)}</b></p>${s.ruta ? `<p class="small muted">Ruta: ${esc(s.ruta)}</p>` : ''}${bloqueFuerza(f)}
       ${pasado ? '<p class="small" style="color:var(--bad)">No consta en Garmin. Si la hiciste sin reloj, márcala como hecha.</p>' : ''}
       <div class="list">
         ${pasado ? `<button class="li" type="button" data-a="mark-done" data-v="${f}">${ic('check')}<span class="main"><b>Marcar como hecha</b></span></button>` : `<button class="li" type="button" data-a="move" data-v="${f}">${ic('move')}<span class="main"><b>Mover a otro día</b></span>${ic('chev', 18, 'chev')}</button>`}
         <button class="li" type="button" data-a="otro" data-v="${f}">${ic('edit')}<span class="main"><b>Cambiar por otra cosa</b></span>${ic('chev', 18, 'chev')}</button>
-        <button class="li" type="button" data-a="watch" data-v="${f}">${ic('watch')}<span class="main"><b>Enviar al reloj</b><span>Por validar con Garmin</span></span></button>
+        ${fuerzaDelDia(f) ? '' : `<button class="li" type="button" data-a="watch" data-v="${f}">${ic('watch')}<span class="main"><b>Enviar al reloj</b><span>Por validar con Garmin</span></span></button>`}
       </div>`;
   } });
 }

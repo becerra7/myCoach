@@ -27,6 +27,8 @@ export const TOOLS = new Set([
   // Intervals.icu: la clave se manda una vez al conector, que la guarda cifrada.
   'intervals_estado', 'intervals_conectar', 'intervals_desconectar',
   'intervals_actividades', 'intervals_actividad', 'intervals_bienestar', 'intervals_curvas',
+  // Fuerza: el entreno del día, su histórico y mandarlo al reloj (con confirmación en la app).
+  'fuerza_dia', 'fuerza_historial', 'fuerza_enviar_garmin',
 ]);
 
 const json = (data, status = 200, headers = {}) =>
