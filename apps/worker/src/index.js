@@ -177,7 +177,14 @@ export async function handleApi(request, env) {
   if (pathname === '/api/callback') {
     const state = url.searchParams.get('state'), code = url.searchParams.get('code');
     const verifier = state && await env.SESIONES.get(`mc:pkce:${state}`);
-    if (!verifier || !code) return new Response('Enlace caducado. Vuelve a intentarlo desde la app.', { status: 400 });
+    if (!verifier || !code) {
+      // Un segundo envío del login (doble toque, volver atrás) trae un enlace ya usado:
+      // si la sesión ya está hecha, a la app; si no, una página con el botón para reintentar.
+      if (sesion && !url.searchParams.get('error')) return new Response(null, { status: 302, headers: { Location: '/' } });
+      const cancelado = url.searchParams.get('error') === 'access_denied';
+      return paginaAviso(cancelado ? 'Has cancelado la entrada' : 'Este enlace ya no vale',
+        cancelado ? 'No se ha conectado nada. Puedes volver a intentarlo cuando quieras.' : 'Los enlaces para entrar solo sirven una vez y durante 10 minutos. Vuelve a intentarlo: es un momento.');
+    }
     await env.SESIONES.delete(`mc:pkce:${state}`);
     const c = await cliente(env, origin);
     const t = await token(env, c, { grant_type: 'authorization_code', code, redirect_uri: c.redirect, code_verifier: verifier });
@@ -239,3 +246,15 @@ export default {
     return env.ASSETS.fetch(request);
   },
 };
+
+/** Página mínima para avisos del login, con el botón para reintentar. */
+function paginaAviso(titulo, texto) {
+  const e = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  return new Response(`<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${e(titulo)} · myCoach</title>
+<style>:root{color-scheme:light dark}body{margin:0;font:17px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;background:#F2F2F7;color:#000}main{max-width:420px;margin:0 auto;padding:48px 16px}
+h1{font-size:26px;margin:0 0 8px}p{color:#5F5F66;margin:0 0 24px}a{display:flex;align-items:center;justify-content:center;min-height:48px;border-radius:999px;background:#1D4FA0;color:#fff;font-weight:600;text-decoration:none}
+a.sec{background:none;color:#1D4FA0;margin-top:8px}a:focus-visible{outline:2px solid #1D4FA0;outline-offset:3px}
+@media (prefers-color-scheme:dark){body{background:#000;color:#fff}p{color:#AEAEB2}a{background:#8DB3F7;color:#0B1B36}a.sec{background:none;color:#8DB3F7}}</style></head>
+<body><main><h1>${e(titulo)}</h1><p>${e(texto)}</p><a href="/api/login">Volver a entrar</a><a class="sec" href="/">Ir a myCoach</a></main></body></html>`,
+    { status: 400, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'" } });
+}
