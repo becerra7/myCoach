@@ -73,7 +73,7 @@ function cardEstado() {
     ${motivo ? `<p class="small muted est-motivo">${esc(cap1(motivo))}.</p>` : ''}
     ${sm.datos_que_faltan && sm.datos_que_faltan.length === 3 ? '<p class="small muted">Garmin aún no tiene tu noche: el semáforo se afinará cuando la tenga.</p>' : ''}
     ${piezas ? `<ul class="mets" aria-label="Por qué">${piezas}</ul>` : ''}
-    ${c.demo ? '' : `<button class="link coach-sentir" type="button" data-a="coach-sentir-hoja">${ic('edit', 18)} Cuéntame cómo te encuentras</button>`}
+    ${(r => `<button class="link coach-sentir" type="button" data-a="coach-sentir-hoja">${ic('edit', 18)} ${r ? `<span class="grow">${esc(r)}</span><span class="u">Cambiar</span>` : 'Cuéntame cómo te encuentras'}</button>`)(resumenSentir())}
   </section>`;
 }
 
@@ -126,19 +126,67 @@ async function coachAplicar() {
   } catch (e) { toast('No he podido cambiar el plan: ' + (e.message || e.code || 'error'), { ms: 7000 }); }
 }
 
-/* Cómo te encuentras: una hoja con opciones y un campo para el dolor (nada de prompt()) */
-const SENSACIONES = [[1, 'Reventado'], [2, 'Cansado'], [3, 'Normal'], [4, 'Bien'], [5, 'Genial']];
-function hojaSentir() {
-  openSheet({ title: '¿Cómo te encuentras?', size: 'auto', id: 'sentir', body: () => `<p class="small muted">Lo tengo en cuenta en el semáforo de hoy y de mañana.</p>
-    <div class="opts" role="group" aria-label="Cómo te encuentras">${SENSACIONES.map(([n, t]) => `<button type="button" class="radio" style="border:0;font:inherit;color:inherit;text-align:left;width:100%" data-a="coach-sentir" data-v="${n}"><b style="font-weight:600">${t}</b></button>`).join('')}</div>
-    <label class="stack" for="dolor-t" style="gap:6px;margin-top:20px"><b>¿Te duele algo?</b><textarea id="dolor-t" class="search" style="min-height:76px;padding:10px 14px;font:15px/1.4 var(--font-ui)" placeholder="Qué te duele y desde cuándo"></textarea></label>
-    <div class="btns"><button class="btn tonal" type="button" data-a="coach-dolor">Anotar el dolor</button></div>` });
+/* Cómo te encuentras: una entrada por día (ánimo, físico y dolor) que se corrige, no se acumula.
+   El conector la guarda (coach_anotar) y coach_hoy la devuelve en anotado_hoy para editarla. */
+const ANIMO = ['Muy mal', 'Mal', 'Normal', 'Bien', 'Muy bien'];
+const FISICO = ['Agotado', 'Cansado', 'Normal', 'Bien', 'Genial'];
+// Caras dibujadas: la boca pasa de triste a sonriente; el texto va siempre debajo.
+const BOCA = ['M8 16.5q4-3.5 8 0', 'M8.5 16q3.5-2 7 0', 'M8.5 15.5h7', 'M8.5 14.5q3.5 2.5 7 0', 'M8 14q4 4.5 8 0'];
+const cara = (n, t = 30) => `<svg viewBox="0 0 24 24" width="${t}" height="${t}" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="9.5"/><circle cx="9" cy="10" r=".9" fill="currentColor" stroke="none"/><circle cx="15" cy="10" r=".9" fill="currentColor" stroke="none"/><path d="${BOCA[n - 1]}"/></svg>`;
+const anotadoHoy = () => (S.modo === 'demo' ? S.sentirDemo && S.sentirDemo.f === HOY && S.sentirDemo : COACH && COACH.anotado_hoy) || { sensacion: null, dolor: null };
+let SENTIR = null; // borrador de la hoja
+
+function resumenSentir() {
+  const { sensacion: s, dolor: d } = anotadoHoy();
+  const partes = [s && s.animo ? `ánimo ${ANIMO[s.animo - 1].toLowerCase()}` : '', s && s.fisico ? `físico ${FISICO[s.fisico - 1].toLowerCase()}` : '', d ? 'dolor anotado' : ''].filter(Boolean);
+  return partes.length ? `Hoy: ${partes.join(' · ')}` : '';
 }
 
-async function coachAnotar(entrada, gracias) {
-  if (!LIVE) return;
-  try { await coachCall('coach_anotar', entrada, true); toast(gracias); cargarCoach(true); }
-  catch (e) { toast('No he podido anotarlo: ' + (e.message || e.code || 'error')); }
+function hojaSentir() {
+  const { sensacion: s, dolor: d } = anotadoHoy();
+  SENTIR = { animo: s && s.animo || null, fisico: s && s.fisico || null, dolor: d ? d.texto : '', habia: { ...(s || {}), dolor: d ? d.texto : '' } };
+  const fila = (k, t, nombres) => `<fieldset class="caras-f"><legend>${t}</legend><div class="caras" role="radiogroup" aria-label="${t}">${nombres.map((l, i) => {
+    const on = SENTIR[k] === i + 1;
+    return `<button type="button" class="cara" role="radio" aria-checked="${on}" tabindex="${on || (!SENTIR[k] && i === 2) ? 0 : -1}" data-a="sentir-set" data-k="${k}" data-v="${i + 1}">${cara(i + 1)}<span>${l}</span></button>`;
+  }).join('')}</div></fieldset>`;
+  openSheet({ title: '¿Cómo te encuentras hoy?', size: 'auto', id: 'sentir', body: () => `<p class="small muted">Una entrada por día: si cambias algo, se corrige. Lo tengo en cuenta en el semáforo de hoy y de mañana.</p>
+    ${fila('animo', 'Ánimo', ANIMO)}${fila('fisico', 'Físico', FISICO)}
+    <label class="stack" for="dolor-t" style="gap:6px;margin-top:16px"><b>¿Te duele algo?</b><textarea id="dolor-t" class="search" style="min-height:64px;padding:10px 14px;font:15px/1.4 var(--font-ui)" placeholder="Qué te duele y desde cuándo">${esc(SENTIR.dolor)}</textarea></label>
+    ${SENTIR.habia.dolor ? '<button class="btn text" type="button" data-a="sentir-sin-dolor">Ya no me duele</button>' : ''}
+    <div class="btns"><button class="btn fill" type="button" data-a="sentir-guardar">${s || d ? 'Guardar los cambios' : 'Guardar'}</button></div>` });
+}
+
+function marcarCara(el) {
+  const k = el.dataset.k, v = +el.dataset.v; SENTIR[k] = v;
+  el.parentElement.querySelectorAll('.cara').forEach(b => { const on = +b.dataset.v === v; b.setAttribute('aria-checked', on); b.tabIndex = on ? 0 : -1; });
+  el.focus();
+}
+
+// Teclado en cada fila de caras: las flechas mueven la elección, como en un grupo de radios.
+document.addEventListener('keydown', e => {
+  const el = e.target; if (!el.classList || !el.classList.contains('cara')) return;
+  const d = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key]; if (!d) return;
+  e.preventDefault(); const bs = [...el.parentElement.querySelectorAll('.cara')]; marcarCara(bs[(bs.indexOf(el) + d + bs.length) % bs.length]);
+});
+
+async function guardarSentir(sinDolor) {
+  const st = SENTIR; const dolor = sinDolor ? '' : (($('#dolor-t') || {}).value || '').trim();
+  const cambiaSens = (st.animo || null) !== (st.habia.animo || null) || (st.fisico || null) !== (st.habia.fisico || null);
+  const cambiaDolor = dolor !== (st.habia.dolor || '');
+  if (!cambiaSens && !cambiaDolor) { closeSheet(); return; }
+  if (!st.animo && !st.fisico && !dolor && !st.habia.dolor) { toast('Elige cómo estás de ánimo o de físico'); return; }
+  closeSheet();
+  const gracias = dolor && cambiaDolor ? 'Anotado. Hoy bajamos la carga; si no mejora, consulta a un profesional.'
+    : st.fisico && st.fisico <= 2 ? 'Anotado: lo tengo en cuenta para hoy' : st.habia.animo || st.habia.fisico || st.habia.dolor ? 'Corregido' : 'Anotado';
+  if (S.modo === 'demo' || !LIVE) {
+    S.sentirDemo = { f: HOY, sensacion: st.animo || st.fisico ? { animo: st.animo, fisico: st.fisico } : null, dolor: dolor ? { texto: dolor } : null };
+    save(); render(); toast(gracias); return;
+  }
+  try {
+    if (cambiaSens) await coachCall('coach_anotar', { tipo: 'sensacion', ...(st.animo ? { animo: st.animo } : {}), ...(st.fisico ? { fisico: st.fisico } : {}) }, true);
+    if (cambiaDolor) await coachCall('coach_anotar', dolor ? { tipo: 'dolor', texto: dolor } : { tipo: 'dolor', borrar: true }, true);
+    toast(gracias); cargarCoach(true);
+  } catch (e) { toast('No he podido anotarlo: ' + (e.message || e.code || 'error')); }
 }
 
 async function guardarNombreCoach(v) {
@@ -153,8 +201,9 @@ Object.assign(ACTIONS, {
   'coach-aplicar': () => coachAplicar(),
   'coach-claude': () => enClaude(PROMPT_COACH()),
   'coach-sentir-hoja': () => hojaSentir(),
-  'coach-sentir': el => { const n = +el.dataset.v; closeSheet(); coachAnotar({ tipo: 'sensacion', nivel: n, texto: SENSACIONES.find(x => x[0] === n)[1] }, n <= 2 ? 'Anotado: lo tengo en cuenta para hoy' : 'Anotado'); },
-  'coach-dolor': () => { const t = ($('#dolor-t') || {}).value || ''; if (!t.trim()) { $('#dolor-t')?.focus(); return; } closeSheet(); coachAnotar({ tipo: 'dolor', texto: t.trim() }, 'Anotado. Hoy bajamos la carga; si no mejora, consulta a un profesional.'); },
+  'sentir-set': el => marcarCara(el),
+  'sentir-guardar': () => guardarSentir(false),
+  'sentir-sin-dolor': () => guardarSentir(true),
 });
 
 // Si al abrir se sincroniza, el semáforo se pide al acabar (en sync): no dos veces.

@@ -396,7 +396,7 @@ body.framed .toasts{top:50px}
 
 /* Chat Claude */
 .chat{display:flex;flex-direction:column;gap:10px}
-.msg{max-width:88%;padding:10px 14px;border-radius:20px;font-size:15px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere}
+.msg{max-width:88%;padding:10px 14px;border-radius:20px;font-size:15px;line-height:1.45;white-space:pre-wrap}
 .msg.me{align-self:flex-end;background:var(--tint);color:var(--tint-ink);border-bottom-right-radius:6px}
 .msg.cl{align-self:flex-start;background:var(--card-2);border-bottom-left-radius:6px}
 .msg.think{color:var(--label-2);font-style:italic}
@@ -777,3 +777,13 @@ button.hp-encaje{cursor:pointer;align-items:center;min-height:44px}
 /* Avisos abajo, encima de la barra de pestañas: no tapan "Atrás" */
 .toast{width:max-content;max-width:100%}
 @container app (min-width:840px){.toasts{bottom:24px}}
+/* Cómo te encuentras: dos filas de cinco caras (ánimo y físico) */
+.caras-f{border:0;margin:16px 0 0;padding:0}
+.caras-f legend{font-weight:700;margin-bottom:8px;padding:0}
+.caras{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px}
+.cara{display:flex;flex-direction:column;align-items:center;gap:4px;min-height:64px;padding:8px 2px;border:0;border-radius:14px;background:var(--card-2);color:var(--label-2);font:inherit;font-size:12px;line-height:1.2;text-align:center;cursor:pointer}
+.cara[aria-checked="true"]{background:var(--tint);color:var(--tint-ink);font-weight:700}
+.cara:focus-visible{outline:2px solid var(--tint);outline-offset:2px}
+.coach-sentir .u{text-decoration:underline;text-underline-offset:3px}
+.coach-sentir .grow{flex:1;text-align:left;color:var(--label);font-weight:500}
+.coach-sentir:has(.grow){width:100%}
