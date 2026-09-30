@@ -87,7 +87,7 @@ function comidasIniciales() {
   ];
 }
 const DEFAULTS = () => ({
-  v: 6, onboarded: false, obStep: 0, obConn: false, variant: 'semana', os: null, theme: 'system', framed: null, modo: 'vivo',
+  v: 6, onboarded: false, obStep: 0, obConn: false, variant: 'semana', hoyForma: false, os: null, theme: 'system', framed: null, modo: 'vivo',
   sports: [], fSport: [], pSport: [], pLevel: 'ccaa', townQ: '',
   tab: 'hoy', stack: [], plan: {}, next: null, nextDraft: null, week: null, readiness: null, adapt: null, otro: null,
   goal: { modo: 'forma' }, clasif: 'min', ai: 'claude', testRes: null, overrides: {}, share: { nombre: false, tipo: true, notas: true, pueblos: true }, nombre: '',

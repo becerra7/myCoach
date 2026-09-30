@@ -200,20 +200,60 @@ function syncLine() {
   const t = S.lastSync ? new Date(S.lastSync) : null;
   return `<span class="sync" id="synctxt">${M.fuente === 'vivo' ? '<span class="live">En vivo</span> ' : '<span class="sim">Demo</span> '}${t ? `Actualizado a las ${t.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}` : 'Sin sincronizar'}</span>`;
 }
+/* ===== Hoy y tu semana =====
+   Arriba, la sesión de hoy y si encaja con tu estado (la tarjeta de arriba): si el entrenador
+   propone cambiarla, el antes → después y "Aplicar el cambio". Abajo, la semana en 7 días.
+   Tocando la sesión o un día se abre su hoja, con los ejercicios o los pasos y "Enviar al reloj". */
+function encajeHoy(s) {
+  const c = S.modo === 'demo' ? coachDemo() : COACH;
+  if (s && s.a) return `<button type="button" class="hp-encaje ok" data-a="push" data-v="actividad" data-id="${s.a.id}">${ic('check', 16)}<span class="grow">Hecho: ${esc(s.a.lugar)}${s.a.km && SPORTS[s.a.dep]?.cardio ? ` · ${nf(s.a.km)} km` : ''} · ${dur(s.a.min)}</span>${ic('chev', 16, 'chev')}</button>`;
+  if (c && c.ya_entrenado_hoy && c.ya_entrenado_hoy.length) return `<p class="hp-encaje ok">${ic('check', 16)}<span>Ya has entrenado hoy. Ahora toca recuperar.</span></p>`;
+  if (!s || s.t === 'descanso') return '';
+  const aplicable = c && c.propuesta && c.propuesta.sesion;
+  if (aplicable) return `<div class="hp-encaje ajustar"><p>${ic('info', 16)}<span><b>Con tu estado, mejor ajustarla.</b> ${esc(c.propuesta.texto || '')}</span></p>${coachCambios(c)}
+    <div class="btns"><button class="btn fill" type="button" data-a="coach-aplicar">Aplicar el cambio</button><button class="btn text" type="button" data-a="coach-claude">${ic('claude', 18)} Hablarlo con Claude</button></div></div>`;
+  if (c) return `<p class="hp-encaje ok">${ic('check', 16)}<span>Encaja con tu estado de hoy.</span></p>`;
+  const fit = fitHoy();
+  return fit.nivel === 'suave' ? `<p class="hp-encaje ajustar">${ic('info', 16)}<span>Encaja si lo haces suave: readiness moderada.</span></p>` : '';
+}
+function cardHoyPlan() {
+  const s = sesion(HOY); const r = resumen(SEM);
+  const quePone = s ? (s.t === 'descanso' ? 'Descanso' : s.d) : 'Nada planeado';
+  const detalle = s && s.t !== 'descanso' ? [SPORTS[s.dep]?.n, s.min ? dur(s.min) : ''].filter(Boolean).join(' · ') : (s ? 'Recupera' : 'Día libre');
+  const semana = r.plan ? `${r.hechas} de ${r.plan} hechas · ${nf(r.min / 60)} h` : `${nf(r.min / 60)} h hechas · sin plan`;
+  const ESTADO_DIA = { done: 'hecha', miss: 'no hecha', today: 'hoy' };
+  const strip = days7(SEM).map(f => {
+    const x = sesion(f); const d = dte(f); let cls = '', dot = '';
+    if (x) { dot = x.t === 'descanso' ? '' : `<i style="background:${scol(x.dep)}"></i>`; if (x.a) cls = 'done'; else if (f < HOY && x.t !== 'descanso') cls = 'miss'; if (f === HOY && !x.a) cls = 'today'; }
+    const marca = cls === 'done' ? `<span class="ok">${ic('check', 11)}</span>` : cls === 'miss' ? `<span class="ok ko">${ic('close', 11)}</span>` : '';
+    return `<button type="button" class="d7 ${f === HOY ? 'hoy' : ''}" data-a="day" data-v="${f}" aria-label="${fLarga(f)}${x ? `: ${esc(x.d)}${ESTADO_DIA[cls] ? `, ${ESTADO_DIA[cls]}` : ''}` : ', libre'}"><small aria-hidden="true">${DL[d.getDay()]}</small><span class="b ${cls}">${dot}${marca}</span><small aria-hidden="true">${d.getDate()}</small></button>`;
+  }).join('');
+  return `<section class="card hoyplan" aria-labelledby="hp-t">
+    <h2 id="hp-t" class="vh">Hoy y esta semana</h2>
+    <button type="button" class="hp-sesion" data-a="day" data-v="${HOY}" aria-label="Hoy: ${esc(quePone)}, ${esc(detalle)}. Ver el detalle">
+      <i class="hp-dot" style="background:${s && s.t !== 'descanso' ? scol(s.dep) : 'var(--label-3)'}" aria-hidden="true"></i>
+      <span class="grow stack" style="gap:2px"><b>${esc(quePone)}</b><span class="small muted">${esc(detalle)}${s && s.dep === 'fuerza' && s.entreno ? ' · ver ejercicios' : s && s.entreno_cardio ? ' · ver los pasos' : ''}</span></span>${ic('chev', 18, 'chev')}</button>
+    ${encajeHoy(s)}
+    <div class="hp-sem">
+      <button type="button" class="hp-sem-h" data-a="tab" data-v="plan"><h3>Esta semana</h3><span class="small muted grow">${semana}</span>${ic('chev', 16, 'chev')}</button>
+      <div class="strip7">${strip}</div>
+    </div>
+  </section>`;
+}
+
 function tabHoy() {
   const banner = S.simRide && !S.seenSim && M.fuente === 'demo' ? `<div class="adapt b-full"><div class="row">${ic('pueblos', 26)}<div class="grow"><b style="font-size:17px">Nueva actividad: +3 pueblos</b><p class="small muted">Palau-solità i Plegamans, Polinyà y Santa Perpètua de Mogoda.</p></div></div><div class="btns"><button class="btn fill" type="button" data-a="seen-sim">Ver en el mapa</button></div></div>` : '';
-  // Hoy responde "¿qué hago hoy y por qué?": el entrenador va primero. Después, la semana
-  // y lo que el usuario haya elegido ver en Ajustes. Preparar la semana solo va arriba si
-  // la actual está sin plan (si no, es algo para el fin de semana y va detrás).
-  const coach = cardCoach();
-  const aviso = cardAvisoPlan(); const avisoUrgente = aviso && !planDe(SEM);
-  const orden = S.variant === 'forma' ? ['forma', 'semana'] : S.variant === 'objetivo' ? ['obj', 'semana'] : ['semana', 'forma'];
-  const bloques = { semana: `<div class="${coach ? 'b-side' : 'b-hero'}">${cardSemana(!coach, !!coach)}</div>${avisoUrgente ? '' : aviso}`, forma: `<div class="b-side">${cardForma(true)}</div>`, obj: `<div class="b-side">${cardObjetivo(true)}</div>` };
-  // Si hoy toca fuerza con un entreno, justo después del entrenador: es "qué hago hoy".
-  const html = `<div class="b-hero">${coach || cardReadiness()}</div>` + cardFuerzaHoy() + orden.map(k => bloques[k]).join('');
-  return { title: 'Hoy', html: head('Hoy', `${cap1(fLarga(HOY))}<br>${syncLine()}`) + `<div class="content"><div class="bento">${banner}${avisoUrgente ? aviso : ''}${html}
+  // Hoy responde "¿cómo estoy y qué hago hoy?": tu estado arriba (compacto, cada dato se abre),
+  // debajo la sesión de hoy con si encaja y la semana. "Tu forma" solo si se activa en Ajustes.
+  const estado = cardEstado();
+  const aviso = cardAvisoPlan();
+  return { title: 'Hoy', html: head('Hoy', `${cap1(fLarga(HOY))}${M.fuente === 'vivo' ? '' : `<br>${syncLine()}`}`) + `<div class="content"><div class="bento hoy-v">${banner}
+    <div class="b-full">${estado || cardReadiness()}</div>
+    <div class="b-full">${cardHoyPlan()}</div>
+    ${aviso}
+    ${S.hoyForma ? `<div class="b-full">${cardForma(true)}</div>` : ''}
     <div class="b-full"><div class="section-h"><h2>Tus deportes</h2><button class="link" type="button" data-a="push" data-v="ajustes">Elegir</button></div>${tilesDeportes()}</div>
-    ${S.variant === 'objetivo' ? `<div class="b-third">${cardForma(true)}</div>` : `<div class="b-third">${cardObjetivo(true)}</div>`}<div class="b-third">${cardComida()}</div><div class="b-third">${cardPueblos()}</div>
+    <div class="b-full">${cardComida()}</div>
   </div></div>` };
 }
 function cardObjetivo(mini) {

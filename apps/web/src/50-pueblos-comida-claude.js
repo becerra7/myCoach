@@ -355,6 +355,7 @@ document.addEventListener('input', e => {
 document.addEventListener('change', e => {
   const el = e.target, a = el.dataset && el.dataset.a; if (!a) return;
   if (a === 'share-t') { S.share[el.dataset.v] = el.checked; save(); render(); }
+  if (a === 'hoy-forma') { S.hoyForma = el.checked; save(); render(); document.getElementById('hoy-forma')?.focus(); }
   if (a === 'sport-t') { const v = el.dataset.v; S.sports = el.checked ? [...new Set([...S.sports, v])] : S.sports.filter(x => x !== v); S.fSport = S.fSport.filter(x => S.sports.includes(x)); save(); render(); markFlow('deportes'); }
   if (a === 'set') { S[el.dataset.k] = el.value; if (el.dataset.k === 'modo') { cargarModo(); if (S.modo === 'vivo' && LIVE) sync(false); } save(); render(); document.getElementById(el.id)?.focus(); toast('Guardado'); }
   if (a === 'goal-date') { S.stack[S.stack.length - 1].g.fecha = el.value; save(); }

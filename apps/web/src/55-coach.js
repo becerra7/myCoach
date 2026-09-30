@@ -54,23 +54,62 @@ function coachCambios(c) {
   const fila = (dia, antes, despues) => `<li><b>${esc(dia)}</b><span>${antes ? `<s>${esc(antes.d || TIPOS[antes.t]?.n || '')}</s><span class="vh"> pasa a </span><span aria-hidden="true"> → </span>` : ''}${esc(despues.d)}</span></li>`;
   return `<ul class="coach-cambio" aria-label="Cambios propuestos">${fila('Hoy', c.sesion_prevista, p.sesion)}${p.mover ? fila(cap1(p.mover.dia), p.mover.sustituye, p.mover.sesion) : ''}</ul>`;
 }
-function cardCoach() {
+/* ===== Tu estado hoy: arriba del todo, compacto =====
+   El veredicto del semáforo en una línea y cada dato como una pieza pequeña con su valor
+   y su estado (texto e icono, no solo color). Tocando una pieza se abre qué es, de dónde
+   sale y cómo lo lee el entrenador. "Qué hacer hoy" va en la tarjeta de abajo (Hoy y tu semana). */
+const EST_ICO = { good: 'check', 'label-2': 'dot', warn: 'info', bad: 'stop' };
+const valorCorto = v => v == null ? '—' : String(v).split(/ · |, /)[0];
+const NOMBRE_CORTO = { readiness: 'Readiness', sueno: 'Sueño', vfc: 'VFC', pulso: 'Pulso', frescura: 'Frescura' };
+function cardEstado() {
   const c = S.modo === 'demo' ? coachDemo() : COACH; if (!c) return '';
   const sm = c.semaforo; const [col, lectura, icono] = COACH_TXT[sm.color];
-  const aplicable = c.propuesta && c.propuesta.sesion && !c.ya_entrenado_hoy?.length;
-  const datos = (sm.datos || []).map(d => { const [tono, txt] = COACH_EST[d.estado] || COACH_EST.normal;
-    return `<div class="coach-dato"><dt>${esc(NOMBRE_DATO[d.clave] || d.nombre)}</dt><dd class="coach-est" style="color:var(--${tono})">${txt}</dd><dd class="coach-val"><b>${d.valor == null ? '—' : esc(d.valor)}</b>${d.normal ? `<span class="muted"> · lo normal: ${esc(d.normal)}</span>` : ''}</dd></div>`; }).join('');
-  return `<section class="card coach" aria-labelledby="coach-t">
-    <div class="card-h">${ic('heart', 18)}<span class="grow">${esc(nombreCoach())}</span>${c.demo ? simTag('Demo') : '<span class="live">En vivo</span>'}</div>
-    <h2 id="coach-t" class="coach-estado ${sm.color}"><span class="coach-ico" aria-hidden="true">${ic(icono, 18)}</span>${col}: ${lectura}</h2>
-    <p class="coach-msg">${esc(coachQue(c))}</p>
-    ${aplicable ? coachCambios(c) : ''}
-    ${aplicable ? `<div class="btns"><button class="btn fill" type="button" data-a="coach-aplicar">Aplicar el cambio</button><button class="btn text" type="button" data-a="coach-claude">${ic('claude', 18)} Hablarlo con Claude</button></div>` : ''}
+  const motivo = sm.color === 'verde' ? (sm.positivos || []).slice(0, 2).join(' · ') : (sm.razones || []).slice(0, 2).join(' · ');
+  const piezas = (sm.datos || []).map(d => { const [tono, txt] = COACH_EST[d.estado] || COACH_EST.normal; const nombre = NOMBRE_CORTO[d.clave] || d.nombre;
+    return `<li><button type="button" class="met" data-a="met" data-v="${esc(d.clave)}" aria-label="${esc(nombre)}: ${esc(valorCorto(d.valor))}, ${txt}. Ver qué es">
+      <span class="met-n">${esc(nombre)}</span><b class="met-v">${esc(valorCorto(d.valor)).replace(/ (ms|ppm)$/, ' <small>$1</small>')}</b><span class="met-e" style="color:var(--${tono})">${ic(EST_ICO[tono] || 'dot', 13)}${txt}</span></button></li>`; }).join('');
+  return `<section class="card estado" aria-labelledby="est-t">
+    <div class="est-top"><h2 id="est-t" class="coach-estado ${sm.color}"><span class="coach-ico" aria-hidden="true">${ic(icono, 18)}</span>${col}: ${lectura}</h2></div>
+    ${motivo ? `<p class="small muted est-motivo">${esc(cap1(motivo))}.</p>` : ''}
     ${sm.datos_que_faltan && sm.datos_que_faltan.length === 3 ? '<p class="small muted">Garmin aún no tiene tu noche: el semáforo se afinará cuando la tenga.</p>' : ''}
-    ${datos ? `<h3 class="coach-sub">Por qué</h3><dl class="coach-datos">${datos}</dl>` : ''}
+    ${piezas ? `<ul class="mets" aria-label="Por qué">${piezas}</ul>` : ''}
     ${c.demo ? '' : `<button class="link coach-sentir" type="button" data-a="coach-sentir-hoja">${ic('edit', 18)} Cuéntame cómo te encuentras</button>`}
   </section>`;
 }
+
+/* Qué es cada dato, de dónde sale y cómo lo lee el entrenador (las mismas reglas que el conector) */
+const MET_INFO = {
+  readiness: { t: 'Readiness de Garmin', que: 'La nota de Garmin (de 0 a 100) que junta tu sueño, tu VFC, la carga de los últimos días y el tiempo de recuperación que te queda.', lee: 'Por debajo de 55 el entrenador lo cuenta como algo peor; por debajo de 35, pide recuperar. A partir de 70 suma a favor.' },
+  sueno: { t: 'Sueño', que: 'Las horas que dormiste anoche y la nota de sueño de Garmin. "Lo normal" es tu media de las últimas 4 semanas.', lee: 'Menos de 6 h 15 cuenta como algo peor; menos de 5 h, peor. 7 h o más suma a favor.' },
+  vfc: { t: 'VFC nocturna', que: 'La variabilidad de tu frecuencia cardiaca mientras duermes. Más alta que tu normal suele querer decir que estás bien recuperado. "Lo normal" es tu media de 4 semanas.', lee: 'Si baja más de un 10 % de tu normal es algo peor; más de un 20 %, peor.' },
+  pulso: { t: 'Pulso en reposo', que: 'Tu pulso más bajo del día. Comparado con tu media de 4 semanas.', lee: 'Si sube 4 ppm sobre tu normal es señal de cansancio (o de que algo se incuba); 7 o más, peor.' },
+  frescura: { t: 'Frescura', que: 'Cómo de descansado llegas respecto a lo que has entrenado. Es tu forma (la carga media de las últimas 6 semanas) menos tu fatiga (la carga de los últimos 7 días). La carga de cada actividad sale de su pulso y su duración (TRIMP).', lee: 'Entre −10 y 10, en equilibrio. Más negativo es normal en una semana fuerte; por debajo de −18 el entrenador lo cuenta como algo peor, y por debajo de −30, peor. Por encima de 5 llegas fresco.' },
+};
+function escalaFrescura(v) {
+  // De −40 a 25: cuatro tramos con su nombre, y dónde estás tú.
+  const lo = -48, hi = 25, x = n => `${Math.round((Math.max(lo, Math.min(hi, n)) - lo) / (hi - lo) * 1000) / 10}%`;
+  const tramos = [[-48, -30, 'bad', 'Muy cargado'], [-30, -10, 'warn', 'Cargado'], [-10, 10, 'good', 'Equilibrio'], [10, 25, 'tint', 'Fresco']];
+  return `<div class="escala" role="img" aria-label="Frescura ${Math.round(v)}: ${esc((tramos.find(([a, b]) => v >= a && v < b) || tramos[v < -30 ? 0 : 3])[3])}">
+    <div class="escala-b">${tramos.map(([a, b, t]) => `<span style="left:${x(a)};width:calc(${x(b)} - ${x(a)});background:var(--${t})"></span>`).join('')}<i style="left:${x(v)}"></i></div>
+    <div class="escala-l" aria-hidden="true">${tramos.map(([a, b, , n]) => `<span style="left:${x(a)};width:calc(${x(b)} - ${x(a)})">${n}</span>`).join('')}</div></div>`;
+}
+function hojaMetrica(clave) {
+  const c = S.modo === 'demo' ? coachDemo() : COACH; if (!c) return;
+  const d = (c.semaforo.datos || []).find(x => x.clave === clave); const info = MET_INFO[clave]; if (!d || !info) return;
+  const [tono, txt] = COACH_EST[d.estado] || COACH_EST.normal;
+  const f = c.forma || (c.demo ? { forma_ctl: 48, fatiga_atl: 56, frescura_tsb: -8 } : null);
+  const frescura = clave === 'frescura' && f && f.frescura_tsb != null ? `
+    <div class="fields" style="margin-top:4px"><div class="field"><span class="l">Forma · 6 semanas</span><span class="v">${Math.round(f.forma_ctl)}</span></div><div class="field"><span class="l">Fatiga · 7 días</span><span class="v">${Math.round(f.fatiga_atl)}</span></div></div>
+    <p class="small muted" style="margin:0">${Math.round(f.forma_ctl)} de forma − ${Math.round(f.fatiga_atl)} de fatiga = <b>${Math.round(f.frescura_tsb)}</b> de frescura.</p>
+    ${escalaFrescura(f.frescura_tsb)}` : '';
+  openSheet({ title: info.t, size: 'auto', id: 'met', body: () => `<div class="stack" style="gap:14px">
+    <div class="row" style="align-items:baseline;gap:10px;flex-wrap:wrap"><b style="font:700 32px/1 var(--font-num)">${esc(valorCorto(d.valor))}</b>${String(d.valor || '').split(/ · |, /)[1] ? `<span class="small muted">${esc(String(d.valor).split(/ · |, /).slice(1).join(' · '))}</span>` : ''}<span class="small" style="color:var(--${tono});display:inline-flex;gap:4px;align-items:center;font-weight:600">${ic(EST_ICO[tono] || 'dot', 14)}${txt}</span></div>
+    ${d.normal ? `<p class="small muted" style="margin:0">Lo normal para ti: <b>${esc(d.normal)}</b></p>` : ''}
+    ${frescura}
+    <div><h3 class="met-h">Qué es</h3><p class="small" style="margin:0">${info.que}</p></div>
+    <div><h3 class="met-h">Cómo lo lee tu entrenador</h3><p class="small" style="margin:0">${info.lee}</p></div></div>` });
+}
+Object.assign(ACTIONS, { met: el => hojaMetrica(el.dataset.v) });
 
 const PROMPT_COACH = () => `Usa mi conector de Garmin (myCoach). Llama a coach_hoy y dime qué hago hoy y por qué. Si el motor propone cambiar o mover la sesión, explícamelo y, si te digo que sí, aplícalo con coach_proponer (primero sin guardar y luego con guardar=true).`;
 
