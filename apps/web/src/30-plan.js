@@ -12,10 +12,10 @@ function weekChips() {
 }
 function saludMix(r, o) {
   const rows = [
-    ['Cardio', 'heart', r.cardioMin / 60, [o.h[0] * .8, o.h[1]], v => `${nf(v)} h`, 'cardio', 12],
-    ['Fuerza', 'dumbbell', r.fuerza, [o.fuerza, o.fuerza + 1], v => `${v} de ${o.fuerza}`, 'fuerza', 4],
-    ['Intensidad', 'flame', r.tipos.int, o.int, v => `${v} día${v === 1 ? '' : 's'}`, 'int', 4],
-    ['Juego', 'racket', r.juego, [0, 2], v => `${v} partido${v === 1 ? '' : 's'}`, 'raqueta', 4],
+    ['Cardio', 'heart', r.cardioMin / 60, [o.h[0] * .8, o.h[1]], v => `${nf(v)} h de ${nf(o.h[0] * .8)}-${o.h[1]} h`, 'cardio', 12],
+    ['Fuerza', 'dumbbell', r.fuerza, [o.fuerza, o.fuerza + 1], v => `${v} de ${o.fuerza} sesiones`, 'fuerza', 4],
+    ['Intensidad', 'flame', r.tipos.int, o.int, v => `${v} de ${o.int[0]}-${o.int[1]} días`, 'int', 4],
+    ...(r.juego ? [['Juego', 'racket', r.juego, [0, 2], v => `${v} partido${v === 1 ? '' : 's'}`, 'raqueta', 4]] : []),
   ];
   return `<div class="hm">${rows.map(([n, i, v, [lo, hi], f, col, mx]) => {
     const st = v < lo ? 'lo' : v > hi ? 'hi' : 'ok'; const pc = x => Math.min(100, x / mx * 100);
@@ -49,15 +49,23 @@ function tabPlan() {
       : w === PROX ? `<div class="row"><div class="grow stack" style="gap:2px"><b style="font-size:17px">Semana planificada</b><span class="small muted">${nf(Object.values(planDe(PROX) || {}).reduce((a, s) => a + s.min, 0) / 60)} h · ${Object.values(planDe(PROX) || {}).filter(s => s.t !== 'descanso').length} sesiones</span></div><button class="btn plain" type="button" data-a="replan">Rehacer</button></div>`
       : `<div class="fields"><div class="field"><span class="l">Horas</span><span class="v">${nf(r.min / 60)}</span></div><div class="field"><span class="l">Actividades</span><span class="v">${r.n}</span></div><div class="field"><span class="l">Días activos</span><span class="v">${r.dias.size}</span></div><div class="field"><span class="l">Plan</span><span class="v" style="font-size:16px">sin plan</span></div></div>`;
     const rp = w === PROX ? resumenPlan(planDe(PROX)) : r;
-    body = `<div class="bento">
-      <div class="card b-side">${cabecera}
-        ${Object.keys(rp.dep).length ? `<div class="stack" style="gap:6px"><b class="small">Por deporte</b>${sportBar(rp.dep)}</div>` : ''}
-        <div class="stack" style="gap:8px"><b class="small">Balance de salud ${w === PROX ? '(planeado)' : ''}</b>${saludMix(rp, o)}</div>
-      </div>
+    // Plan responde "¿qué toca esta semana y cómo voy?": una línea de resumen, los días (cada uno se
+    // abre con sus ejercicios o pasos y "Enviar al reloj") y lo que necesitas por tipo. El análisis, plegado.
+    const planeadas = Object.values(planDe(w) || {}).reduce((a, x) => a + (x.min || 0), 0) / 60;
+    const linea = w === SEM && r.plan ? `<b>${r.hechas} de ${r.plan}</b> sesiones hechas · ${nf(r.min / 60)} de ${nf(planeadas)} h`
+      : w === SEM ? `<b>Sin plan</b> · ${nf(r.min / 60)} h hechas`
+      : w === PROX ? `<b>${Object.values(planDe(PROX) || {}).filter(x => x.t !== 'descanso').length} sesiones</b> · ${nf(planeadas)} h planeadas`
+      : `<b>${nf(r.min / 60)} h</b> · ${r.n} actividad${r.n === 1 ? '' : 'es'} · ${r.dias.size} días activos${planDe(w) ? ` · ${r.hechas} de ${r.plan} del plan` : ''}`;
+    body = `<div class="bento plan-v">
       <div class="b-hero stack" style="gap:12px">
-        ${w !== PROX ? `<div class="card"><div class="card-h"><span class="grow">Lo que dice tu semana</span><span class="xs" style="text-transform:none">reglas, sin IA</span></div><ul class="insights">${ins.map(([k, i, t]) => `<li class="ins-${k}"><span class="ic">${ic(i, 16)}</span><span>${esc(t)}</span></li>`).join('')}</ul></div>` : `<div class="card"><div class="card-h"><span class="grow">Afinar</span></div><div class="btns"><button class="btn tonal" type="button" data-a="claude" data-v="Revisa mi plan de la semana que viene y mejóralo">${ic('claude', 18)} Afinar con Claude</button><button class="btn plain" type="button" data-a="goal-edit">Ajustar objetivo</button></div></div>`}
+        <div class="plan-res"><p>${linea}</p>${w === PROX ? '<button class="btn text" type="button" data-a="replan">Rehacer</button>' : ''}</div>
         <div class="list split">${listaDias(w)}</div>
-        ${w !== PROX && w !== SEM ? '' : `<div class="list"><button type="button" class="li" data-a="push" data-v="entrenos">${ic('dumbbell')}<span class="main"><b>Tus entrenos de fuerza</b><span>Edítalos y ponlos en un día de la semana</span></span>${ic('chev', 18, 'chev')}</button></div>`}
+        ${w !== PROX && w !== SEM ? '' : `<div class="list"><button type="button" class="li" data-a="push" data-v="entrenos">${ic('dumbbell')}<span class="main"><b>Tus entrenos de fuerza</b><span>Edítalos y ponlos en un día</span></span>${ic('chev', 18, 'chev')}</button></div>`}
+      </div>
+      <div class="b-side stack" style="gap:12px">
+        <section class="card" aria-labelledby="nec-t"><h2 class="card-t" id="nec-t">${w === PROX ? 'Lo que llevas planeado' : 'Lo que necesitas esta semana'}</h2>${saludMix(rp, o)}</section>
+        ${w !== PROX ? `<details class="card plan-ins"><summary><span class="grow">Lo que dice tu semana</span><span class="small muted">${ins.length}</span></summary><ul class="insights">${ins.map(([k, i, t]) => `<li class="ins-${k}"><span class="ic">${ic(i, 16)}</span><span>${esc(t)}</span></li>`).join('')}</ul></details>`
+        : `<div class="btns"><button class="btn tonal" type="button" data-a="claude" data-v="Revisa mi semana que viene y afínala">${ic('claude', 18)} Afinarla con Claude</button></div>`}
       </div></div>`;
   }
   const sub = w === SEM ? `${rangoSem(SEM)} · en curso` : w === PROX ? `${rangoSem(PROX)} · planificar` : `Semana del ${fDia(w)} · revisión`;
@@ -100,14 +108,15 @@ function sheetDia(f) {
     if (s.a) return `<div class="row">${chip(k)}${s.a.sim ? simTag() : ''}</div><p><b>${esc(s.a.lugar)}</b> · ${s.a.km ? `${nf(s.a.km)} km · ` : ''}${dur(s.a.min)}${s.a.fc ? ` · ${s.a.fc} ppm` : ''}</p>${s.a.z ? distBar(s.a.z) : ''}
       ${s.t !== k && s.t !== 'otros' ? `<p class="small">Planeado: <b>${TIPOS[s.t].n}</b> (${esc(s.d)}).</p>` : ''}<button class="btn fill" type="button" data-a="push-close" data-v="actividad" data-id="${s.a.id}">Ver actividad</button>`;
     const pasado = f < HOY;
-    return `<div class="row">${sportDot2(s.dep)} <b>${SPORTS[s.dep].n}</b> ${s.t !== 'otros' ? chip(s.t) : ''}${s.min ? `<span class="muted small">${dur(s.min)}</span>` : ''}</div>
-      <p style="font-size:18px"><b>${esc(s.d)}</b></p>${s.ruta ? `<p class="small muted">Ruta: ${esc(s.ruta)}</p>` : ''}${bloqueFuerza(f)}
-      ${pasado ? '<p class="small" style="color:var(--bad)">No consta en Garmin. Si la hiciste sin reloj, márcala como hecha.</p>' : ''}
+    const cuerpo = bloqueFuerza(f) || bloqueCardio(f);
+    return `<div class="dia-cab">${sportDot2(s.dep)} <b>${SPORTS[s.dep].n}</b>${s.t !== 'otros' ? chip(s.t) : ''}${s.min ? `<span class="muted small">${dur(s.min)}</span>` : ''}</div>
+      <p class="dia-t">${esc(s.d)}</p>${s.ruta ? `<p class="small muted">Ruta: ${esc(s.ruta)}</p>` : ''}
+      ${pasado ? `<p class="small" style="color:var(--bad)">${ic('info', 16)} No consta en Garmin. Si la hiciste sin reloj, márcala como hecha.</p>` : ''}
+      ${cuerpo}
       <div class="list">
         ${pasado ? `<button class="li" type="button" data-a="mark-done" data-v="${f}">${ic('check')}<span class="main"><b>Marcar como hecha</b></span></button>` : `<button class="li" type="button" data-a="move" data-v="${f}">${ic('move')}<span class="main"><b>Mover a otro día</b></span>${ic('chev', 18, 'chev')}</button>`}
         <button class="li" type="button" data-a="otro" data-v="${f}">${ic('edit')}<span class="main"><b>Cambiar por otra cosa</b></span>${ic('chev', 18, 'chev')}</button>
         ${pasado ? '' : `<button class="li" type="button" data-a="ent-elegir" data-v="${f}">${ic('dumbbell')}<span class="main"><b>${s.dep === 'fuerza' ? 'Cambiar el entreno de fuerza' : 'Poner un entreno de fuerza'}</b></span>${ic('chev', 18, 'chev')}</button>`}
-        ${fuerzaDelDia(f) ? '' : `<button class="li" type="button" data-a="watch" data-v="${f}">${ic('watch')}<span class="main"><b>Enviar al reloj</b><span>Por validar con Garmin</span></span></button>`}
       </div>`;
   } });
 }

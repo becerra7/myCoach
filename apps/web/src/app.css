@@ -734,3 +734,24 @@ button.hp-encaje{cursor:pointer;align-items:center;min-height:44px}
 .hp-sem-h h3{margin:0;font-size:16px;font-weight:700}
 .d7{min-width:0;min-height:44px}
 .d7.hoy small{color:var(--tint)}
+
+/* ===== Plan ===== */
+.plan-res{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:44px}
+.plan-res p{margin:0;font-size:16px}
+.card-t{margin:0 0 10px;font-size:16px;font-weight:700}
+.plan-ins{display:block;padding:6px 16px}.plan-ins summary .grow{flex:1}.plan-ins[open]{padding-bottom:16px}
+.plan-ins summary{display:flex;align-items:center;gap:8px;min-height:44px;cursor:pointer;font-weight:700;list-style:none}
+.plan-ins summary::-webkit-details-marker{display:none}
+.plan-ins summary::after{content:"";width:8px;height:8px;border-right:2px solid var(--label-2);border-bottom:2px solid var(--label-2);transform:rotate(45deg);margin:0 4px 4px}
+.plan-ins[open] summary::after{transform:rotate(-135deg);margin-top:4px}
+.plan-ins .insights{margin-top:8px}
+/* Hoja de un día: pasos de las series y pista para pedirlas */
+.pasos{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+.pasos li{padding:8px 12px;border-radius:10px;background:var(--card-2);font-size:15px;line-height:1.35}
+.pasos li span{color:var(--label-2)}
+.pasos li.rep{background:none;padding:10px 0 2px;font-size:13px;color:var(--label-2)}
+.pasos li.dentro{margin-left:16px}
+.dia-pista{gap:8px;padding:12px;border-radius:14px;background:var(--card-2)}
+.dia-pista p{margin:0}
+.dia-cab{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dia-t{margin:4px 0 0;font-size:20px;line-height:1.25;font-weight:700}

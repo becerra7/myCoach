@@ -293,7 +293,6 @@ const ACTIONS = {
   week: el => { S.week = el.dataset.v; save(); render(); markFlow(el.dataset.v < SEM ? 'revision' : el.dataset.v === PROX ? 'planificar' : 'semana'); },
   day: el => sheetDia(el.dataset.v), move: el => sheetMover(el.dataset.v), 'move-to': el => doMove(el.dataset.v, el.dataset.to),
   'mark-done': el => { closeSheet(); toast('Marcada como hecha (sin datos del reloj)'); },
-  watch: () => toast('Enviado al calendario del reloj (simulado)'),
   'draft-dep': el => { const d = S.nextDraft; const v = el.dataset.v; d.deps = d.deps.includes(v) ? d.deps.filter(x => x !== v) : [...d.deps, v]; save(); render(); },
   'gen-week': () => { const d = S.nextDraft; if (!d.deps.some(k => SPORTS[k].cardio)) { ask({ title: 'Elige un deporte de resistencia', text: 'Bici, correr, skimo o montaña.', actions: [{ label: 'Vale', kind: 'fill' }] }); return; }
     const w = semSel(); const p = generarSemana(d.deps, d.h, S.goal.modo, w); if (w === SEM) for (const f of Object.keys(p)) if (f < HOY) delete p[f];

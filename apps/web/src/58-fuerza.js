@@ -8,8 +8,16 @@ const FZ = {}; // fecha → undefined (sin pedir) · 'cargando' · null (nada) �
 // al reloj o se hizo ese día. Si no hay ninguno, el bloque no sale.
 const fuerzaDelDia = f => { const s = sesion(f); return s && s.dep === 'fuerza' && s.t !== 'descanso' ? s : null; };
 
+// Modo demo: un entreno de ejemplo para ver cómo queda, sin conector.
+const DEMO_FUERZA = { id: 'demo', nombre: 'Fuerza en casa (ejemplo)', ejercicios: [
+  { nombre: 'Sentadilla búlgara', series: 3, reps: 10, peso_kg: 8, material: 'mancuernas', descanso_s: 90, garmin: true },
+  { nombre: 'Peso muerto rumano', series: 3, reps: 10, peso_kg: 16, material: 'kettlebell', descanso_s: 90, garmin: true },
+  { nombre: 'Plancha', series: 3, segundos: 40, descanso_s: 60, garmin: true },
+] };
+
 async function cargarFuerza(f, fresco) {
-  if (!LIVE || S.modo !== 'vivo' || FZ[f] === 'cargando') return;
+  if (FZ[f] === 'cargando') return;
+  if (!LIVE || S.modo !== 'vivo') { FZ[f] = { entreno: DEMO_FUERZA, demo: true }; return; }
   FZ[f] = 'cargando';
   try { FZ[f] = await coachCall('fuerza_dia', { fecha: f }, fresco); } catch (e) { FZ[f] = null; }
   render(); if (sheetState && sheetState.id === 'dia') fillSheet();
@@ -30,8 +38,8 @@ const ESTADO_EJ = {
 /** El bloque de fuerza de un día. '' si ese día no hay entreno de fuerza. */
 function bloqueFuerza(f) {
   const s = fuerzaDelDia(f); if (!s) return '';
-  if (FZ[f] === undefined) { cargarFuerza(f); return '<p class="small muted" role="status">Cargando el entreno…</p>'; }
-  if (FZ[f] === 'cargando') return '<p class="small muted" role="status">Cargando el entreno…</p>';
+  if (FZ[f] === undefined) cargarFuerza(f);
+  if (FZ[f] === undefined || FZ[f] === 'cargando') return '<p class="small muted" role="status">Cargando el entreno…</p>';
   const d = FZ[f]; const e = d && d.entreno;
   if (!e) return s.entreno ? `<p class="small">Este día apunta al entreno <b>${esc(s.entreno)}</b>, que ya no existe. Pídele a Claude que lo vuelva a crear.</p>` : '';
   const cambios = Object.fromEntries((d.cambios_frente_al_plan || []).map(c => [c.ejercicio, c]));
@@ -79,6 +87,7 @@ function hojaHistorialFuerza(nombre) {
 
 function enviarAlReloj(f) {
   const d = FZ[f]; const e = d && d.entreno; if (!e) return;
+  if (d.demo) { toast('En el modo demo no se envía nada. Conecta tu Garmin para usarlo.'); return; }
   const sin = e.ejercicios.filter(x => !x.garmin).map(x => x.nombre);
   if (sin.length) { ask({ title: 'Falta un paso', text: `Para mandarlo al reloj, Claude tiene que elegir el ejercicio de Garmin de: ${sin.join(', ')}. Pídeselo y vuelve a probar.`, actions: [{ label: 'Entendido', kind: 'fill' }] }); return; }
   ask({

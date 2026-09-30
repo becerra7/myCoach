@@ -144,7 +144,7 @@ function insightsSemana(w) {
   const r = resumen(w), o = objetivos(), out = [];
   const top = Object.entries(r.dep).sort((a, b) => b[1] - a[1])[0];
   if (!r.n) return [['warn', 'info', 'Semana sin actividad registrada.']];
-  if (r.fuerza < o.fuerza) out.push(['bad', 'dumbbell', `Te ha faltado fuerza: ${r.fuerza} de ${o.fuerza} sesiones recomendadas.`]);
+  if (r.fuerza < o.fuerza) out.push(['warn', 'dumbbell', `Fuerza: ${r.fuerza} de ${o.fuerza}. Dos sesiones cortas a la semana te vendrían bien.`]);
   else out.push(['good', 'dumbbell', `Fuerza cumplida: ${r.fuerza} sesiones.`]);
   if (top && r.min && top[1] / r.min >= 0.7 && r.n > 2) out.push(['warn', SPORTS[top[0]].ic, `El ${Math.round(top[1] / r.min * 100)} % fue ${SPORTS[top[0]].n.toLowerCase()}. Varía un poco: otro deporte suave cuenta.`]);
   if (r.tipos.int > o.int[1]) out.push(['bad', 'flame', `${r.tipos.int} días intensos: más de los ${o.int[1]} recomendados.`]);

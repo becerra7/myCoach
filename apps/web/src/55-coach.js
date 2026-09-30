@@ -10,7 +10,7 @@ const COACH_EST = { bien: ['good', 'Bien'], normal: ['label-2', 'Normal'], leve:
 const NOMBRE_DATO = { frescura: 'Frescura', readiness: 'Readiness' };
 /* El nombre lo pone cada uno (Ajustes o su Claude); se guarda en el perfil del conector. Por defecto, myCoach. */
 const nombreCoach = () => (S.coachNombre || '').trim() || (COACH && COACH.entrenador) || 'myCoach';
-const coachCall = (tool, input, fresh) => LIVE.callTool('Garmin', tool, input, { cache: fresh ? { refresh: true } : { staleTime: 20 * 60e3 } }).then(r => r.payload);
+const coachCall = (tool, input, fresh) => !LIVE ? Promise.reject(new Error('Sin conector')) : LIVE.callTool('Garmin', tool, input, { cache: fresh ? { refresh: true } : { staleTime: 20 * 60e3 } }).then(r => r.payload);
 
 async function cargarCoach(fresco) {
   if (!LIVE || S.modo !== 'vivo' || coachCargando) return;
