@@ -3192,11 +3192,13 @@ function semaforo({ hoy, datosHoy = {}, base = {}, tsb = null, diario = [], perf
 		if (n.tipo === "dolor") {
 			senal(4, `anotaste dolor: ${String(n.texto || "").slice(0, 60)}`);
 			dato("diario", "Lo que has anotado", `Dolor: ${String(n.texto || "").slice(0, 60)}`, null, "fuerte");
-		} else if (n.tipo === "sensacion" && n.nivel != null) {
-			if (n.nivel <= 1) senal(2, "dijiste que estabas reventado");
-			else if (n.nivel === 2) senal(1, "dijiste que estabas cansado");
-			dato("diario", "Lo que has anotado", String(n.texto || `Sensación ${n.nivel}/5`).slice(0, 60), null,
-				n.nivel <= 1 ? "fuerte" : n.nivel === 2 ? "leve" : n.nivel >= 4 ? "bien" : "normal");
+		} else if (n.tipo === "sensacion" && (n.fisico ?? n.nivel) != null) {
+			const f = n.fisico ?? n.nivel;
+			if (f <= 1) senal(2, "dijiste que estabas agotado");
+			else if (f === 2) senal(1, "dijiste que estabas cansado");
+			if (n.animo != null && n.animo <= 1) senal(1, "dijiste que tenías el ánimo muy bajo");
+			dato("diario", "Lo que has anotado", String(n.texto || textoSensacion(n)).slice(0, 60), null,
+				f <= 1 ? "fuerte" : f === 2 ? "leve" : f >= 4 ? "bien" : "normal");
 		}
 	}
 
@@ -3310,6 +3312,23 @@ async function guardarDoc(env, userId, doc, valor) {
 	return v;
 }
 
+const ANIMO = ["", "muy mal", "mal", "normal", "bien", "muy bien"];
+const FISICO = ["", "agotado", "cansado", "normal", "bien", "genial"];
+const textoSensacion = (n) => [n.animo ? `Ánimo ${ANIMO[n.animo]}` : "", (n.fisico ?? n.nivel) ? `físico ${FISICO[n.fisico ?? n.nivel]}` : ""].filter(Boolean).join(", ");
+
+/** La sensacion y el dolor son uno por dia: anotar otra vez ese dia lo corrige. Las notas se acumulan. */
+async function anotarDelDia(env, userId, entrada, max = 300) {
+	const lista = (await leerDoc(env, userId, "atleta/diario")) || [];
+	const mismo = (n) => n?.fecha === entrada.fecha && n.tipo === entrada.tipo;
+	// Si quedaron varias de antes (cuando se acumulaban), se funden en una.
+	const previa = lista.filter(mismo).reduce((a, n) => ({ ...a, ...n }), null);
+	const resto = lista.filter((n) => !mismo(n));
+	const nueva = entrada.borrar ? null : { ...(previa || {}), ...entrada };
+	if (nueva) delete nueva.borrar;
+	await env.GARMIN.put(appKey(userId, "atleta/diario"), JSON.stringify((nueva ? [...resto, nueva] : resto).slice(-max)));
+	return { entrada: nueva, corregida: Boolean(previa) };
+}
+
 async function anadirADoc(env, userId, doc, entrada, max = 300) {
 	const lista = (await leerDoc(env, userId, doc)) || [];
 	const nueva = [...(Array.isArray(lista) ? lista : []), entrada].slice(-max);
@@ -3359,6 +3378,16 @@ async function datosDeHoy(env, userId, fecha) {
 	};
 }
 
+/** Lo anotado ese dia: la sensacion (animo y fisico) y el dolor, para enseñarlo y poder corregirlo. */
+function anotadoDelDia(diario, dia) {
+	const de = (tipo) => diario.filter((n) => n?.fecha === dia && n.tipo === tipo).at(-1) || null;
+	const s = de("sensacion"), d = de("dolor");
+	return {
+		sensacion: s && { animo: s.animo ?? null, fisico: s.fisico ?? s.nivel ?? null, texto: s.texto || null },
+		dolor: d && { texto: d.texto || "" },
+	};
+}
+
 async function calcularHoy(env, userId, { fecha } = {}) {
 	const hoy = fecha || fechaLocal();
 	const [estadoApp, perfil, diario, hist, datosHoy] = await Promise.all([
@@ -3388,6 +3417,7 @@ async function calcularHoy(env, userId, { fecha } = {}) {
 		datos_hoy: datosHoy,
 		linea_base_28d: base,
 		entrenador: String(perfil?.entrenador?.nombre || "").trim() || NOMBRE_COACH,
+		anotado_hoy: anotadoDelDia(diario || [], hoy),
 		mensaje: mensajeDelDia(sem, sesion, ajuste),
 		calculado_en: new Date().toISOString(),
 	};
@@ -3726,30 +3756,48 @@ const COACH_TOOLS = {
 		title: "Entrenador: anotar como estoy",
 		write: true,
 		description:
-			"Anota en el diario del deportista una sensacion (nivel 1 = reventado ... 5 = genial), un dolor o una nota. El semaforo " +
-			"del dia tiene en cuenta lo anotado en las ultimas 36 h: un dolor lo pone en rojo. Uselo cuando el usuario diga como se " +
-			"encuentra o como le ha ido una sesion.",
+			"Anota en el diario del deportista como esta hoy: el animo y el estado fisico (1 = muy mal / agotado ... 5 = muy bien / genial), " +
+			"un dolor o una nota. La sensacion y el dolor son uno por dia: anotarlos otra vez ese dia los corrige (lo que no pases se queda); " +
+			"las notas se acumulan. Dolor con borrar=true lo quita (ya no duele). El semaforo tiene en cuenta lo anotado en las ultimas 36 h: " +
+			"un dolor lo pone en rojo. Uselo cuando el usuario diga como se encuentra o como le ha ido una sesion.",
 		schema: {
 			type: "object",
 			properties: {
 				tipo: { type: "string", enum: ["sensacion", "dolor", "nota"] },
 				texto: { type: "string" },
-				nivel: { type: "integer", minimum: 1, maximum: 5, description: "Solo para sensacion: 1 reventado, 3 normal, 5 genial." },
+				animo: { type: "integer", minimum: 1, maximum: 5, description: "Sensacion: animo. 1 muy mal, 2 mal, 3 normal, 4 bien, 5 muy bien." },
+				fisico: { type: "integer", minimum: 1, maximum: 5, description: "Sensacion: estado fisico. 1 agotado, 2 cansado, 3 normal, 4 bien, 5 genial." },
+				nivel: { type: "integer", minimum: 1, maximum: 5, description: "Antiguo: igual que fisico." },
+				borrar: { type: "boolean", description: "Quita la sensacion o el dolor de ese dia." },
 				fecha: { type: "string", description: "YYYY-MM-DD. Por defecto hoy." },
 			},
-			required: ["tipo", "texto"],
+			required: ["tipo"],
 		},
-		run: async (env, userId, { tipo, texto, nivel, fecha } = {}) => {
+		run: async (env, userId, { tipo, texto, animo, fisico, nivel, borrar, fecha } = {}) => {
 			if (!["sensacion", "dolor", "nota"].includes(tipo)) throw new HttpError(400, "tipo: sensacion, dolor o nota");
-			const entrada = {
-				fecha: /^\d{4}-\d{2}-\d{2}$/.test(fecha || "") ? fecha : fechaLocal(),
-				tipo,
-				texto: String(texto || "").slice(0, 300),
-				...(tipo === "sensacion" && nivel ? { nivel: Math.min(5, Math.max(1, Math.round(nivel))) } : {}),
-				at: new Date().toISOString(),
-			};
-			const diario = await anadirADoc(env, userId, "atleta/diario", entrada);
-			return { guardado: true, entrada, total: diario.length };
+			const dia = /^\d{4}-\d{2}-\d{2}$/.test(fecha || "") ? fecha : fechaLocal();
+			const escala = (v) => (v == null || v === "" ? undefined : Math.min(5, Math.max(1, Math.round(Number(v)))));
+			const txt = texto == null ? undefined : String(texto).trim().slice(0, 300);
+			if (tipo === "nota") {
+				if (!txt) throw new HttpError(400, "La nota necesita texto.");
+				const entrada = { fecha: dia, tipo, texto: txt, at: new Date().toISOString() };
+				const diario = await anadirADoc(env, userId, "atleta/diario", entrada);
+				return { guardado: true, entrada, total: diario.length };
+			}
+			const entrada = { fecha: dia, tipo, at: new Date().toISOString() };
+			if (borrar === true) entrada.borrar = true;
+			else if (tipo === "dolor") {
+				if (!txt) throw new HttpError(400, "Di que te duele, o borrar=true si ya no.");
+				entrada.texto = txt;
+			} else {
+				const a = escala(animo), f = escala(fisico ?? nivel);
+				if (a == null && f == null && !txt) throw new HttpError(400, "Pasa animo, fisico o un texto.");
+				if (a != null) entrada.animo = a;
+				if (f != null) { entrada.fisico = f; entrada.nivel = f; }
+				if (txt !== undefined) entrada.texto = txt;
+			}
+			const r = await anotarDelDia(env, userId, entrada);
+			return { guardado: true, borrado: borrar === true, corregida: r.corregida, entrada: r.entrada };
 		},
 	},
 };

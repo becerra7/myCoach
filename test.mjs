@@ -1510,6 +1510,22 @@ const rpc = async (env, token, message) => {
 	check("con dolor no se reprograma la intensidad", dolor.propuesta?.mover === null && dolor.propuesta.texto.includes("profesional"), JSON.stringify(dolor.propuesta));
 	check("anotar valida el tipo", Boolean((await llamar(ana, "coach_anotar", { tipo: "otro", texto: "x" })).error));
 
+	// Una sensacion y un dolor por dia: se corrigen, no se acumulan
+	await llamar(ana, "coach_anotar", { tipo: "sensacion", animo: 4, fisico: 3 });
+	const corrige = await llamar(ana, "coach_anotar", { tipo: "sensacion", fisico: 2 });
+	check("la sensacion del dia se corrige y conserva lo que no cambias", corrige.corregida && corrige.entrada.animo === 4 && corrige.entrada.fisico === 2, JSON.stringify(corrige));
+	const leidoDiario = await llamar(ana, "app_leer", { doc: "atleta/diario" }); const diarioHoy = (Array.isArray(leidoDiario) ? leidoDiario : leidoDiario.datos || leidoDiario.doc || []).filter((n) => n.fecha === HOY_C && n.tipo === "sensacion");
+	check("solo queda una sensacion ese dia", diarioHoy.length === 1, JSON.stringify(diarioHoy));
+	const conAnotado = await llamar(ana, "coach_hoy");
+	check("coach_hoy devuelve lo anotado hoy para editarlo",
+		conAnotado.anotado_hoy.sensacion.animo === 4 && conAnotado.anotado_hoy.sensacion.fisico === 2 && conAnotado.anotado_hoy.dolor.texto.includes("Rodilla"), JSON.stringify(conAnotado.anotado_hoy));
+	await llamar(ana, "coach_anotar", { tipo: "dolor", borrar: true });
+	const sinDolor = await llamar(ana, "coach_hoy");
+	check("borrar el dolor lo quita del semaforo", sinDolor.anotado_hoy.dolor === null && !sinDolor.semaforo.razones.some((r) => r.includes("Rodilla")), JSON.stringify(sinDolor.semaforo));
+	check("fisico 2 (cansado) cuenta en el semaforo", sinDolor.semaforo.razones.some((r) => r.includes("cansado")), JSON.stringify(sinDolor.semaforo.razones));
+	check("la sensacion necesita animo, fisico o texto", Boolean((await llamar(ana, "coach_anotar", { tipo: "sensacion" })).error));
+	await llamar(ana, "coach_anotar", { tipo: "sensacion", borrar: true });
+
 	// Proponer: las reglas mandan
 	const tres = {
 		[proxLunes]: { dep: "bici", t: "int", d: "Umbral", min: 60 },
