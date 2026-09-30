@@ -35,13 +35,15 @@ const ESTADO_EJ = {
   no_hecho: ['close', 'No hecho', 'var(--bad)'],
 };
 
-/** El bloque de fuerza de un día. '' si ese día no hay entreno de fuerza. */
-function bloqueFuerza(f) {
-  const s = fuerzaDelDia(f); if (!s) return '';
+/** El bloque de fuerza de un día. '' si ese día no hay entreno de fuerza.
+    enActividad: desde la pantalla de una actividad de fuerza, aunque el plan no la tuviera. */
+function bloqueFuerza(f, enActividad) {
+  const s = fuerzaDelDia(f) || (enActividad ? {} : null); if (!s) return '';
   if (FZ[f] === undefined) cargarFuerza(f);
   if (FZ[f] === undefined || FZ[f] === 'cargando') return '<p class="small muted" role="status">Cargando el entreno…</p>';
   const d = FZ[f]; const e = d && d.entreno;
-  if (!e) return s.entreno ? `<p class="small">Este día apunta al entreno <b>${esc(s.entreno)}</b>, que ya no existe. Pídele a Claude que lo vuelva a crear.</p>` : '';
+  if (!e) return s.entreno ? `<p class="small">Este día apunta al entreno <b>${esc(s.entreno)}</b>, que ya no existe. Pídele a Claude que lo vuelva a crear.</p>`
+    : enActividad ? '<p class="small">Aún no tengo tus series de este día. Pídele a Claude que las lea de tu reloj o cuéntale qué hiciste.</p>' : '';
   const cambios = Object.fromEntries((d.cambios_frente_al_plan || []).map(c => [c.ejercicio, c]));
   const filas = e.ejercicios.map(x => {
     const c = d.hecha && cambios[x.nombre]; const est = c && ESTADO_EJ[c.estado];
@@ -57,6 +59,7 @@ function bloqueFuerza(f) {
   const enReloj = e.garmin && e.garmin.fecha === f && !e.garmin.desactualizado;
   const pie = d.hecha
     ? `<p class="small muted">${d.hecha.fuente === 'garmin' ? 'Contada por tu reloj.' : 'Registrada con Claude.'} Toca un ejercicio para ver su histórico.</p>`
+    : enActividad ? '<p class="small muted">Aún sin registrar: pídele a Claude que lea las series de tu reloj.</p>'
     : f >= HOY ? `<div class="btns"><button class="btn tonal" type="button" data-a="fz-reloj" data-v="${f}">${ic('watch', 18)} ${enReloj ? 'Volver a enviar al reloj' : 'Enviar al reloj'}</button></div>
       ${enReloj ? '<p class="small muted">Ya está en tu reloj para este día: sincronízalo y búscalo en Entrenamientos.</p>' : ''}` : '';
   return `<div class="stack" style="gap:8px">${d.hecha ? `<p class="small"><b>Hecha.</b> Así ha ido frente al plan:</p>` : ''}<div class="list">${filas}</div>${extra}${pie}</div>`;

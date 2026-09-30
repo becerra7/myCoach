@@ -108,16 +108,33 @@ function scrTest(scr) {
 }
 
 /* ===== ACTIVIDAD ===== */
+/* Responde "¿cómo ha ido y cuenta como lo que tocaba?": cifras, plan frente a lo hecho, lo mejor
+   de la salida (o los ejercicios si es fuerza), el mapa y los pueblos nuevos. */
 function scrActividad(scr) {
-  const a = actById(scr.id); if (!a) return { title: '', html: '<p>No encontrada</p>' }; const k = tipoAct(a);
-  return { title: a.lugar, html: head(a.lugar, `${cap1(fLarga(a.f))} · ${SPORTS[a.dep].n}${a.sim ? ' · ' + simTag() : ''}`) + `<div class="content" style="max-width:760px">
-    <div class="card"><div class="fields">${a.km ? `<div class="field"><span class="l">Distancia</span><span class="v">${nf(a.km)} <small>km</small></span></div>` : ''}<div class="field"><span class="l">Tiempo</span><span class="v">${dur(a.min)}</span></div>${a.desn ? `<div class="field"><span class="l">Desnivel</span><span class="v">${a.desn} <small>m</small></span></div>` : ''}${a.fc ? `<div class="field"><span class="l">Pulso medio</span><span class="v">${a.fc} <small>ppm</small></span></div>` : ''}</div></div>
-    ${SPORTS[a.dep].cardio ? `<div class="card"><div class="card-h"><span class="grow">Cómo cuenta en tu semana</span></div><div class="row">${chip(k)}${S.overrides[a.id] ? '<span class="xs">corregido por ti</span>' : a.analizada ? '<span class="xs">por tus minutos de pulso</span>' : '<span class="xs">según Garmin</span>'}</div>
+  const a = actById(scr.id);
+  if (!a) return { title: 'Actividad', html: head('Actividad', '') + '<div class="content"><p>No encuentro esta actividad. Puede que se haya borrado en Garmin; vuelve a Hoy y actualiza.</p></div>' };
+  const k = tipoAct(a); const cardio = SPORTS[a.dep].cardio;
+  const s = sesion(a.f); const plan = s && s.a && s.a.id === a.id && s.t !== 'descanso' ? s : null;
+  const cifra = (v, u, l) => `<div class="field"><span class="l">${l}</span><span class="v">${v}${u ? ` <small>${u}</small>` : ''}</span></div>`;
+  const cifras = [a.km && cardio ? cifra(nf(a.km), 'km', 'Distancia') : '', cifra(dur(a.min), '', 'Tiempo'), a.desn ? cifra(a.desn, 'm', 'Desnivel') : '', a.fc ? cifra(a.fc, 'ppm', 'Pulso medio') : ''].join('');
+  // Plan frente a lo hecho, en una línea: el color acompaña al texto, nunca va solo.
+  const cumple = plan && (!cardio || plan.t === 'otros' || plan.t === k || S.overrides[a.id]);
+  const vsPlan = plan ? `<p class="act-plan ${cumple ? 'ok' : 'dev'}">${ic(cumple ? 'check' : 'info', 16)}<span>${cumple ? 'Lo que tocaba' : 'Distinto del plan'}: ${esc(plan.d)}</span></p>` : '';
+  const semana = cardio ? `<section class="card" aria-labelledby="act-sem"><div class="act-h"><h2 class="card-t" id="act-sem">Cómo cuenta en tu semana</h2>${chip(k)}</div>
+      ${vsPlan}
       ${a.z ? distBar(a.z) + `<div class="row xs"><span class="grow">Suave ${a.z[0]} min</span><span class="grow">Medio ${a.z[1]} min</span><span>Duro ${a.z[2]} min</span></div>` : ''}
-      <button class="btn plain" type="button" data-a="fix-type" data-v="${a.id}">No es correcto, cambiar</button></div>` : ''}
+      <div class="row" style="justify-content:space-between"><span class="xs">${S.overrides[a.id] ? 'Corregido por ti' : a.analizada ? 'Por tus minutos de pulso' : 'Según Garmin'}</span><button class="btn text" type="button" data-a="fix-type" data-v="${a.id}" style="white-space:nowrap">Corregir</button></div></section>` : '';
+  const mejor = [
+    a.llano ? `<li><b>${nf(a.llano.kmh)} km/h en llano</b><span>${nf(a.llano.km)} km a ${a.llano.fc} ppm</span></li>` : '',
+    a.sub && !a.sub.remonte ? `<li><b>Subida de ${a.sub.desn} m en ${dur(a.sub.min)}</b><span>${nf(a.sub.km)} km a ${a.sub.fc} ppm · ${a.sub.vam} m/h${a.sub.wkg ? ` · ≈${nf(a.sub.wkg, 1)} W/kg estimado` : ''}</span></li>` : '',
+  ].join('');
+  const fuerza = a.dep === 'fuerza' ? `<section class="card" aria-labelledby="act-fz"><h2 class="card-t" id="act-fz">${plan ? 'El plan frente a lo que hiciste' : 'Tus ejercicios'}</h2>${bloqueFuerza(a.f, true)}</section>` : '';
+  return { title: a.lugar, html: head(a.lugar, `${cap1(fLarga(a.f))} · ${SPORTS[a.dep].n}${a.sim ? ' · ' + simTag() : ''}`) + `<div class="content" style="max-width:760px">
+    <div class="card"><div class="fields">${cifras}</div>${cardio ? '' : vsPlan}</div>
+    ${semana}${fuerza}
+    ${mejor ? `<section class="card" aria-labelledby="act-mejor"><h2 class="card-t" id="act-mejor" style="margin:0">Lo mejor de la salida</h2><ul class="act-mejor">${mejor}</ul></section>` : ''}
     ${(DSET.rutas || {})[a.id] ? `<div class="trackmap">${trackSvg(a.id)}</div>` : ''}
-    ${a.llano ? `<div class="card"><div class="card-h"><span class="grow">En llano</span></div><p>${esc(a.llano)}</p></div>` : ''}${a.subida ? `<div class="card"><div class="card-h"><span class="grow">Mejor subida</span></div><p>${esc(a.subida)}</p></div>` : ''}${a.vam ? `<div class="card"><div class="card-h"><span class="grow">Ritmo de subida</span></div><p>${a.vam} m/h en la subida principal</p></div>` : ''}
-    ${a.nuevos.length ? `<div class="card"><div class="card-h"><span class="grow">${a.nuevos.length} pueblos nuevos</span></div><div class="towns">${a.nuevos.map(n => `<span class="town new">${esc(n)}</span>`).join('')}</div></div>` : ''}</div>` };
+    ${a.nuevos.length ? `<section class="card" aria-labelledby="act-pue"><h2 class="card-t" id="act-pue" style="margin:0">${a.nuevos.length} pueblo${a.nuevos.length === 1 ? '' : 's'} nuevo${a.nuevos.length === 1 ? '' : 's'}</h2><div class="towns">${a.nuevos.map(n => `<span class="town new">${esc(n)}</span>`).join('')}</div></section>` : ''}</div>` };
 }
 /* ===== COMPARTIR ===== */
 function scrCompartir() {
