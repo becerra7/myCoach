@@ -31,6 +31,8 @@ export const TOOLS = new Set([
   'fuerza_dia', 'fuerza_historial', 'fuerza_enviar_garmin',
   // La librería de entrenos: verlos, editarlos y añadir ejercicios del catálogo de Garmin.
   'fuerza_entrenos', 'fuerza_entreno_guardar', 'fuerza_ejercicios_garmin',
+  // Entrenos de bici y correr para el reloj.
+  'cardio_entrenos', 'cardio_enviar_garmin',
 ]);
 
 const json = (data, status = 200, headers = {}) =>
