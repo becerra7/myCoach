@@ -352,7 +352,7 @@ document.addEventListener('input', e => {
   if (a === 'meal-txt') { S.mealDraft.txt = el.value; }
   if (a === 'draft-h') { S.nextDraft.h = +el.value; save(); render(); $('#draft-h')?.focus(); }
   if (a === 'test-in') { const t = S.stack[S.stack.length - 1].t; t[el.dataset.k] = el.value.replace(',', '.'); const id = el.id, p = el.selectionStart; render(); const i = document.getElementById(id); if (i) { i.focus(); try { i.setSelectionRange(p, p); } catch (e) { } } }
-  if (a === 'nombre-in') { S.nombre = el.value; save(); }
+  if (a === 'nombre-in') { S.nombre = el.value; save(); pintarAvatar(); }
   if (a === 'test-w') { S.stack[S.stack.length - 1].w = +el.value; render(); $('#t-w')?.focus(); }
   if (a === 'goal-pro') { const s = S.stack[S.stack.length - 1]; const m = MODOS[s.g.modo]; const v = +el.value; const k = el.dataset.k; if (k === 'fuerza') s.g.fuerza = v; else s.g[k] = [Math.min((s.g[k] || m[k])[0], v), v]; render(); document.getElementById(el.id)?.focus(); }
 });

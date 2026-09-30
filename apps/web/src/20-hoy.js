@@ -59,7 +59,13 @@ function go(tab) { vt(() => { S.tab = tab; S.stack = []; save(); render(true); }
 function push(screen) { vt(() => { S.stack.push(screen); save(); render(true); }); }
 function pop() { vt(() => { S.stack.pop(); save(); render(true); }); }
 const TABS = [['hoy', 'Hoy'], ['plan', 'Plan'], ['forma', 'Forma'], ['pueblos', 'Pueblos']];
-function renderTabs() { $('#tabs').innerHTML = TABS.map(([id, l]) => `<button class="tab" type="button" data-a="tab" data-v="${id}" ${S.tab === id ? 'aria-current="page"' : ''}><span class="ic">${ic(id)}</span><span>${l}</span></button>`).join(''); }
+// El botón de Ajustes lleva tus iniciales (Ajustes → Tu nombre); sin nombre, un icono de persona.
+function pintarAvatar() {
+  const el = $('#avatar .avatar'); if (!el) return;
+  const ini = String(S.nombre || '').trim().split(/\s+/).filter(Boolean).slice(0, 2).map(p => p[0].toUpperCase()).join('');
+  el.innerHTML = ini ? esc(ini) : ic('user', 18);
+}
+function renderTabs() { pintarAvatar(); $('#tabs').innerHTML = TABS.map(([id, l]) => `<button class="tab" type="button" data-a="tab" data-v="${id}" ${S.tab === id ? 'aria-current="page"' : ''}><span class="ic">${ic(id)}</span><span>${l}</span></button>`).join(''); }
 function render(resetScroll) {
   document.body.classList.toggle('framed', !!S.framed);
   app.dataset.os = S.os;
