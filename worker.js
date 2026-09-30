@@ -1074,7 +1074,7 @@ const TOOLS = {
 		write: true,
 		description:
 			"Guarda un documento de la app myCoach para este usuario. Con 'fusionar' mezcla los campos de primer nivel con lo que ya hay (p. ej. solo 'meals' en estado/app); con 'anadir' agrega 'datos' al final de una lista (p. ej. notas). " +
-			"PARA CAMBIAR EL PLAN USE coach_proponer, no esta herramienta: valida las reglas y guarda en el sitio correcto. Si aun asi escribe " +
+			"PARA CAMBIAR EL PLAN USE coach_proponer y PARA LAS COMIDAS comida_registrar, no esta herramienta: validan y guardan en el sitio correcto. Si aun asi escribe " +
 			"'plan' (esta semana) o 'next' (la siguiente) en estado/app, el formato es { \"AAAA-MM-DD\": { dep, t, d, min } } con dep = bici|correr|skimo|fuerza, " +
 			"t = rec|fondo|tempo|int|otros|descanso, d = descripcion corta y min = minutos. Escribe en la app del usuario: confirme con el antes los cambios.",
 		schema: {
@@ -3965,7 +3965,10 @@ const instruccionesCoach = (nombre = NOMBRE_COACH) =>
 	"pregunte si lo deja asi para la proxima (actualizar_entreno). El historico, con fuerza_historial." +
 	" SERIES Y ENTRENOS DE BICI O CORRER PARA EL RELOJ: con cardio_enviar_garmin, por pasos (calentamiento, bloques que se repiten, " +
 	"recuperacion, vuelta a la calma) con objetivo de pulso, potencia, ritmo, velocidad o cadencia. Primero sin confirm para ver la " +
-	"vista previa y enseñarsela; solo con su si, confirm=true (escribe en Garmin). Rangos con sus zonas y umbrales; si no los sabe, zona de pulso del reloj.";
+	"vista previa y enseñarsela; solo con su si, confirm=true (escribe en Garmin). Rangos con sus zonas y umbrales; si no los sabe, zona de pulso del reloj." +
+	" COMIDA: en cuartos de plato (carbohidrato, proteina, verdura), sin calorias. Si le pasa una foto o le cuenta que ha comido, " +
+	"estime los cuartos, digaselo en una frase y guardelo con comida_registrar (desayuno, comida, merienda y cena son una por dia: " +
+	"registrarla otra vez la corrige). Para ver lo registrado, comidas.";
 const limpio_entrenador_invalido = (c) =>
 	c.entrenador !== undefined &&
 	(typeof c.entrenador !== "object" || !String(c.entrenador?.nombre || "").trim() || String(c.entrenador.nombre).trim().length > 24);
@@ -5992,6 +5995,95 @@ Object.assign(TOOLS, {
 				return { ...e, min_estimados: Math.round(minutosCardio(e.pasos)), resumen: resumenCardio(e.pasos) };
 			}
 			return { entrenos: Object.values(entrenos).map((e) => ({ id: e.id, nombre: e.nombre, deporte: e.deporte, min_estimados: Math.round(minutosCardio(e.pasos)), ultimo_envio: e.garmin?.fecha || null })) };
+		},
+	},
+});
+
+// ──────────────────────────────── Comida ────────────────────────────────
+// Las comidas viven en estado/app.meals, en el formato de la app:
+// { id, f: AAAA-MM-DD, h: HH:MM, tipo, c, p, v (cuartos de plato 0-4), txt, ia }.
+
+const TIPOS_COMIDA = { desayuno: "Desayuno", comida: "Comida", merienda: "Merienda", cena: "Cena", tentempie: "Tentempié", durante: "Durante el entreno" };
+const UNA_AL_DIA = new Set(["Desayuno", "Comida", "Merienda", "Cena"]);
+const claveTipoComida = (t) => String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/ el entreno$/, "").trim();
+const comidaParaFuera = (m) => ({ id: m.id, fecha: m.f, hora: m.h, tipo: m.tipo, carbohidrato: m.c, proteina: m.p, verdura: m.v, descripcion: m.txt });
+
+Object.assign(TOOLS, {
+	comida_registrar: {
+		title: "Registrar una comida",
+		write: true,
+		description:
+			"Guarda en myCoach una comida en cuartos de plato (carbohidrato, proteina y verdura, de 0 a 4 cada uno, que suman 4 como mucho), " +
+			"sin calorias. Desayuno, comida, merienda y cena son una por dia: registrarla otra vez ese dia la corrige. Tentempie y durante " +
+			"(el entreno) se acumulan; para corregir uno, pase su id (comidas lo da). borrar=true con id, o con tipo y fecha, la quita. " +
+			"La app la enseña al momento.",
+		schema: {
+			type: "object",
+			properties: {
+				tipo: { type: "string", enum: Object.keys(TIPOS_COMIDA) },
+				carbohidrato: { type: "integer", minimum: 0, maximum: 4 },
+				proteina: { type: "integer", minimum: 0, maximum: 4 },
+				verdura: { type: "integer", minimum: 0, maximum: 4 },
+				descripcion: { type: "string", description: "Que era, en pocas palabras. P. ej. 'Pasta con atun y ensalada'." },
+				fecha: { type: "string", description: "AAAA-MM-DD; por defecto hoy." },
+				hora: { type: "string", description: "HH:MM; por defecto ahora (hora de España)." },
+				id: { type: "string", description: "Para corregir o borrar una ya guardada." },
+				borrar: { type: "boolean" },
+			},
+			required: ["tipo"],
+		},
+		run: async (env, userId, args = {}) => {
+			const tipo = TIPOS_COMIDA[claveTipoComida(args.tipo)];
+			if (!tipo && !args.id) throw new HttpError(400, `tipo: ${Object.keys(TIPOS_COMIDA).join(", ")}`);
+			const fecha = /^\d{4}-\d{2}-\d{2}$/.test(args.fecha || "") ? args.fecha : fechaLocal();
+			const estado = (await leerDoc(env, userId, "estado/app")) || {};
+			const meals = Array.isArray(estado.meals) ? estado.meals : [];
+			const previa = args.id ? meals.find((m) => m.id === args.id)
+				: UNA_AL_DIA.has(tipo) || args.borrar ? meals.filter((m) => m.f === fecha && m.tipo === tipo).at(-1) : null;
+			if (args.id && !previa) throw new HttpError(404, `No hay ninguna comida con id ${args.id}.`);
+			let guardada = null;
+			let lista;
+			if (args.borrar === true) {
+				if (!previa) throw new HttpError(404, "No hay ninguna comida asi para borrar.");
+				lista = meals.filter((m) => m !== previa);
+			} else {
+				const q = (k, v) => {
+					if (v == null) return previa ? previa[k] : 0;
+					const n = Math.round(Number(v));
+					if (!(n >= 0 && n <= 4)) throw new HttpError(400, "Cada parte va de 0 a 4 cuartos.");
+					return n;
+				};
+				const c = q("c", args.carbohidrato), p = q("p", args.proteina), v = q("v", args.verdura);
+				if (c + p + v > 4) throw new HttpError(400, `Son cuartos de un plato: suman ${c + p + v} y el maximo es 4.`);
+				if (c + p + v === 0 && tipo !== "Durante el entreno") throw new HttpError(400, "Di cuantos cuartos son de carbohidrato, proteina y verdura.");
+				const hora = /^\d{1,2}:\d{2}$/.test(args.hora || "") ? args.hora.padStart(5, "0")
+					: previa?.h || new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Madrid" });
+				guardada = {
+					...(previa || {}), id: previa?.id || `m${Date.now()}`, f: previa && args.id ? previa.f : fecha, h: hora,
+					tipo: tipo || previa.tipo, c, p, v,
+					txt: String(args.descripcion ?? previa?.txt ?? tipo ?? "").trim().slice(0, 80) || tipo, ia: true, img: null,
+				};
+				lista = previa ? meals.map((m) => (m === previa ? guardada : m)) : [...meals, guardada];
+			}
+			// Sello de tiempo: la app ve que hay cambios y los carga.
+			await guardarDoc(env, userId, "estado/app", { ...estado, meals: lista.slice(-400), at: Date.now() });
+			return {
+				guardado: true, borrado: args.borrar === true, corregida: Boolean(previa) && args.borrar !== true,
+				...(guardada ? { comida: comidaParaFuera(guardada) } : {}),
+			};
+		},
+	},
+
+	comidas: {
+		title: "Comidas registradas",
+		description: "Las comidas guardadas en myCoach (cuartos de plato), de un dia o de los ultimos dias. Uselo antes de comentar la comida o de corregir una.",
+		schema: { type: "object", properties: { fecha: { type: "string", description: "AAAA-MM-DD; por defecto hoy." }, dias: { type: "integer", minimum: 1, maximum: 31, description: "Cuantos dias hacia atras desde fecha (1 = solo ese dia)." } } },
+		run: async (env, userId, { fecha, dias } = {}) => {
+			const hasta = /^\d{4}-\d{2}-\d{2}$/.test(fecha || "") ? fecha : fechaLocal();
+			const n = Math.min(31, Math.max(1, Math.round(dias || 1)));
+			const desde = sumaDias(hasta, -(n - 1));
+			const meals = ((await leerDoc(env, userId, "estado/app"))?.meals || []).filter((m) => m && m.f >= desde && m.f <= hasta);
+			return { desde, hasta, comidas: meals.sort((a, b) => (a.f + a.h).localeCompare(b.f + b.h)).map(comidaParaFuera) };
 		},
 	},
 });

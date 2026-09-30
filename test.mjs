@@ -546,7 +546,7 @@ const rpc = async (env, token, message) => {
 	check("initialize con token valido", init.body.result?.serverInfo?.name === "garmin");
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("tools/list devuelve 40 herramientas", list.body.result.tools.length === 40);
+	check("tools/list devuelve 42 herramientas", list.body.result.tools.length === 42);
 	check("app_guardar se anuncia como escritura", anot0(list).app_guardar.readOnlyHint === false);
 	{
 		const call = (name, args) => rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name, arguments: args } });
@@ -1082,7 +1082,7 @@ const rpc = async (env, token, message) => {
 	check("el token de acceso vale sin leer del KV", init.body.result?.serverInfo?.name === "garmin");
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("las herramientas se listan igualmente", list.body.result.tools.length === 40);
+	check("las herramientas se listan igualmente", list.body.result.tools.length === 42);
 
 	// Y el dato que si vive en KV avisa en vez de mentir
 	const call = await rpc(env, tokens.access_token, {
@@ -1509,6 +1509,24 @@ const rpc = async (env, token, message) => {
 	check("un dolor anotado pone el dia en rojo", dolor.semaforo.color === "rojo" && dolor.semaforo.razones[0].includes("Rodilla"), JSON.stringify(dolor.semaforo));
 	check("con dolor no se reprograma la intensidad", dolor.propuesta?.mover === null && dolor.propuesta.texto.includes("profesional"), JSON.stringify(dolor.propuesta));
 	check("anotar valida el tipo", Boolean((await llamar(ana, "coach_anotar", { tipo: "otro", texto: "x" })).error));
+
+	// Comida: cuartos de plato; desayuno, comida, merienda y cena son una por dia
+	const com1 = await llamar(ana, "comida_registrar", { tipo: "comida", carbohidrato: 2, proteina: 1, verdura: 1, descripcion: "Pasta con atún", hora: "14:10" });
+	check("comida_registrar guarda en el formato de la app", com1.guardado && com1.comida.tipo === "Comida" && com1.comida.carbohidrato === 2, JSON.stringify(com1));
+	const com2 = await llamar(ana, "comida_registrar", { tipo: "comida", verdura: 2, carbohidrato: 1 });
+	check("registrar otra vez la comida del dia la corrige y conserva lo demas",
+		com2.corregida && com2.comida.id === com1.comida.id && com2.comida.proteina === 1 && com2.comida.descripcion === "Pasta con atún", JSON.stringify(com2));
+	await llamar(ana, "comida_registrar", { tipo: "tentempie", carbohidrato: 1, descripcion: "Plátano" });
+	await llamar(ana, "comida_registrar", { tipo: "tentempie", carbohidrato: 1, proteina: 1, descripcion: "Yogur" });
+	const lasDeHoy = await llamar(ana, "comidas");
+	check("comidas devuelve las del dia; los tentempies se acumulan",
+		lasDeHoy.comidas.filter((m) => m.tipo === "Comida").length === 1 && lasDeHoy.comidas.filter((m) => m.tipo === "Tentempié").length === 2, JSON.stringify(lasDeHoy));
+	const estadoCom = await llamar(ana, "app_leer", { doc: "estado/app" });
+	check("la comida queda en estado/app.meals con su sello de tiempo para que la app la cargue",
+		estadoCom.meals.some((m) => m.tipo === "Comida" && m.c === 1 && m.p === 1 && m.v === 2 && m.f && m.h === "14:10") && typeof estadoCom.at === "number" && Boolean(estadoCom.plan), JSON.stringify(estadoCom.meals));
+	check("los cuartos no pasan de 4", Boolean((await llamar(ana, "comida_registrar", { tipo: "cena", carbohidrato: 3, proteina: 2 })).error));
+	const borrada = await llamar(ana, "comida_registrar", { tipo: "comida", borrar: true });
+	check("borrar quita la comida del dia", borrada.borrado && !(await llamar(ana, "comidas")).comidas.some((m) => m.tipo === "Comida"));
 
 	// Una sensacion y un dolor por dia: se corrigen, no se acumulan
 	await llamar(ana, "coach_anotar", { tipo: "sensacion", animo: 4, fisico: 3 });
