@@ -1706,7 +1706,19 @@ const TOOLS = {
 
 // ──────────────────────────── MCP (JSON-RPC) ────────────────────────────
 
-const SERVER_INFO = { name: "garmin", title: "Garmin Connect", version: "1.0.0" };
+/**
+ * La version lleva una huella de las herramientas (nombre, descripcion y esquema).
+ * Claude guarda la lista de herramientas y, sin cambio de version, sigue con la vieja
+ * aunque despleguemos herramientas nuevas: asi ve que el servidor ha cambiado.
+ */
+let serverInfoMemo = null;
+function serverInfo() {
+	if (serverInfoMemo) return serverInfoMemo;
+	const texto = JSON.stringify(Object.entries(TOOLS).map(([n, t]) => [n, t.description, t.schema]));
+	let h = 0x811c9dc5;
+	for (let i = 0; i < texto.length; i++) h = Math.imul(h ^ texto.charCodeAt(i), 0x01000193) >>> 0;
+	return (serverInfoMemo = { name: "garmin", title: "Garmin Connect", version: `1.1.0+${h.toString(16).padStart(8, "0")}` });
+}
 const DEFAULT_PROTOCOL = "2025-06-18";
 const SUPPORTED_PROTOCOLS = ["2026-07-28", "2025-06-18", "2025-03-26", "2024-11-05"];
 
@@ -1747,7 +1759,7 @@ async function handleRpc(message, env, userId) {
 		return rpcResult(id, {
 			protocolVersion: SUPPORTED_PROTOCOLS.includes(asked) ? asked : DEFAULT_PROTOCOL,
 			capabilities: capacidades,
-			serverInfo: SERVER_INFO,
+			serverInfo: serverInfo(),
 			instructions: await instrucciones(),
 		});
 	}
@@ -1759,7 +1771,7 @@ async function handleRpc(message, env, userId) {
 			resultType: "complete",
 			supportedVersions: VERSIONES_DESCUBRIMIENTO,
 			capabilities: capacidades,
-			_meta: { "io.modelcontextprotocol/serverInfo": SERVER_INFO },
+			_meta: { "io.modelcontextprotocol/serverInfo": serverInfo() },
 			instructions: await instrucciones(),
 			...CACHE_LISTA,
 			cacheScope: "private",
