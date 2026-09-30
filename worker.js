@@ -2369,6 +2369,7 @@ const PAGE_STYLE = `
   button { width: 100%; font-size: 16px; padding: 15px; border: 0; border-radius: 12px;
            background: #1c1917; color: #fff; font-weight: 600; cursor: pointer; }
   @media (prefers-color-scheme: dark) { button { background: #4f46e5; } }
+  button:disabled { opacity: .6; cursor: progress; }
   .err { background: #fdecec; color: #a3261f; padding: 12px 14px; border-radius: 10px;
          font-size: 14px; margin: 0 0 16px; }
   @media (prefers-color-scheme: dark) { .err { background: #3a1e1c; color: #ffb4ad; } }
@@ -2394,7 +2395,14 @@ const hiddenFields = (params, extra = {}) =>
 
 const page = (title, inner) => `<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${title}</title><style>${PAGE_STYLE}</style></head><body><main>${inner}</main></body></html>`;
+<title>${title}</title><style>${PAGE_STYLE}</style></head><body><main>${inner}</main><script>
+// Un solo envio: entrar con Garmin tarda unos segundos y un segundo toque reenviaria un login ya usado.
+document.addEventListener("submit", (e) => {
+  if (e.target.dataset.enviado) { e.preventDefault(); return; }
+  e.target.dataset.enviado = "1";
+  e.target.querySelectorAll("button[type=submit]").forEach((b) => { b.disabled = true; b.textContent = "Un momento…"; });
+});
+</script></body></html>`;
 
 /** Enlace a la misma autorizacion en otro modo (entrar, crear, garmin). */
 const enlaceModo = (params, modo) =>
