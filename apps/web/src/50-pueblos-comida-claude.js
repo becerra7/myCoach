@@ -331,7 +331,7 @@ const ACTIONS = {
   'meal-add': () => { S.mealDraft = null; sheetMeal(); markFlow('comida'); },
   'meal-set': el => { S.mealDraft[el.dataset.k] = el.dataset.v; fillSheet(); },
   'meal-step': el => { const st = S.mealDraft, k = el.dataset.k; st[k] = Math.max(0, Math.min(4, st[k] + +el.dataset.v)); fillSheet(); },
-  'meal-claude': () => enClaude('Te paso una foto de mi comida. Dime si es desayuno, comida, merienda, cena o tentempié y cuántos cuartos del plato son carbohidrato, proteína y verdura (que sumen 4). Cuando te confirme, guárdalo en myCoach con app_guardar (doc "estado/app", fusionar: true, campo "meals").'),
+  'meal-claude': () => enClaude('Te paso una foto de mi comida. Dime si es desayuno, comida, merienda, cena o tentempié y cuántos cuartos del plato son carbohidrato, proteína y verdura (que sumen 4). Cuando te confirme, guárdalo en myCoach con comida_registrar.'),
   'meal-save': () => { const st = S.mealDraft; const d = new Date(); S.meals.push({ id: 'm' + Date.now(), f: HOY, h: d.toTimeString().slice(0, 5), tipo: st.tipo, c: st.c, p: st.p, v: st.v, txt: st.txt || st.tipo, img: st.img, ia: st.ia }); S.mealDraft = null; save(); closeSheet(); render(); toast('Comida guardada'); },
   'sheet-close': () => closeSheet(), 'web-login': () => PLATFORM.login(), 'web-logout': () => PLATFORM.logout(),
   'sheet-detent': () => { if (!sheetState) return; const sh = sheetState.sh; if (sh.classList.contains('large')) { sh.classList.remove('large'); sh.classList.add('medium'); } else { sh.classList.remove('medium', 'auto'); sh.classList.add('large'); } },
