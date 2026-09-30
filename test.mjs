@@ -1727,6 +1727,8 @@ const rpc = async (env, token, message) => {
 	check("server/discover responde con versiones, capacidades e instrucciones",
 		desc.supportedVersions.includes("2025-06-18") && !desc.supportedVersions.includes("2026-07-28") && Boolean(desc.capabilities.resources) &&
 		desc.instructions.includes("mycoach_abrir") && desc.cacheScope === "private");
+	check("la version del servidor lleva la huella de las herramientas (Claude ve que han cambiado)",
+		/^1\.1\.0\+[0-9a-f]{8}$/.test(desc._meta["io.modelcontextprotocol/serverInfo"].version));
 	const bien = env.MYCOACH.fetch;
 	env.MYCOACH = { fetch: async () => new Response("caida", { status: 503 }) };
 	const caida = await rpc(env, tok, { jsonrpc: "2.0", id: 6, method: "resources/read", params: { uri: "ui://mycoach/app" } });
