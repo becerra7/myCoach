@@ -3028,6 +3028,7 @@ function normalizarSesion(s, deporteDefecto) {
 		...(Number.isFinite(Number(s.fc_max)) ? { fc_max: Math.round(Number(s.fc_max)) } : {}),
 		// Un dia de fuerza puede apuntar a un entreno con nombre (fuerza_entrenos).
 		...(typeof s.entreno === "string" && s.entreno.trim() ? { entreno: s.entreno.trim().slice(0, 40) } : {}),
+		...(typeof s.entreno_cardio === "string" && s.entreno_cardio.trim() ? { entreno_cardio: s.entreno_cardio.trim().slice(0, 40) } : {}),
 	};
 }
 
@@ -3901,7 +3902,10 @@ const instruccionesCoach = (nombre = NOMBRE_COACH) =>
 	"fuerza_entreno_guardar con un nombre (p. ej. 'Pierna A') y el ejercicio de Garmin de cada uno (fuerza_ejercicios_garmin); en el " +
 	"plan, el dia de fuerza lleva entreno: '<id>'. Puede mandarlo al reloj con fuerza_enviar_garmin (escribe en Garmin: pida permiso). " +
 	"Al acabar: si lo hizo con el reloj, fuerza_desde_garmin; si no, fuerza_registrar con solo lo que cambio. Si subio peso o reps, " +
-	"pregunte si lo deja asi para la proxima (actualizar_entreno). El historico, con fuerza_historial.";
+	"pregunte si lo deja asi para la proxima (actualizar_entreno). El historico, con fuerza_historial." +
+	" SERIES Y ENTRENOS DE BICI O CORRER PARA EL RELOJ: con cardio_enviar_garmin, por pasos (calentamiento, bloques que se repiten, " +
+	"recuperacion, vuelta a la calma) con objetivo de pulso, potencia, ritmo, velocidad o cadencia. Primero sin confirm para ver la " +
+	"vista previa y enseñarsela; solo con su si, confirm=true (escribe en Garmin). Rangos con sus zonas y umbrales; si no los sabe, zona de pulso del reloj.";
 const limpio_entrenador_invalido = (c) =>
 	c.entrenador !== undefined &&
 	(typeof c.entrenador !== "object" || !String(c.entrenador?.nombre || "").trim() || String(c.entrenador.nombre).trim().length > 24);
@@ -5676,6 +5680,258 @@ Object.assign(TOOLS, {
 				hecha,
 				cambios_frente_al_plan: hecha ? cambiosFrenteAlPlan(entreno, hecha.ejercicios) : [],
 			};
+		},
+	},
+});
+
+// ───────────────────── Entrenos de bici y correr para el reloj ─────────────────────
+//
+// Claude escribe el entreno por pasos (calentamiento, series, recuperacion, vuelta a la
+// calma, repeticiones) con su objetivo: pulso (zona del reloj o rango), potencia, ritmo,
+// velocidad o cadencia. Sin confirm devuelve la vista previa y no escribe nada; con
+// confirm=true lo crea en Garmin Connect como entreno guiado y lo programa para el dia.
+// Se guarda con nombre para repetirlo y el dia del plan queda enlazado.
+//
+//   app:<id>:cardio/entrenos   { entrenos: { <id>: entreno } }
+
+const CARDIO_ENTRENOS = "cardio/entrenos";
+const DEPORTES_CARDIO = {
+	bici: { sportTypeId: 2, sportTypeKey: "cycling", displayOrder: 2 },
+	correr: { sportTypeId: 1, sportTypeKey: "running", displayOrder: 1 },
+};
+const TIPOS_PASO = {
+	calentamiento: { stepTypeId: 1, stepTypeKey: "warmup", displayOrder: 1 },
+	vuelta_calma: { stepTypeId: 2, stepTypeKey: "cooldown", displayOrder: 2 },
+	intervalo: { stepTypeId: 3, stepTypeKey: "interval", displayOrder: 3 },
+	recuperacion: { stepTypeId: 4, stepTypeKey: "recovery", displayOrder: 4 },
+	descanso: { stepTypeId: 5, stepTypeKey: "rest", displayOrder: 5 },
+};
+const NOMBRE_PASO = { calentamiento: "Calentamiento", vuelta_calma: "Vuelta a la calma", intervalo: "Serie", recuperacion: "Recuperación", descanso: "Descanso" };
+const OBJETIVOS = {
+	ninguno: { workoutTargetTypeId: 1, workoutTargetTypeKey: "no.target", displayOrder: 1 },
+	potencia: { workoutTargetTypeId: 2, workoutTargetTypeKey: "power.zone", displayOrder: 2 },
+	cadencia: { workoutTargetTypeId: 3, workoutTargetTypeKey: "cadence", displayOrder: 3 },
+	fc: { workoutTargetTypeId: 4, workoutTargetTypeKey: "heart.rate.zone", displayOrder: 4 },
+	velocidad: { workoutTargetTypeId: 5, workoutTargetTypeKey: "speed.zone", displayOrder: 5 },
+	ritmo: { workoutTargetTypeId: 6, workoutTargetTypeKey: "pace.zone", displayOrder: 6 },
+};
+
+/** "4:30" (min/km) → segundos por km. */
+const segPorKm = (v) => {
+	const m = String(v ?? "").trim().match(/^(\d{1,2}):(\d{2})$/);
+	if (m) return Number(m[1]) * 60 + Number(m[2]);
+	const n = Number(v);
+	return Number.isFinite(n) && n > 0 ? n * 60 : null; // 4.5 → 4:30
+};
+const mmss = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
+
+/** Valida un paso y lo deja en forma canonica; lanza con un mensaje que diga que falta. */
+function normalizarPasoCardio(p, ruta) {
+	if (p && Array.isArray(p.pasos)) {
+		const veces = Math.round(Number(p.repetir));
+		if (!(veces >= 2 && veces <= 50)) throw new HttpError(400, `${ruta}: un bloque con pasos necesita repetir entre 2 y 50 veces.`);
+		if (!p.pasos.length) throw new HttpError(400, `${ruta}: el bloque que se repite no tiene pasos.`);
+		return { repetir: veces, pasos: p.pasos.map((x, i) => normalizarPasoCardio(x, `${ruta}.${i + 1}`)) };
+	}
+	if (!p || !TIPOS_PASO[p.tipo]) throw new HttpError(400, `${ruta}: tipo de paso no valido (${p?.tipo}). Use ${Object.keys(TIPOS_PASO).join(", ")}, o { repetir, pasos }.`);
+	const salida = { tipo: p.tipo };
+	if (Number(p.duracion_s) > 0) salida.duracion_s = Math.round(numeroEn(p.duracion_s, 5, 6 * 3600, 60));
+	else if (Number(p.distancia_m) > 0) salida.distancia_m = Math.round(numeroEn(p.distancia_m, 50, 300000, 1000));
+	else salida.hasta_boton = true;
+	const o = p.objetivo;
+	if (o && o.tipo && o.tipo !== "ninguno") {
+		if (!OBJETIVOS[o.tipo]) throw new HttpError(400, `${ruta}: objetivo no valido (${o.tipo}). Use fc, potencia, ritmo, velocidad o cadencia.`);
+		const obj = { tipo: o.tipo };
+		if (o.zona != null && (o.tipo === "fc" || o.tipo === "potencia")) {
+			obj.zona = Math.round(numeroEn(o.zona, 1, o.tipo === "fc" ? 5 : 7, 2));
+		} else if (o.tipo === "ritmo") {
+			const a = segPorKm(o.min), b = segPorKm(o.max);
+			if (!a || !b) throw new HttpError(400, `${ruta}: el ritmo va en min/km, p. ej. { min: "4:40", max: "4:20" }.`);
+			obj.min = mmss(Math.max(a, b)); obj.max = mmss(Math.min(a, b)); // min = el mas lento
+		} else {
+			const a = Number(o.min), b = Number(o.max);
+			if (!Number.isFinite(a) || !Number.isFinite(b)) throw new HttpError(400, `${ruta}: el objetivo ${o.tipo} necesita min y max (o zona).`);
+			obj.min = Math.min(a, b); obj.max = Math.max(a, b);
+		}
+		salida.objetivo = obj;
+	}
+	if (typeof p.nota === "string" && p.nota.trim()) salida.nota = p.nota.trim().slice(0, 120);
+	return salida;
+}
+
+const textoObjetivo = (o) => {
+	if (!o) return "";
+	const u = { fc: "ppm", potencia: "W", velocidad: "km/h", cadencia: "rpm", ritmo: "/km" }[o.tipo];
+	if (o.zona) return o.tipo === "fc" ? `zona ${o.zona} de pulso` : `zona ${o.zona} de potencia`;
+	return o.tipo === "ritmo" ? `${o.min}-${o.max} /km` : `${o.min}-${o.max} ${u}`;
+};
+const textoDuracion = (p) => (p.duracion_s ? (p.duracion_s % 60 ? `${Math.floor(p.duracion_s / 60)}:${String(p.duracion_s % 60).padStart(2, "0")} min` : `${p.duracion_s / 60} min`)
+	: p.distancia_m ? (p.distancia_m >= 1000 ? `${String(p.distancia_m / 1000).replace(".", ",")} km` : `${p.distancia_m} m`) : "hasta pulsar vuelta");
+
+/** El entreno en frases, para enseñarlo antes de mandarlo. */
+function resumenCardio(pasos, sangria = "") {
+	return pasos.flatMap((p) => p.repetir
+		? [`${sangria}${p.repetir} ×`, ...resumenCardio(p.pasos, `${sangria}   `)]
+		: [`${sangria}${NOMBRE_PASO[p.tipo]}: ${textoDuracion(p)}${p.objetivo ? ` · ${textoObjetivo(p.objetivo)}` : ""}${p.nota ? ` · ${p.nota}` : ""}`]);
+}
+
+/** Duracion aproximada en minutos (los pasos por distancia o boton no suman). */
+const minutosCardio = (pasos) => pasos.reduce((t, p) => t + (p.repetir ? p.repetir * minutosCardio(p.pasos) : (p.duracion_s || 0) / 60), 0);
+
+function pasoGarmin(p, orden, grupo) {
+	const fin = p.duracion_s
+		? { endCondition: { conditionTypeId: 2, conditionTypeKey: "time", displayOrder: 2, displayable: true }, endConditionValue: p.duracion_s }
+		: p.distancia_m
+			? { endCondition: { conditionTypeId: 3, conditionTypeKey: "distance", displayOrder: 3, displayable: true }, endConditionValue: p.distancia_m }
+			: { endCondition: { conditionTypeId: 1, conditionTypeKey: "lap.button", displayOrder: 1, displayable: true } };
+	const o = p.objetivo;
+	let objetivo = { targetType: OBJETIVOS.ninguno };
+	if (o) {
+		objetivo = { targetType: OBJETIVOS[o.tipo] };
+		if (o.zona) objetivo.zoneNumber = o.zona;
+		else if (o.tipo === "ritmo") {
+			// Garmin guarda el ritmo como velocidad en m/s: el valor bajo es el ritmo lento.
+			objetivo.targetValueOne = Math.round((1000 / segPorKm(o.min)) * 1000) / 1000;
+			objetivo.targetValueTwo = Math.round((1000 / segPorKm(o.max)) * 1000) / 1000;
+		} else if (o.tipo === "velocidad") {
+			objetivo.targetValueOne = Math.round((o.min / 3.6) * 1000) / 1000;
+			objetivo.targetValueTwo = Math.round((o.max / 3.6) * 1000) / 1000;
+		} else { objetivo.targetValueOne = o.min; objetivo.targetValueTwo = o.max; }
+	}
+	return {
+		type: "ExecutableStepDTO", stepOrder: orden, ...(grupo ? { childStepId: grupo } : {}),
+		stepType: TIPOS_PASO[p.tipo], ...fin, ...objetivo,
+		...(p.nota ? { description: p.nota } : {}),
+	};
+}
+
+function cardioParaGarmin(entreno) {
+	let orden = 0, grupos = 0;
+	const convertir = (pasos, grupo) => pasos.map((p) => {
+		if (!p.repetir) return pasoGarmin(p, ++orden, grupo);
+		const id = ++grupos, suOrden = ++orden;
+		return {
+			type: "RepeatGroupDTO", stepOrder: suOrden, childStepId: id, numberOfIterations: p.repetir, smartRepeat: false,
+			stepType: { stepTypeId: 6, stepTypeKey: "repeat", displayOrder: 6 },
+			endCondition: { conditionTypeId: 7, conditionTypeKey: "iterations", displayOrder: 7, displayable: false },
+			endConditionValue: p.repetir,
+			workoutSteps: convertir(p.pasos, id),
+		};
+	});
+	const deporte = DEPORTES_CARDIO[entreno.deporte];
+	return {
+		workoutName: `myCoach · ${entreno.nombre}`.slice(0, 80),
+		description: (entreno.nota || "Creado por myCoach").slice(0, 512),
+		sportType: deporte,
+		workoutSegments: [{ segmentOrder: 1, sportType: deporte, workoutSteps: convertir(entreno.pasos, null) }],
+	};
+}
+
+/** El dia de bici o correr del plan apunta a su entreno para el reloj. */
+async function enlazarCardioEnPlan(env, userId, fecha, entreno) {
+	const estado = await leerDoc(env, userId, "estado/app");
+	const clave = estado?.plan?.[fecha] ? "plan" : estado?.next?.[fecha] ? "next" : null;
+	const dia = clave && estado[clave][fecha];
+	if (!dia || dia.dep !== entreno.deporte) return false;
+	estado[clave][fecha] = { ...dia, entreno_cardio: entreno.id };
+	await guardarDoc(env, userId, "estado/app", estado);
+	return true;
+}
+
+const esquemaPasoCardio = {
+	type: "object",
+	description: "Un paso, o un bloque { repetir: n, pasos: [...] } para las series.",
+	properties: {
+		tipo: { type: "string", enum: Object.keys(TIPOS_PASO) },
+		duracion_s: { type: "integer", description: "Duracion en segundos." },
+		distancia_m: { type: "integer", description: "O distancia en metros. Sin duracion ni distancia: hasta pulsar vuelta." },
+		objetivo: {
+			type: "object",
+			description: "fc (zona 1-5 del reloj, o min/max en ppm), potencia (zona o min/max en W), ritmo (min/max en min/km, '4:30'), velocidad (min/max en km/h), cadencia (min/max en rpm o pasos/min).",
+			properties: { tipo: { type: "string", enum: ["ninguno", "fc", "potencia", "ritmo", "velocidad", "cadencia"] }, zona: { type: "integer" }, min: {}, max: {} },
+		},
+		nota: { type: "string" },
+		repetir: { type: "integer" },
+		pasos: { type: "array", items: { type: "object" } },
+	},
+};
+
+Object.assign(TOOLS, {
+	cardio_enviar_garmin: {
+		title: "Crear un entreno de bici o correr para el reloj",
+		write: true,
+		description:
+			"Crea un entreno guiado de bici o correr por pasos: calentamiento, series (bloques con repetir), recuperacion, vuelta a la calma; " +
+			"cada paso por tiempo, distancia o hasta pulsar vuelta, con objetivo de pulso (zona del reloj o rango), potencia, ritmo, velocidad o cadencia. " +
+			"Sin confirm (o confirm=false) devuelve la vista previa y NO escribe nada: enseñela al usuario. Con confirm=true, tras su si, lo crea en Garmin Connect, " +
+			"lo programa para la fecha y lo guarda con su nombre para repetirlo (cardio_entrenos). Si ese dia del plan es de ese deporte, queda enlazado. " +
+			"Use las zonas y umbrales del usuario (coach_perfil, garmin_training_readiness) para los rangos; si no los sabe, mejor zona de pulso del reloj.",
+		schema: {
+			type: "object",
+			properties: {
+				nombre: { type: "string", description: "P. ej. '5 × 4 min a umbral'." },
+				deporte: { type: "string", enum: ["bici", "correr"] },
+				fecha: { type: "string", description: "AAAA-MM-DD en que lo hara; por defecto hoy." },
+				pasos: { type: "array", items: esquemaPasoCardio },
+				nota: { type: "string", description: "Para que sirve, en una frase." },
+				id: { type: "string", description: "Para volver a mandar uno guardado (sin pasos)." },
+				confirm: { type: "boolean" },
+			},
+		},
+		run: async (env, userId, args) => {
+			const fecha = /^\d{4}-\d{2}-\d{2}$/.test(args.fecha || "") ? args.fecha : fechaLocal();
+			const doc = (await leerDoc(env, userId, CARDIO_ENTRENOS)) || { entrenos: {} };
+			doc.entrenos = doc.entrenos || {};
+			let entreno;
+			if (args.id && !args.pasos) {
+				entreno = doc.entrenos[slugFuerza(args.id)];
+				if (!entreno) throw new HttpError(404, `No hay ningun entreno de bici o correr "${args.id}".`);
+			} else {
+				if (!DEPORTES_CARDIO[args.deporte]) throw new HttpError(400, "deporte tiene que ser bici o correr.");
+				if (!Array.isArray(args.pasos) || !args.pasos.length) throw new HttpError(400, "El entreno necesita pasos.");
+				const nombre = String(args.nombre || "").trim().slice(0, 60);
+				if (!nombre) throw new HttpError(400, "El entreno necesita un nombre.");
+				entreno = {
+					id: slugFuerza(args.id || nombre), nombre, deporte: args.deporte,
+					pasos: args.pasos.slice(0, 30).map((p, i) => normalizarPasoCardio(p, `Paso ${i + 1}`)),
+					...(typeof args.nota === "string" && args.nota.trim() ? { nota: args.nota.trim().slice(0, 200) } : {}),
+				};
+			}
+			const vista = { nombre: entreno.nombre, deporte: entreno.deporte, fecha, min_estimados: Math.round(minutosCardio(entreno.pasos)), pasos: resumenCardio(entreno.pasos) };
+			if (args.confirm !== true)
+				return { vista_previa: vista, escrito: false, siguiente: "Enseñeselo al usuario y, si dice que si, llame otra vez con confirm=true." };
+
+			const creado = await apiPost(env, userId, "/workout-service/workout", cardioParaGarmin(entreno));
+			const workoutId = creado?.workoutId;
+			if (!workoutId) throw new HttpError(502, "Garmin no devolvio el id del entreno.");
+			let programado = true;
+			try { await apiPost(env, userId, `/workout-service/schedule/${workoutId}`, { date: fecha }); } catch { programado = false; }
+			const previo = doc.entrenos[entreno.id];
+			if (previo?.garmin?.workout_id && String(previo.garmin.workout_id) !== String(workoutId)) await borrarEntrenoGarmin(env, userId, previo.garmin.workout_id);
+			doc.entrenos[entreno.id] = { ...entreno, creado: previo?.creado || fechaLocal(), garmin: { workout_id: String(workoutId), fecha, enviado: fechaLocal() } };
+			await guardarDoc(env, userId, CARDIO_ENTRENOS, doc);
+			const enlazado = await enlazarCardioEnPlan(env, userId, fecha, entreno);
+			return {
+				enviado: true, ...vista, workout_id: String(workoutId), programado, enlazado_al_plan: enlazado,
+				mensaje: programado
+					? `"${entreno.nombre}" esta en tu calendario de Garmin para el ${fecha}. Sincroniza el reloj y lo tendras en Entrenamientos.`
+					: `"${entreno.nombre}" esta en tus entrenos de Garmin, pero no he podido ponerlo en el calendario: buscalo en Entrenamientos del reloj.`,
+			};
+		},
+	},
+
+	cardio_entrenos: {
+		title: "Entrenos de bici y correr guardados",
+		description: "Sin id: la lista de entrenos de bici y correr ya creados para el reloj. Con id: sus pasos. Para repetir uno, cardio_enviar_garmin con id y la fecha.",
+		schema: { type: "object", properties: { id: { type: "string" } } },
+		run: async (env, userId, { id }) => {
+			const entrenos = (await leerDoc(env, userId, CARDIO_ENTRENOS))?.entrenos || {};
+			if (id) {
+				const e = entrenos[slugFuerza(id)];
+				if (!e) throw new HttpError(404, `No hay ningun entreno de bici o correr "${id}".`);
+				return { ...e, min_estimados: Math.round(minutosCardio(e.pasos)), resumen: resumenCardio(e.pasos) };
+			}
+			return { entrenos: Object.values(entrenos).map((e) => ({ id: e.id, nombre: e.nombre, deporte: e.deporte, min_estimados: Math.round(minutosCardio(e.pasos)), ultimo_envio: e.garmin?.fecha || null })) };
 		},
 	},
 });

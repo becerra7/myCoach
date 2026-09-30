@@ -546,7 +546,7 @@ const rpc = async (env, token, message) => {
 	check("initialize con token valido", init.body.result?.serverInfo?.name === "garmin");
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("tools/list devuelve 38 herramientas", list.body.result.tools.length === 38);
+	check("tools/list devuelve 40 herramientas", list.body.result.tools.length === 40);
 	check("app_guardar se anuncia como escritura", anot0(list).app_guardar.readOnlyHint === false);
 	{
 		const call = (name, args) => rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name, arguments: args } });
@@ -1082,7 +1082,7 @@ const rpc = async (env, token, message) => {
 	check("el token de acceso vale sin leer del KV", init.body.result?.serverInfo?.name === "garmin");
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("las herramientas se listan igualmente", list.body.result.tools.length === 38);
+	check("las herramientas se listan igualmente", list.body.result.tools.length === 40);
 
 	// Y el dato que si vive en KV avisa en vez de mentir
 	const call = await rpc(env, tokens.access_token, {
@@ -1875,6 +1875,73 @@ const rpc = async (env, token, message) => {
 	await llamar("fuerza_entreno_guardar", { id: "pierna-a-copia", nombre: "Pierna B", borrar: true });
 	const borrado = await llamar("fuerza_entreno_guardar", { nombre: "Pierna A", borrar: true });
 	check("un entreno se puede borrar", borrado.borrado === "pierna-a" && (await llamar("fuerza_entrenos")).entrenos.length === 0);
+	globalThis.fetch = base;
+}
+
+// ── 16. Entrenos de bici y correr para el reloj ──
+{
+	mockGarmin({ "ana@x.com": { password: "a", data: { displayName: "ana", hrv: 50 } } });
+	const base = globalThis.fetch;
+	const garmin = { creados: [], programados: [] };
+	globalThis.fetch = async (url, init = {}) => {
+		const u = new URL(url);
+		if (u.pathname === "/workout-service/workout" && init.method === "POST") { garmin.creados.push(JSON.parse(init.body)); return new Response(JSON.stringify({ workoutId: 900 + garmin.creados.length })); }
+		if (u.pathname.startsWith("/workout-service/schedule/")) { garmin.programados.push(JSON.parse(init.body)); return new Response("{}"); }
+		if (u.pathname.startsWith("/workout-service/workout/") && init.method === "DELETE") return new Response(null, { status: 204 });
+		return base(url, init);
+	};
+	const env = makeEnv();
+	const ana = (await connect(env, "ana@x.com", "a")).tokens.access_token;
+	const llamar = async (name, args = {}) => {
+		const res = (await rpc(env, ana, { jsonrpc: "2.0", id: 40, method: "tools/call", params: { name, arguments: args } })).body.result;
+		return res.isError ? { error: res.content[0].text } : JSON.parse(res.content[0].text);
+	};
+	const series = {
+		nombre: "5 × 4 min umbral", deporte: "bici", fecha: "2026-10-02", nota: "Umbral para subir el FTP.",
+		pasos: [
+			{ tipo: "calentamiento", duracion_s: 900, objetivo: { tipo: "fc", zona: 2 } },
+			{ repetir: 5, pasos: [
+				{ tipo: "intervalo", duracion_s: 240, objetivo: { tipo: "potencia", min: 300, max: 280 } },
+				{ tipo: "recuperacion", duracion_s: 180, objetivo: { tipo: "fc", min: 110, max: 125 } },
+			] },
+			{ tipo: "vuelta_calma", duracion_s: 600 },
+		],
+	};
+	const vista = await llamar("cardio_enviar_garmin", series);
+	check("sin confirm, solo la vista previa: no escribe en Garmin", vista.escrito === false && garmin.creados.length === 0);
+	check("la vista previa se lee: series y objetivos", vista.vista_previa.pasos.includes("5 ×") && vista.vista_previa.pasos.some((l) => /Serie: 4 min · 280-300 W/.test(l)) && vista.vista_previa.min_estimados === 60, JSON.stringify(vista.vista_previa));
+	const malo = await llamar("cardio_enviar_garmin", { ...series, pasos: [{ tipo: "intervalo", duracion_s: 60, objetivo: { tipo: "ritmo", min: "rapido", max: "4:00" } }] });
+	check("un ritmo mal escrito se explica", /min\/km/.test(malo.error || ""));
+	await llamar("app_guardar", { doc: "estado/app", datos: { plan: { "2026-10-02": { dep: "bici", t: "int", d: "Series", min: 60 } } } });
+	const ok = await llamar("cardio_enviar_garmin", { ...series, confirm: true });
+	const w = garmin.creados[0];
+	const pasos = w.workoutSegments[0].workoutSteps;
+	check("se crea un entreno de ciclismo en Garmin", ok.enviado === true && w.sportType.sportTypeKey === "cycling" && w.workoutName === "myCoach · 5 × 4 min umbral");
+	check("calentamiento por tiempo con zona de pulso del reloj",
+		pasos[0].stepType.stepTypeKey === "warmup" && pasos[0].endConditionValue === 900 && pasos[0].targetType.workoutTargetTypeKey === "heart.rate.zone" && pasos[0].zoneNumber === 2);
+	const bloque = pasos[1];
+	check("las series son una repeticion con potencia y recuperacion por pulso",
+		bloque.type === "RepeatGroupDTO" && bloque.numberOfIterations === 5 &&
+		bloque.workoutSteps[0].targetType.workoutTargetTypeKey === "power.zone" && bloque.workoutSteps[0].targetValueOne === 280 && bloque.workoutSteps[0].targetValueTwo === 300 &&
+		bloque.workoutSteps[1].stepType.stepTypeKey === "recovery" && bloque.workoutSteps[1].targetValueOne === 110, JSON.stringify(bloque).slice(0, 300));
+	check("los pasos van numerados sin repetir", (() => { const o = []; const r = (ps) => ps.forEach((p) => { o.push(p.stepOrder); if (p.workoutSteps) r(p.workoutSteps); }); r(pasos); return new Set(o).size === o.length; })());
+	check("se programa para el dia y enlaza el dia de bici del plan", garmin.programados[0].date === "2026-10-02" && ok.enlazado_al_plan === true &&
+		(await llamar("app_leer", { doc: "estado/app" })).plan["2026-10-02"].entreno_cardio === "5-4-min-umbral");
+
+	const carrera = await llamar("cardio_enviar_garmin", { nombre: "Tempo 3 km", deporte: "correr", confirm: true, pasos: [
+		{ tipo: "calentamiento", distancia_m: 2000 },
+		{ tipo: "intervalo", distancia_m: 3000, objetivo: { tipo: "ritmo", min: "4:20", max: "4:40" } },
+		{ tipo: "vuelta_calma" },
+	] });
+	const c = garmin.creados[1].workoutSegments[0].workoutSteps;
+	check("correr: distancia en metros, ritmo como velocidad (lento primero) y 'hasta pulsar vuelta'",
+		carrera.enviado && garmin.creados[1].sportType.sportTypeKey === "running" && c[1].endCondition.conditionTypeKey === "distance" && c[1].endConditionValue === 3000 &&
+		c[1].targetType.workoutTargetTypeKey === "pace.zone" && c[1].targetValueOne < c[1].targetValueTwo && Math.abs(c[1].targetValueTwo - 1000 / 260) < 0.01 &&
+		c[2].endCondition.conditionTypeKey === "lap.button", JSON.stringify(c[1]));
+	const lista = await llamar("cardio_entrenos");
+	check("los entrenos quedan guardados para repetirlos", lista.entrenos.length === 2 && lista.entrenos.some((e) => e.id === "tempo-3-km" && e.deporte === "correr"));
+	const otra = await llamar("cardio_enviar_garmin", { id: "tempo-3-km", fecha: "2026-10-09", confirm: true });
+	check("repetir uno guardado solo con su id y la fecha", otra.enviado && garmin.programados.at(-1).date === "2026-10-09");
 	globalThis.fetch = base;
 }
 

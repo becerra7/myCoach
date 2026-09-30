@@ -90,6 +90,10 @@ mañana el cron deja `coach/hoy` calculado para quien usa myCoach.
 
 Entrenos de fuerza con nombre, liderados por Claude: `fuerza_entrenos`, `fuerza_entreno_guardar`, `fuerza_registrar`, `fuerza_historial`, `fuerza_ejercicios_garmin` (busca en el catálogo de Garmin, en castellano; va en `ejercicios-garmin.js`), `fuerza_enviar_garmin` (crea el entreno de fuerza guiado en Garmin Connect y lo programa; escribe, pide confirmación), `fuerza_desde_garmin` (cierra la sesión con las series que contó el reloj) y `fuerza_dia` (lo que usa la app). Se guarda en `app:<id>:fuerza/entrenos` y `app:<id>:fuerza/registro`; la plantilla y lo hecho van separados.
 
+## Entrenos de bici y correr para el reloj (`cardio_*`)
+
+`cardio_enviar_garmin` crea un entreno guiado por pasos (calentamiento, bloques que se repiten, recuperación, vuelta a la calma), cada paso por tiempo, distancia o hasta pulsar vuelta, con objetivo de pulso (zona del reloj o rango en ppm), potencia (zona o W), ritmo (min/km), velocidad (km/h) o cadencia. Sin `confirm` devuelve la vista previa y no escribe; con `confirm=true` lo crea en Garmin Connect, lo programa para el día, lo guarda (`app:<id>:cardio/entrenos`) y enlaza el día del plan (`entreno_cardio`). `cardio_entrenos` los lista para repetirlos.
+
 ## Todas las métricas de una actividad
 
 `garmin_activity_detail` devuelve el resumen de Garmin entero, con nombre y
