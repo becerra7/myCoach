@@ -152,22 +152,26 @@ function scrCompartir() {
    sus deportes y sus preferencias. Cada grupo con su encabezado (h2) para lectores de pantalla. */
 function scrAjustes() {
   const sec = (t, cuerpo, nota) => `<section class="aj-sec"><h2 class="aj-h">${t}</h2>${nota ? `<p class="small muted aj-nota">${nota}</p>` : ''}${cuerpo}</section>`;
-  const grp = (id, t, opts, cur) => `<fieldset class="aj-grp"><legend class="aj-leg">${t}</legend><div class="opts">${opts.map(([v, l, s]) => `<label class="radio" for="${id}-${v}"><input type="radio" name="${id}" id="${id}-${v}" value="${v}" data-a="set" data-k="${id}" ${cur === v ? 'checked' : ''}><span><b style="font-weight:600">${l}</b>${s ? `<br><span class="small muted">${s}</span>` : ''}</span></label>`).join('')}</div></fieldset>`;
+  // Una elección corta: control segmentado con su explicación debajo (cambia con la opción).
+  const seg = (k, t, opts, cur, nota) => `<div class="stack" style="gap:8px" role="group" aria-labelledby="seg-${k}"><b id="seg-${k}">${t}</b><div class="seg">${opts.map(([v, l]) => `<button type="button" data-a="set-seg" data-k="${k}" data-v="${v}" aria-pressed="${cur === v}">${l}</button>`).join('')}</div><span class="small muted">${nota}</span></div>`;
   const horas = horasPorDeporte();
   const otros = Object.entries(horas).filter(([k]) => !ENTRENABLES.includes(k));
   return { title: 'Ajustes', html: head('Ajustes', M.fuente === 'vivo' ? 'Garmin conectado en vivo' : 'Modo demo') + `<div class="content aj" style="max-width:640px">
     ${cardCuenta() ? sec('Tu cuenta', cardCuenta()) : ''}
-    ${sec('Conexiones', `<div class="stack" style="gap:12px">${cardGarmin()}${cardIntervals()}${calDisponible() ? cardCalendario() : ''}</div>`)}
-    ${sec('Tu entrenador', `<label class="stack" for="coach-nombre" style="gap:6px"><b>Nombre</b><input id="coach-nombre" class="search" value="${esc(S.coachNombre || '')}" data-a="coach-nombre" placeholder="myCoach" maxlength="24" aria-describedby="coach-nombre-h"><span class="small muted" id="coach-nombre-h">Así se presenta en la app y en tu Claude.</span></label>`)}
+    ${sec('Conexiones', LIVE && S.modo === 'vivo'
+      ? `<div class="stack" style="gap:12px">${cardGarmin()}${cardIntervals()}${calDisponible() ? cardCalendario() : ''}</div>`
+      : cardGarmin(), LIVE && S.modo === 'vivo' ? '' : 'Intervals.icu y tu calendario se conectan cuando entres.')}
+    ${sec('Tú y tu entrenador', `<div class="card stack" style="gap:14px">
+      <label class="stack" for="coach-nombre" style="gap:6px"><b>Nombre del entrenador</b><input id="coach-nombre" class="search" value="${esc(S.coachNombre || '')}" data-a="coach-nombre" placeholder="myCoach" maxlength="24" aria-describedby="coach-nombre-h"><span class="small muted" id="coach-nombre-h">Así se presenta en la app y en tu Claude.</span></label>
+      <label class="stack" for="nombre-in" style="gap:6px"><b>Tu nombre</b><input id="nombre-in" class="search" value="${esc(S.nombre)}" data-a="nombre-in" placeholder="Opcional" autocomplete="given-name"><span class="small muted">Sale en la ficha que compartes.</span></label></div>`)}
     ${sec('Deportes que entreno', `<div class="list">${ENTRENABLES.map(k => `<label class="toggle-row" for="sp-${k}"><span class="main"><b>${sportDot2(k)} ${SPORTS[k].n}</b><br><span class="small muted">${horas[k] ? `${nf(horas[k])} h en tu Garmin` : 'Sin actividades todavía'}${k === 'fuerza' ? ' · complemento' : ''}</span></span><input class="switch" type="checkbox" id="sp-${k}" data-a="sport-t" data-v="${k}" ${S.sports.includes(k) ? 'checked' : ''}></label>`).join('')}</div>
-      ${otros.length ? `<p class="small muted aj-nota">También haces ${otros.map(([k, h]) => `${SPORTS[k].n.toLowerCase()} (${nf(h)} h)`).join(', ')}. Cuenta como carga en tu semáforo, pero no lo planifico: no se mide con ritmo, potencia o pulso de forma fiable.</p>` : ''}`,
+      ${otros.length ? `<p class="small muted aj-nota">${cap1(otros.map(([k]) => SPORTS[k].n.toLowerCase()).join(', ').replace(/, ([^,]*)$/, ' y $1'))}: cuentan como carga, pero no los planifico.</p>` : ''}`,
       'Los planifico con pulso, ritmo, velocidad, potencia y cadencia. La fuerza entra como complemento.')}
-    ${sec('Preferencias', `<label class="toggle-row" for="hoy-forma"><span class="main"><b>Tu forma en Hoy</b><br><span class="small muted">Tu nota y tu tipo de deportista, debajo de la semana.</span></span><input class="switch" type="checkbox" id="hoy-forma" data-a="hoy-forma" ${S.hoyForma ? 'checked' : ''}></label>
-      ${grp('ai', 'Inteligencia artificial', [['claude', 'Con mi Claude', 'Gratis para la app: usa tu cuenta de Claude'], ['off', 'Sin IA', 'Todo funciona con reglas; sin fotos de comida ni chat']], S.ai)}
-      ${grp('clasif', 'Cómo se clasifican los días', [['min', 'Por mis minutos de pulso', 'Recomendado'], ['garmin', 'Por la etiqueta de Garmin']], S.clasif)}`)}
-    ${sec('Tú', `<label class="stack" for="nombre-in" style="gap:6px"><b>Tu nombre</b><input id="nombre-in" class="search" value="${esc(S.nombre)}" data-a="nombre-in" placeholder="Opcional" autocomplete="given-name"><span class="small muted">Sale en la ficha que compartes.</span></label>
-      <p class="small muted">Tu zona en el mapa: ${esc(M.ccaa || 'sin datos')} (la comunidad donde más kilómetros haces).</p>`)}
-    ${sec('Datos', grp('modo', 'De dónde salen tus datos', [['vivo', 'Mi Garmin en vivo', LIVE ? 'Conector disponible' : 'Aquí no hay conector de Garmin'], ['demo', 'Modo demo', 'Datos de ejemplo para probar la app']], S.modo))}
+    ${sec('Preferencias', `<div class="card stack" style="gap:16px">
+      <label class="toggle-row" for="hoy-forma" style="padding:0"><span class="main"><b>Tu forma en Hoy</b><br><span class="small muted">Tu nota y tu tipo de deportista, debajo de la semana.</span></span><input class="switch" type="checkbox" id="hoy-forma" data-a="hoy-forma" ${S.hoyForma ? 'checked' : ''}></label>
+      ${seg('ai', 'Inteligencia artificial', [['claude', 'Con mi Claude'], ['off', 'Sin IA']], S.ai, S.ai === 'off' ? 'Todo funciona con reglas; sin fotos de comida ni chat.' : 'Usa tu cuenta de Claude: la app no paga otra IA.')}
+      ${seg('clasif', 'Cómo se clasifican los días', [['min', 'Por mi pulso'], ['garmin', 'Por Garmin']], S.clasif, S.clasif === 'garmin' ? 'Con la etiqueta que pone Garmin a cada actividad.' : 'Por tus minutos en cada zona de pulso. Recomendado.')}
+      ${LIVE ? seg('modo', 'De dónde salen tus datos', [['vivo', 'Mi Garmin'], ['demo', 'Demo']], S.modo, S.modo === 'demo' ? 'Datos de ejemplo para probar la app.' : 'Tus datos, en vivo.') : ''}</div>`)}
     <p class="small muted aj-nota">myCoach · versión ${esc(APP_VERSION.commit)} · ${esc(APP_VERSION.fecha)}${window.PLATFORM && PLATFORM.name === 'claude-app' ? ' · dentro de Claude' : ''}</p>
   </div>` };
 }

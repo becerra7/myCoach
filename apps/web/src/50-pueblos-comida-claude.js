@@ -323,6 +323,7 @@ const ACTIONS = {
   'map-zoom': el => zoomAt($('#mf-view svg'), +el.dataset.v), 'map-reset': () => setVB($('#mf-view svg'), [...MAPA.vb0]),
   plevel: el => { S.pLevel = el.dataset.v; save(); render(); markFlow('pueblos'); }, pzoom: el => { S.pZoom = el.dataset.v; save(); render(); },
   'p-rutas-btn': el => { S.pRutas = !S.pRutas; save(); el.setAttribute('aria-pressed', S.pRutas); const svg = $('#mf-view svg'); if (svg) applyMapFilter(svg); },
+  'set-seg': el => { const k = el.dataset.k, v = el.dataset.v; if (S[k] === v) return; ponerAjuste(k, v); document.querySelector(`[data-a="set-seg"][data-k="${k}"][data-v="${v}"]`)?.focus(); },
   'town-all': () => { S.townAll = true; render(); },
   'fix-type': el => { const id = el.dataset.v; openSheet({ title: 'Cómo cuenta', size: 'auto', body: () => `<div class="opts">${['rec', 'fondo', 'tempo', 'int'].map(k => `<button type="button" class="radio" style="border:0;font:inherit;color:inherit;text-align:left" data-a="fix-to" data-v="${id}" data-k="${k}">${chip(k)}</button>`).join('')}</div>` }); },
   'fix-to': el => { closeSheet(); S.overrides[el.dataset.v] = el.dataset.k; save(); render(); toast(`Ahora cuenta como ${TIPOS[el.dataset.k].n.toLowerCase()}`); },
@@ -355,13 +356,14 @@ document.addEventListener('input', e => {
   if (a === 'test-w') { S.stack[S.stack.length - 1].w = +el.value; render(); $('#t-w')?.focus(); }
   if (a === 'goal-pro') { const s = S.stack[S.stack.length - 1]; const m = MODOS[s.g.modo]; const v = +el.value; const k = el.dataset.k; if (k === 'fuerza') s.g.fuerza = v; else s.g[k] = [Math.min((s.g[k] || m[k])[0], v), v]; render(); document.getElementById(el.id)?.focus(); }
 });
+function ponerAjuste(k, v) { S[k] = v; if (k === 'modo') { cargarModo(); if (S.modo === 'vivo' && LIVE) sync(false); } save(); render(); toast('Guardado'); }
 document.addEventListener('change', e => {
   const el = e.target, a = el.dataset && el.dataset.a; if (!a) return;
   if (a === 'share-t') { S.share[el.dataset.v] = el.checked; save(); render(); }
   if (a === 'p-rutas') { S.pRutas = el.checked; save(); $$('#view .map').forEach(applyMapFilter); }
   if (a === 'hoy-forma') { S.hoyForma = el.checked; save(); render(); document.getElementById('hoy-forma')?.focus(); }
   if (a === 'sport-t') { const v = el.dataset.v; S.sports = el.checked ? [...new Set([...S.sports, v])] : S.sports.filter(x => x !== v); S.fSport = S.fSport.filter(x => S.sports.includes(x)); save(); render(); markFlow('deportes'); }
-  if (a === 'set') { S[el.dataset.k] = el.value; if (el.dataset.k === 'modo') { cargarModo(); if (S.modo === 'vivo' && LIVE) sync(false); } save(); render(); document.getElementById(el.id)?.focus(); toast('Guardado'); }
+  if (a === 'set') { ponerAjuste(el.dataset.k, el.value); document.getElementById(el.id)?.focus(); }
   if (a === 'goal-date') { S.stack[S.stack.length - 1].g.fecha = el.value; save(); }
   if (a === 'otro-txt') { fillSheet(); }
   if (a === 'meal-foto' && el.files && el.files[0]) mealFoto(el.files[0]);

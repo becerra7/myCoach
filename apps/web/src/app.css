@@ -769,3 +769,4 @@ button.hp-encaje{cursor:pointer;align-items:center;min-height:44px}
 .sw.on{background:var(--map-on);border-color:var(--map-on-line)}
 .ley-rutas{margin-left:auto;display:inline-flex;align-items:center;gap:10px;min-height:44px;color:var(--label);cursor:pointer}
 .mf-rutas{position:absolute;left:12px;top:calc(env(safe-area-inset-top,0px) + 118px);z-index:2;background:var(--glass);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
+.aj .seg button{min-height:44px}
