@@ -8,6 +8,7 @@ function openMapa(key = mapKeyActual(), focusId = null) {
   el.innerHTML = `<div class="mf-top"><button class="close" type="button" aria-label="Cerrar mapa" data-a="map-close">${ic('close', 18)}</button>
       <div class="seg" role="group" aria-label="Zona" style="flex:1">${[['ccaa', M.ccaa || 'Comunidad'], ['es', 'España']].map(([k, l]) => `<button type="button" data-a="map-key" data-v="${k}" aria-pressed="${key === k}">${l}</button>`).join('')}</div></div>
     <div class="mf-chips">${fchips('pSport', ['bici', 'correr', 'montana', 'skimo'], S.pSport)}</div>
+    <button type="button" class="fchip mf-rutas" data-a="p-rutas-btn" aria-pressed="${!!S.pRutas}">${ic('bike', 16)} Rutas</button>
     <div class="mf-view" id="mf-view">${mapSvg(key)}</div>
     <div class="mf-zoom"><button type="button" aria-label="Acercar" data-a="map-zoom" data-v="1.6">${ic('plus', 22)}</button><button type="button" aria-label="Alejar" data-a="map-zoom" data-v="0.625">${ic('minus', 22)}</button><button type="button" aria-label="Ver todo" data-a="map-reset">${ic('sync', 20)}</button></div>
     <div class="mf-card" id="mf-card" hidden></div>

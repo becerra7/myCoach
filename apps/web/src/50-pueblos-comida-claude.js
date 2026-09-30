@@ -1,10 +1,10 @@
 /* ===== PUEBLOS: niveles (tu comunidad · España · mundo) y filtro por deporte ===== */
-function visitedSet() { const sel = S.pSport; return new Set(pueblosDe(sel).map(t => t[0])); }
+function visitedSet() { const sel = S.pSport; return new Set(pueblosDe(sel).map(t => t.id)); }
 function applyMapFilter(svg) {
   if (!svg.dataset.map || svg.dataset.map === 'world') return;
   const vs = visitedSet();
   svg.querySelectorAll('path[data-m]').forEach(p => p.classList.toggle('on', !!p.dataset.m && vs.has(p.dataset.m)));
-  svg.querySelectorAll('.tr').forEach(t => t.classList.toggle('hide', !!S.pSport.length && !S.pSport.includes(t.dataset.t)));
+  svg.querySelectorAll('.tr').forEach(t => t.classList.toggle('hide', !S.pRutas || (!!S.pSport.length && !S.pSport.includes(t.dataset.t))));
 }
 function tabPueblos() {
   const lv = S.pLevel, sel = S.pSport; const lista = pueblosDe(sel); const zona = M.ccaa || 'Tu comunidad';
@@ -20,11 +20,13 @@ function tabPueblos() {
       <div class="b-full stats"><div class="stat"><span class="v">${count}</span><span class="l">${lv === 'world' ? 'países' : lv === 'es' ? 'de 8.131 en España' : `de ${totZona ?? '—'} en ${esc(zona)}`}</span></div><div class="stat"><span class="v">${nuevosMes}</span><span class="l">nuevos en 30 días</span></div><div class="stat"><span class="v">${Object.keys(DSET.rutas || {}).filter(k => DSET.rutas[k]).length}</span><span class="l">trazados leídos</span></div></div>
       <div class="b-hero stack" style="gap:10px">
         <button type="button" class="mapbox mapprev" data-a="open-map" aria-label="Abrir el mapa a pantalla completa">${mapSvg(lv)}<span class="mp-cta">${ic('pueblos', 18)} Abrir mapa</span></button>
-        <p class="xs">${lv === 'world' ? esc(M.paises.join(', ')) + '.' : 'Toca el mapa: pellizca para acercar y toca un pueblo para ver su ficha.'}</p></div>
+        ${lv === 'world' ? `<p class="xs">${esc(M.paises.join(', '))}.</p>` : `<div class="map-ley"><span class="ley"><i class="sw on" aria-hidden="true"></i>Has pasado</span><span class="ley"><i class="sw" aria-hidden="true"></i>Aún no</span>
+          <label class="ley-rutas" for="p-rutas"><span>Ver tus rutas</span><input class="switch" type="checkbox" id="p-rutas" data-a="p-rutas" ${S.pRutas ? 'checked' : ''}></label></div>`}</div>
       <div class="b-side stack" style="gap:10px"><div class="section-h"><h2>Por kilómetros</h2></div>
         <label class="vh" for="town-q">Buscar pueblo</label><input id="town-q" class="search" type="search" placeholder="Buscar pueblo" value="${esc(S.townQ || '')}" data-a="town-q" autocomplete="off">
-        <div class="list" id="town-list">${lista.filter(t => !q || t.n.toLowerCase().includes(q)).slice(0, 80).map(t => `<button type="button" class="li" style="min-height:44px" data-a="town-focus" data-v="${t.id}"><span class="main"><b>${esc(t.n)}</b><span>desde ${fDia(t.primera)}</span></span><span class="stack" style="align-items:flex-end;gap:2px"><span class="num" style="font-size:18px">${nf(sel.length ? sel.reduce((a, s) => a + (t.dep[s] || 0), 0) : t.km)} km</span><span style="display:flex;gap:3px">${Object.keys(t.dep).map(k => `<i class="dot" style="width:8px;height:8px;background:${scol(k)}" title="${SPORTS[k].n}"></i>`).join('')}</span></span></button>`).join('') || '<p class="small muted" style="padding:12px 16px">Sin pueblos todavía: actualiza para leer tus trazados.</p>'}</div>
-        <p class="xs">Cuento municipios (IGN). Los núcleos pequeños de cada municipio necesitan datos de OpenStreetMap: llegarán con la versión web.</p></div>
+        <div class="list" id="town-list">${lista.filter(t => !q || t.n.toLowerCase().includes(q)).slice(0, q || S.townAll ? 80 : 8).map(t => `<button type="button" class="li" style="min-height:44px" data-a="town-focus" data-v="${t.id}"><span class="main"><b>${esc(t.n)}</b><span>desde ${fDia(t.primera)}</span></span><span class="stack" style="align-items:flex-end;gap:2px"><span class="num" style="font-size:18px">${nf(sel.length ? sel.reduce((a, s) => a + (t.dep[s] || 0), 0) : t.km)} km</span><span style="display:flex;gap:3px">${Object.keys(t.dep).map(k => `<i class="dot" style="width:8px;height:8px;background:${scol(k)}" title="${SPORTS[k].n}"></i>`).join('')}</span></span></button>`).join('') || '<p class="small muted" style="padding:12px 16px">Sin pueblos todavía: actualiza para leer tus trazados.</p>'}</div>
+        ${!q && !S.townAll && lista.length > 8 ? `<button class="btn text" type="button" data-a="town-all">Ver los ${lista.length}</button>` : ''}
+        <p class="xs">Cuento municipios (IGN).</p></div>
     </div></div>` };
 }
 
@@ -320,6 +322,8 @@ const ACTIONS = {
   'map-close': () => closeMapa(), 'map-key': el => openMapa(el.dataset.v), 'map-card-close': () => { $('#mf-card').hidden = true; $$('#mapfull path.sel').forEach(x => x.classList.remove('sel')); },
   'map-zoom': el => zoomAt($('#mf-view svg'), +el.dataset.v), 'map-reset': () => setVB($('#mf-view svg'), [...MAPA.vb0]),
   plevel: el => { S.pLevel = el.dataset.v; save(); render(); markFlow('pueblos'); }, pzoom: el => { S.pZoom = el.dataset.v; save(); render(); },
+  'p-rutas-btn': el => { S.pRutas = !S.pRutas; save(); el.setAttribute('aria-pressed', S.pRutas); const svg = $('#mf-view svg'); if (svg) applyMapFilter(svg); },
+  'town-all': () => { S.townAll = true; render(); },
   'fix-type': el => { const id = el.dataset.v; openSheet({ title: 'Cómo cuenta', size: 'auto', body: () => `<div class="opts">${['rec', 'fondo', 'tempo', 'int'].map(k => `<button type="button" class="radio" style="border:0;font:inherit;color:inherit;text-align:left" data-a="fix-to" data-v="${id}" data-k="${k}">${chip(k)}</button>`).join('')}</div>` }); },
   'fix-to': el => { closeSheet(); S.overrides[el.dataset.v] = el.dataset.k; save(); render(); toast(`Ahora cuenta como ${TIPOS[el.dataset.k].n.toLowerCase()}`); },
   'do-share': () => { toast('En la app real se abre el menú de compartir con la imagen'); markFlow('compartir'); },
@@ -354,6 +358,7 @@ document.addEventListener('input', e => {
 document.addEventListener('change', e => {
   const el = e.target, a = el.dataset && el.dataset.a; if (!a) return;
   if (a === 'share-t') { S.share[el.dataset.v] = el.checked; save(); render(); }
+  if (a === 'p-rutas') { S.pRutas = el.checked; save(); $$('#view .map').forEach(applyMapFilter); }
   if (a === 'hoy-forma') { S.hoyForma = el.checked; save(); render(); document.getElementById('hoy-forma')?.focus(); }
   if (a === 'sport-t') { const v = el.dataset.v; S.sports = el.checked ? [...new Set([...S.sports, v])] : S.sports.filter(x => x !== v); S.fSport = S.fSport.filter(x => S.sports.includes(x)); save(); render(); markFlow('deportes'); }
   if (a === 'set') { S[el.dataset.k] = el.value; if (el.dataset.k === 'modo') { cargarModo(); if (S.modo === 'vivo' && LIVE) sync(false); } save(); render(); document.getElementById(el.id)?.focus(); toast('Guardado'); }
