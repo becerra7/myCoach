@@ -545,6 +545,16 @@ const rpc = async (env, token, message) => {
 	});
 	check("initialize con token valido", init.body.result?.serverInfo?.name === "garmin");
 
+	// Conector añadido sin el /mcp (o con la barra final): tambien funciona
+	const raizAnon = await postJson(env, "/", { jsonrpc: "2.0", id: 1, method: "initialize" });
+	check("en la raiz, sin token -> 401 que dice donde autenticarse",
+		raizAnon.status === 401 && (raizAnon.headers.get("WWW-Authenticate") || "").includes("oauth-protected-resource"));
+	const raiz = await postJson(env, "/", { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } }, { Authorization: `Bearer ${tokens.access_token}` });
+	check("en la raiz, con token, contesta como /mcp", (await raiz.json()).result?.serverInfo?.name === "garmin");
+	const barra = await postJson(env, "/mcp/", { jsonrpc: "2.0", id: 1, method: "tools/list" }, { Authorization: `Bearer ${tokens.access_token}` });
+	check("/mcp/ con barra final tambien", (await barra.json()).result?.tools?.length > 0);
+	check("un navegador en la raiz sigue viendo la pagina", (await (await get(env, "/")).text()).includes("<h1>"));
+
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
 	check("tools/list devuelve 44 herramientas", list.body.result.tools.length === 44);
 	check("app_guardar se anuncia como escritura", anot0(list).app_guardar.readOnlyHint === false);

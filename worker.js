@@ -6220,7 +6220,7 @@ async function record(env, request, status, note) {
 	if (!env.LOGS) return;
 	try {
 		await env.LOGS.prepare(
-			"INSERT INTO events (at, path, method, status, note, ua) VALUES (?, ?, ?, ?, ?, ?)",
+			"INSERT INTO events (at, path, method, status, note, ua, host) VALUES (?, ?, ?, ?, ?, ?, ?)",
 		)
 			.bind(
 				new Date().toISOString(),
@@ -6229,6 +6229,8 @@ async function record(env, request, status, note) {
 				status,
 				String(note ?? "").slice(0, 300),
 				(request.headers.get("User-Agent") || "").slice(0, 120),
+				// Tres workers (garmin, garmin-2, garmin-pruebas) escriben aqui: el host dice cual.
+				new URL(request.url).hostname.split(".")[0],
 			)
 			.run();
 	} catch {
@@ -6295,7 +6297,10 @@ export default {
 
 			if (pathname === "/panel" || pathname.startsWith("/panel/")) return handlePanel(request, env, ctx);
 
-			if (pathname === "/mcp") {
+			// El conector tambien contesta en la raiz (y con la barra final): si alguien lo
+			// añade en Claude sin el /mcp, el login iba bien pero Claude recibia la pagina de
+			// bienvenida y decia que el conector no estaba disponible. Un navegador (GET) ve la pagina.
+			if (pathname === "/mcp" || pathname === "/mcp/" || (pathname === "/" && request.method === "POST")) {
 				const userId = await userForRequest(request, env);
 				if (!userId)
 					// El WWW-Authenticate es lo que le dice a Claude donde autenticarse.
