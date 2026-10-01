@@ -11,7 +11,7 @@ async function cargarCardio(id, fresco) {
   if (fuente === 'demo') return; // en el modo demo no hay series guardadas
   CZ[id] = 'cargando';
   try { CZ[id] = await coachCall('cardio_entrenos', { id }, fresco); } catch (e) { CZ[id] = null; }
-  render(); if (sheetState && sheetState.id === 'dia') fillSheet();
+  render(); if (sheetState && (sheetState.id === 'dia' || sheetState.id === 'cent')) fillSheet();
 }
 
 /** Los pasos en filas; los de un bloque que se repite, sangrados debajo de "5 ×". */

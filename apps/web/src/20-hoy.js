@@ -251,6 +251,7 @@ function cardHoyPlan() {
       <button type="button" class="hp-sem-h" data-a="tab" data-v="plan"><h3>Esta semana</h3><span class="small muted grow">${semana}</span>${ic('chev', 16, 'chev')}</button>
       <div class="strip7">${strip}</div>
     </div>
+    <button type="button" class="link hp-ents" data-a="push" data-v="entrenos">${ic('dumbbell', 18)} Tus entrenos</button>
   </section>`;
 }
 

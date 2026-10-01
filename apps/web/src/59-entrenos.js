@@ -16,16 +16,57 @@ const resumenEntreno = e => [`${e.ejercicios.length} ejercicio${e.ejercicios.len
 const ultimaVez = e => e.ultima_sesion ? `Última vez: ${fDia(e.ultima_sesion.fecha)}` : 'Sin hacer todavía';
 const sinConector = '<p class="small">Tus entrenos viven en tu conector de Garmin. Conéctalo para verlos.</p>';
 
-/* Lista */
+/* Lista: fuerza (editables) y bici y correr (guiados, los crea Claude) */
+let CENTS; // entrenos de bici y correr: undefined · 'cargando' · null · lista
+async function cargarCardioLista(fresco) {
+  if (!LIVE || S.modo !== 'vivo' || CENTS === 'cargando') return;
+  CENTS = 'cargando';
+  try { CENTS = (await coachCall('cardio_entrenos', {}, fresco)).entrenos || []; } catch (e) { CENTS = null; }
+  render();
+}
 function scrEntrenos() {
-  let cuerpo;
-  if (!LIVE || S.modo !== 'vivo') cuerpo = sinConector;
-  else if (ENTS === undefined || ENTS === 'cargando') { if (ENTS === undefined) cargarEntrenos(true); cuerpo = '<p class="small muted" role="status">Cargando tus entrenos…</p>'; }
-  else if (ENTS === null) cuerpo = '<p class="small">No he podido leer tus entrenos. Vuelve a probar en un momento.</p><div class="btns"><button class="btn tonal" type="button" data-a="ent-recargar">Volver a probar</button></div>';
-  else if (!ENTS.length) cuerpo = '<div class="card stack" style="gap:8px"><b>Aún no tienes entrenos</b><p class="small">Pídele a Claude una sesión de fuerza (en casa o en el gimnasio) y dile que la guarde con un nombre, por ejemplo "Pierna A". Aparecerá aquí para editarla y ponerla en tu plan.</p></div>';
-  else cuerpo = `<div class="list">${ENTS.map(e => `<button type="button" class="li" data-a="ent-abrir" data-v="${esc(e.id)}"><span class="main"><b>${esc(e.nombre)}</b><span>${esc(resumenEntreno(e))}</span><span class="small muted">${esc(ultimaVez(e))}${e.veces > 1 ? ` · ${e.veces} veces` : ''}</span></span>${ic('chev', 18, 'chev')}</button>`).join('')}</div>
-    <p class="small muted aj-nota">Para ponerlos en tu semana, toca un día en Plan y elige "Poner un entreno de fuerza".</p>`;
-  return { title: 'Tus entrenos', html: head('Tus entrenos', 'De fuerza, para repetirlos y ajustarlos') + `<div class="content" style="max-width:640px">${cuerpo}</div>` };
+  let fuerza, cardio;
+  if (!LIVE || S.modo !== 'vivo') fuerza = sinConector;
+  else if (ENTS === undefined || ENTS === 'cargando') { if (ENTS === undefined) cargarEntrenos(true); fuerza = '<p class="small muted" role="status">Cargando tus entrenos…</p>'; }
+  else if (ENTS === null) fuerza = '<p class="small">No he podido leer tus entrenos. Vuelve a probar en un momento.</p><div class="btns"><button class="btn tonal" type="button" data-a="ent-recargar">Volver a probar</button></div>';
+  else if (!ENTS.length) fuerza = '<div class="card stack" style="gap:8px"><b>Aún no tienes entrenos de fuerza</b><p class="small">Pídele a Claude una sesión de fuerza (en casa o en el gimnasio) y dile que la guarde con un nombre, por ejemplo "Pierna A". Aparecerá aquí para editarla y ponerla en tu plan.</p></div>';
+  else fuerza = `<div class="list">${ENTS.map(e => `<button type="button" class="li" data-a="ent-abrir" data-v="${esc(e.id)}"><span class="main"><b>${esc(e.nombre)}</b><span>${esc(resumenEntreno(e))}</span><span class="small muted">${esc(ultimaVez(e))}${e.veces > 1 ? ` · ${e.veces} veces` : ''}</span></span>${ic('chev', 18, 'chev')}</button>`).join('')}</div>`;
+  if (LIVE && S.modo === 'vivo') {
+    if (CENTS === undefined || CENTS === 'cargando') { if (CENTS === undefined) cargarCardioLista(true); cardio = '<p class="small muted" role="status">Cargando…</p>'; }
+    else if (CENTS === null) cardio = '<p class="small">No he podido leerlos. Vuelve a probar en un momento.</p>';
+    else if (!CENTS.length) cardio = '<div class="card stack" style="gap:8px"><b>Aún no tienes entrenos de bici ni de correr</b><p class="small">Pídele a Claude unas series (por pulso, potencia o ritmo) para un día: te las manda al reloj y quedan aquí para repetirlas.</p></div>';
+    else cardio = `<div class="list">${CENTS.map(e => `<button type="button" class="li" data-a="cent-abrir" data-v="${esc(e.id)}"><span class="main"><b>${sportDot2(e.deporte)} ${esc(e.nombre)}</b><span>${SPORTS[e.deporte]?.n || ''}${e.min_estimados ? ` · ≈ ${dur(e.min_estimados)}` : ''}</span><span class="small muted">${e.ultimo_envio ? `Último envío al reloj: ${fDia(e.ultimo_envio)}` : 'Sin enviar'}</span></span>${ic('chev', 18, 'chev')}</button>`).join('')}</div>`;
+  } else cardio = '';
+  return { title: 'Tus entrenos', html: head('Tus entrenos', 'Para repetirlos, ajustarlos y mandarlos al reloj') + `<div class="content stack" style="max-width:640px;gap:8px">
+    <h2 class="aj-h">${ic('dumbbell', 18)} Fuerza</h2>${fuerza}
+    <p class="small muted aj-nota">Para ponerlos en tu semana, toca un día en Plan y elige "Poner un entreno de fuerza".</p>
+    ${cardio ? `<h2 class="aj-h" style="margin-top:16px">${ic('bike', 18)} Bici y correr</h2>${cardio}` : ''}</div>` };
+}
+
+/* Un entreno de bici o correr: sus pasos y mandarlo al reloj para un día */
+function hojaCardioEntreno(id) {
+  const prox = days7(HOY); let dia = null;
+  const cuerpo = () => {
+    const e = CZ[id];
+    if (e === undefined || e === 'cargando') { if (e === undefined) cargarCardio(id, true); return '<p class="small muted" role="status">Cargando los pasos…</p>'; }
+    if (!e) return '<p class="small">No he podido leer este entreno. Vuelve a probar en un momento.</p>';
+    // Por defecto, el próximo día del plan de ese deporte; si no hay, hoy.
+    if (!dia) dia = prox.find(f => { const s = sesion(f); return s && s.dep === e.deporte && !s.a; }) || HOY;
+    return `<p class="small muted">${SPORTS[e.deporte]?.n || ''}${e.min_estimados ? ` · ≈ ${dur(e.min_estimados)}` : ''}${e.nota ? ` · ${esc(e.nota)}` : ''}</p>
+      ${pasosCardio(e.resumen || [])}
+      <fieldset class="caras-f"><legend>¿Para qué día?</legend><div class="filters" style="flex-wrap:wrap">${prox.map(f => `<button type="button" class="fchip" data-a="cent-dia" data-v="${f}" aria-pressed="${f === dia}">${f === HOY ? 'Hoy' : cap1(fCorta(f))}</button>`).join('')}</div></fieldset>
+      <div class="btns"><button class="btn fill" type="button" data-a="cent-enviar" data-v="${esc(id)}" data-f="${dia}">${ic('watch', 18)} Enviar para ${dia === HOY ? 'hoy' : `el ${fCorta(dia).toLowerCase()}`}</button></div>`;
+  };
+  const nombre = Array.isArray(CENTS) ? (CENTS.find(x => x.id === id) || {}).nombre : null;
+  openSheet({ title: nombre || 'Entreno', size: 'large', id: 'cent', body: cuerpo });
+  hojaCardioEntreno.elegir = f => { dia = f; fillSheet(); };
+}
+async function enviarCardioId(id, f) {
+  try {
+    const r = await coachCall('cardio_enviar_garmin', { id, fecha: f, confirm: true }, true);
+    closeSheet(); toast(r.programado ? `En tu reloj para ${f === HOY ? 'hoy' : `el ${fCorta(f)}`}: sincronízalo` : 'En Garmin, pero no en el calendario');
+    CZ[id] = undefined; CENTS = undefined; render();
+  } catch (err) { toast('No he podido enviarlo: ' + (err.message || 'error')); }
 }
 
 /* Un entreno, editable */
@@ -157,6 +198,9 @@ function ponerEntreno(id, f) {
 
 Object.assign(ACTIONS, {
   'ent-recargar': () => { ENTS = undefined; render(); },
+  'cent-abrir': el => hojaCardioEntreno(el.dataset.v),
+  'cent-dia': el => hojaCardioEntreno.elegir(el.dataset.v),
+  'cent-enviar': el => enviarCardioId(el.dataset.v, el.dataset.f),
   // Cada vez que se abre, fresco: puede haberlo cambiado Claude.
   'ent-abrir': el => { delete ENT[el.dataset.v]; push({ s: 'entreno', id: el.dataset.v }); },
   'ent-lugar': el => { const st = entAbierto(); if (!st) return; st.borrador.lugar = el.dataset.v; $$('[data-a="ent-lugar"]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === el.dataset.v))); marcarSucio(st); },

@@ -799,3 +799,4 @@ button.hp-encaje{cursor:pointer;align-items:center;min-height:44px}
 .chart .sel-l{stroke:var(--label-2);stroke-width:1.5;stroke-dasharray:3 3;vector-effect:non-scaling-stroke}
 .chart .sel-c{fill:var(--tint);stroke:var(--card);stroke-width:3}
 .chart .sel{pointer-events:none}
+.hp-ents{display:inline-flex;align-items:center;gap:8px;min-height:var(--tap);padding:0;margin-top:4px;background:none;border:0;color:var(--tint);font:inherit;font-weight:600;cursor:pointer}

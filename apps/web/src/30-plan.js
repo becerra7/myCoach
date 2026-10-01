@@ -60,7 +60,7 @@ function tabPlan() {
       <div class="b-hero stack" style="gap:12px">
         <div class="plan-res"><p>${linea}</p>${w === PROX ? '<button class="btn text" type="button" data-a="replan">Rehacer</button>' : ''}</div>
         <div class="list split">${listaDias(w)}</div>
-        ${w !== PROX && w !== SEM ? '' : `<div class="list"><button type="button" class="li" data-a="push" data-v="entrenos">${ic('dumbbell')}<span class="main"><b>Tus entrenos de fuerza</b><span>Edítalos y ponlos en un día</span></span>${ic('chev', 18, 'chev')}</button></div>`}
+        ${w !== PROX && w !== SEM ? '' : `<div class="list"><button type="button" class="li" data-a="push" data-v="entrenos">${ic('dumbbell')}<span class="main"><b>Tus entrenos</b><span>Fuerza, bici y correr: velos, ajústalos y mándalos al reloj</span></span>${ic('chev', 18, 'chev')}</button></div>`}
       </div>
       <div class="b-side stack" style="gap:12px">
         <section class="card" aria-labelledby="nec-t"><h2 class="card-t" id="nec-t">${w === PROX ? 'Lo que llevas planeado' : 'Lo que necesitas esta semana'}</h2>${saludMix(rp, o)}</section>
