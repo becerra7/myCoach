@@ -6128,7 +6128,7 @@ async function pesajesGarmin(env, userId, desde, hasta) {
 		for (const d of r?.dailyWeightSummaries || []) {
 			const w = d.latestWeight || (d.allWeightMetrics || []).at(-1);
 			const g = w?.weight;
-			if (g) dias.push({ fecha: d.summaryDate || w.calendarDate, kg: Math.round((g > 1000 ? g / 1000 : g) * 10) / 10, ...(w.bodyFat ? { grasa_pct: Math.round(w.bodyFat * 10) / 10 } : {}) });
+			if (g) dias.push({ fecha: d.summaryDate || w.calendarDate, kg: Math.round((g > 1000 ? g / 1000 : g) * 100) / 100, ...(w.bodyFat ? { grasa_pct: Math.round(w.bodyFat * 10) / 10 } : {}) });
 		}
 	}
 	return dias.filter((d) => d.fecha).sort((a, b) => a.fecha.localeCompare(b.fecha));
@@ -6169,7 +6169,7 @@ Object.assign(TOOLS, {
 			if (crudos.length > PESO_MAX_POR_LLAMADA) throw new HttpError(400, `Son ${crudos.length}: sube como mucho ${PESO_MAX_POR_LLAMADA} por llamada, por tandas.`);
 			const hoy = fechaLocal();
 			const pesajes = crudos.map((p, i) => {
-				const kg = Math.round(Number(String(p.kg).replace(",", ".")) * 10) / 10;
+				const kg = Math.round(Number(String(p.kg).replace(",", ".")) * 100) / 100; // dos decimales, como dan las basculas
 				if (!(kg >= 25 && kg <= 300)) throw new HttpError(400, `Pesaje ${i + 1}: ${p.kg} no parece un peso en kg.`);
 				const fecha = /^\d{4}-\d{2}-\d{2}$/.test(p.fecha || "") ? p.fecha : hoy;
 				if (fecha > hoy) throw new HttpError(400, `Pesaje ${i + 1}: ${fecha} es una fecha futura.`);
@@ -6178,7 +6178,7 @@ Object.assign(TOOLS, {
 			}).sort((a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora));
 			const desde = pesajes[0].fecha, hasta = pesajes.at(-1).fecha;
 			const enGarmin = new Map((await pesajesGarmin(env, userId, desde, hasta)).map((d) => [d.fecha, d.kg]));
-			const nuevos = pesajes.filter((p) => !(enGarmin.has(p.fecha) && Math.abs(enGarmin.get(p.fecha) - p.kg) < 0.05));
+			const nuevos = pesajes.filter((p) => !(enGarmin.has(p.fecha) && Math.abs(enGarmin.get(p.fecha) - p.kg) < 0.005));
 			const vista = { nuevos: nuevos.length, ya_estaban: pesajes.length - nuevos.length, desde, hasta, primero: nuevos[0] || null, ultimo: nuevos.at(-1) || null };
 			if (args.confirm !== true) return { vista_previa: vista, escrito: false, siguiente: nuevos.length ? "Enseñeselo y, si dice que si, llame otra vez con confirm=true." : "No hay nada nuevo que subir." };
 			const fallidos = [];

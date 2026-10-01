@@ -2021,11 +2021,13 @@ const rpc = async (env, token, message) => {
 	check("peso: con confirm sube solo los nuevos", ok.subidos === 2 && subidos.length === 2 && subidos[1].value === 70.8 && subidos[0].value === 71.1, JSON.stringify(ok));
 	check("peso: hora local de España y su hora en UTC, como lo pide Garmin",
 		subidos[1].dateTimestamp === "2026-09-25T07:30:00.00" && subidos[1].gmtTimestamp === "2026-09-25T05:30:00.00" && subidos[1].unitKey === "kg" && subidos[1].sourceType === "MANUAL", JSON.stringify(subidos[1]));
+	const dos = await llamar("peso_registrar", { kg: "70,85", fecha: "2026-09-27", confirm: true });
+	check("peso: dos decimales, como da la bascula", dos.subidos === 1 && subidos.at(-1).value === 70.85, JSON.stringify(subidos.at(-1)));
 	check("peso: un valor raro se explica", /no parece un peso/.test((await llamar("peso_registrar", { kg: 7, confirm: true })).error || ""));
 	check("peso: nada de fechas futuras", /futura/.test((await llamar("peso_registrar", { kg: 70, fecha: "2999-01-01" })).error || ""));
 	const hist = await llamar("peso_historico", { dias: 3650 });
-	check("peso_historico: un pesaje por dia, en kg y ordenados", hist.pesajes.length === 3 && hist.pesajes[0].kg === 71.4 && hist.pesajes.at(-1).fecha === "2026-09-25", JSON.stringify(hist.pesajes));
-	check("peso_historico: ultimo y media de 7 dias", hist.resumen.ultimo.kg === 70.8 && hist.resumen.media_7_dias === 71.1, JSON.stringify(hist.resumen));
+	check("peso_historico: un pesaje por dia, en kg y ordenados, con sus dos decimales", hist.pesajes.length === 4 && hist.pesajes[0].kg === 71.4 && hist.pesajes.at(-1).kg === 70.85, JSON.stringify(hist.pesajes));
+	check("peso_historico: ultimo y media de 7 dias", hist.resumen.ultimo.kg === 70.85 && hist.resumen.media_7_dias === 70.9, JSON.stringify(hist.resumen));
 	globalThis.fetch = base;
 }
 
