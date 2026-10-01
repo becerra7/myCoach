@@ -6,7 +6,9 @@ const RANGOS_PESO = [['90', '3 meses'], ['365', '1 año'], ['todo', 'Todo']];
 
 async function cargarPeso(fresco) {
   if (PZ.datos === 'cargando') return;
-  if (!LIVE || S.modo !== 'vivo') { PZ.datos = pesoDemo(); return; }
+  const fuente = fuenteDatos(); if (fuente === 'espera') { cuandoHayaConector(); return; }
+  PZ.fuente = fuente;
+  if (fuente === 'demo') { PZ.datos = pesoDemo(); return; }
   PZ.datos = 'cargando';
   try { PZ.datos = await coachCall('peso_historico', { dias: 1830 }, fresco); } catch (e) { PZ.datos = null; }
   render();
@@ -52,16 +54,20 @@ function chartPeso(ps, desde) {
   s += ps.map(p => `<circle cx="${X(p.fecha).toFixed(1)}" cy="${Y(p.kg).toFixed(1)}" r="2.5" class="pz-pt"/>`).join('');
   s += `<polyline points="${ps.map((p, i) => `${X(p.fecha).toFixed(1)},${Y(tend[i]).toFixed(1)}`).join(' ')}" fill="none" stroke="var(--tint)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
   s += `<circle cx="${X(ult.fecha)}" cy="${Y(ult.kg)}" r="5" fill="var(--tint)" stroke="var(--card)" stroke-width="2"/><text class="lbl" x="${X(ult.fecha) + 8}" y="${Y(ult.kg) + 4}">${nf(ult.kg, 2)}</text>`;
+  // Marcador del pesaje señalado: línea vertical y punto con anillo (lo mueve el manejador común de los gráficos).
+  s += `<g class="sel" visibility="hidden" aria-hidden="true"><line class="sel-l" x1="0" x2="0" y1="${pt}" y2="${H - pb}"/><circle class="sel-c" r="9" cx="0" cy="0"/></g>`;
   // Zonas de toque: de punto medio a punto medio, para que el más cercano responda.
   ps.forEach((p, i) => {
     const a = i ? (X(ps[i - 1].fecha) + X(p.fecha)) / 2 : pl, b = i < ps.length - 1 ? (X(p.fecha) + X(ps[i + 1].fecha)) / 2 : W - pr;
-    s += `<rect class="hit" x="${a.toFixed(1)}" y="${pt}" width="${Math.max(1, b - a).toFixed(1)}" height="${H - pt - pb}" data-tip="${esc(`${fDia(p.fecha)}: ${kgTxt(p.kg)} · media ${kgTxt(Math.round(tend[i] * 10) / 10)}`)}"/>`;
+    s += `<rect class="hit" x="${a.toFixed(1)}" y="${pt}" width="${Math.max(1, b - a).toFixed(1)}" height="${H - pt - pb}" data-cx="${X(p.fecha).toFixed(1)}" data-cy="${Y(p.kg).toFixed(1)}" data-tip="${esc(`${fDia(p.fecha)}: ${kgTxt(p.kg)} · media ${kgTxt(Math.round(tend[i] * 10) / 10)}`)}"/>`;
   });
   return `<div class="chart pz-chart">${s}</svg><div class="tip"></div></div>`;
 }
 
 function cardPeso() {
   if (S.verPeso === false) return '';
+  // Si cambia de dónde salen los datos (conector listo, o modo demo ↔ vivo), se vuelven a leer.
+  if (PZ.datos !== undefined && PZ.datos !== 'cargando' && fuenteDatos() !== 'espera' && PZ.fuente !== fuenteDatos()) PZ.datos = undefined;
   if (PZ.datos === undefined) cargarPeso();
   const d = PZ.datos; const cab = extra => `<div class="act-h"><h2 class="card-t" id="peso-t">Tu peso</h2>${extra || ''}</div>`;
   let cuerpo;

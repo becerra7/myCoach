@@ -7,7 +7,8 @@ const cardioDelDia = f => { const s = sesion(f); return s && (s.dep === 'bici' |
 
 async function cargarCardio(id, fresco) {
   if (CZ[id] === 'cargando') return;
-  if (!LIVE || S.modo !== 'vivo') { CZ[id] = null; return; }
+  const fuente = fuenteDatos(); if (fuente === 'espera') { cuandoHayaConector(); return; }
+  if (fuente === 'demo') return; // en el modo demo no hay series guardadas
   CZ[id] = 'cargando';
   try { CZ[id] = await coachCall('cardio_entrenos', { id }, fresco); } catch (e) { CZ[id] = null; }
   render(); if (sheetState && sheetState.id === 'dia') fillSheet();
@@ -33,6 +34,7 @@ function bloqueCardio(f) {
   }
   const id = s.entreno_cardio;
   if (CZ[id] === undefined) cargarCardio(id);
+  if (fuenteDatos() === 'demo') return '<p class="small muted">En el modo demo no hay series guardadas.</p>';
   if (CZ[id] === undefined || CZ[id] === 'cargando') return '<p class="small muted" role="status">Cargando los pasos…</p>';
   const e = CZ[id];
   if (!e) return `<p class="small">Este día apunta al entreno <b>${esc(id)}</b>, que no encuentro. Pídele a Claude que lo vuelva a crear.</p>`;

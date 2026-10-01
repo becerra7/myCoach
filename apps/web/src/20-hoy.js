@@ -122,13 +122,18 @@ function chartLine(pts, { h = 170, min, max, unit = '', fmt = v => nf(v), bands 
   pts.forEach((p, i) => { if (i % 2 === 0 || i === pts.length - 1) s += `<text class="ax" x="${X(i)}" y="${H - 6}" text-anchor="middle">${p.l}</text>`; s += `<rect class="hit" x="${X(i) - (W - pl - pr) / pts.length / 2}" y="${pt}" width="${(W - pl - pr) / pts.length}" height="${H - pt - pb}" data-tip="${esc(`${p.l}: ${p.v == null ? 'sin dato' : fmt(p.v) + ' ' + unit}`)}"/>`; });
   return `<div class="chart">${s}</svg><div class="tip"></div></div>`;
 }
-document.addEventListener('pointermove', e => {
-  const h = e.target.closest && e.target.closest('.hit'); const charts = $$('.chart .tip.on'); charts.forEach(t => { if (!h || t.parentElement !== h.closest('.chart')) { t.classList.remove('on'); t.style.opacity = 0; } });
+function señalarEnGrafico(e) {
+  const h = e.target.closest && e.target.closest('.hit'); const charts = $$('.chart .tip.on'); charts.forEach(t => { if (!h || t.parentElement !== h.closest('.chart')) { t.classList.remove('on'); t.style.opacity = 0; t.parentElement.querySelector('.sel')?.setAttribute('visibility', 'hidden'); } });
   if (!h) return; const c = h.closest('.chart'), tip = c.querySelector('.tip'); const r = c.getBoundingClientRect(); const hr = h.getBoundingClientRect();
+  // Marcador: si el gráfico lo tiene, se coloca en el punto señalado.
+  const sel = c.querySelector('.sel'); if (sel && h.dataset.cx) { sel.querySelector('.sel-l').setAttribute('x1', h.dataset.cx); sel.querySelector('.sel-l').setAttribute('x2', h.dataset.cx); sel.querySelector('.sel-c').setAttribute('cx', h.dataset.cx); sel.querySelector('.sel-c').setAttribute('cy', h.dataset.cy); sel.setAttribute('visibility', 'visible'); }
   tip.textContent = h.dataset.tip; const mitad = tip.offsetWidth / 2;
   // Dentro del gráfico: cerca de los bordes, el recuadro no se sale de la tarjeta.
   tip.style.left = Math.min(r.width - mitad, Math.max(mitad, hr.left - r.left + hr.width / 2)) + 'px'; tip.style.top = '12px'; tip.style.opacity = 1; tip.classList.add('on');
-});
+}
+// Ratón al pasar y dedo al tocar (en el móvil un toque no siempre genera pointermove).
+document.addEventListener('pointermove', señalarEnGrafico);
+document.addEventListener('pointerdown', señalarEnGrafico);
 
 /* ===== HOY ===== */
 function cardSemana(big, conEntrenador) {

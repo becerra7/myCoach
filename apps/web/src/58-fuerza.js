@@ -17,7 +17,8 @@ const DEMO_FUERZA = { id: 'demo', nombre: 'Fuerza en casa (ejemplo)', ejercicios
 
 async function cargarFuerza(f, fresco) {
   if (FZ[f] === 'cargando') return;
-  if (!LIVE || S.modo !== 'vivo') { FZ[f] = { entreno: DEMO_FUERZA, demo: true }; return; }
+  const fuente = fuenteDatos(); if (fuente === 'espera') { cuandoHayaConector(); return; }
+  if (fuente === 'demo') { FZ[f] = { entreno: DEMO_FUERZA, demo: true }; return; }
   FZ[f] = 'cargando';
   try { FZ[f] = await coachCall('fuerza_dia', { fecha: f }, fresco); } catch (e) { FZ[f] = null; }
   render(); if (sheetState && sheetState.id === 'dia') fillSheet();
@@ -39,6 +40,7 @@ const ESTADO_EJ = {
     enActividad: desde la pantalla de una actividad de fuerza, aunque el plan no la tuviera. */
 function bloqueFuerza(f, enActividad) {
   const s = fuerzaDelDia(f) || (enActividad ? {} : null); if (!s) return '';
+  if (FZ[f] && FZ[f].demo && fuenteDatos() === 'vivo') FZ[f] = undefined; // el ejemplo no se queda si ya hay conector
   if (FZ[f] === undefined) cargarFuerza(f);
   if (FZ[f] === undefined || FZ[f] === 'cargando') return '<p class="small muted" role="status">Cargando el entreno…</p>';
   const d = FZ[f]; const e = d && d.entreno;

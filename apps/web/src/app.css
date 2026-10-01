@@ -796,3 +796,6 @@ button.hp-encaje{cursor:pointer;align-items:center;min-height:44px}
 .pz-tabla ul{list-style:none;margin:0;padding:0;max-height:240px;overflow:auto}
 .pz-tabla li{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--sep);font-variant-numeric:tabular-nums}
 .pz-chart .ax{font-size:20px}.pz-chart .lbl{font-size:22px}
+.chart .sel-l{stroke:var(--label-2);stroke-width:1.5;stroke-dasharray:3 3;vector-effect:non-scaling-stroke}
+.chart .sel-c{fill:var(--tint);stroke:var(--card);stroke-width:3}
+.chart .sel{pointer-events:none}

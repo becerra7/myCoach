@@ -10,6 +10,14 @@ const COACH_EST = { bien: ['good', 'Bien'], normal: ['label-2', 'Normal'], leve:
 const NOMBRE_DATO = { frescura: 'Frescura', readiness: 'Readiness' };
 /* El nombre lo pone cada uno (Ajustes o su Claude); se guarda en el perfil del conector. Por defecto, myCoach. */
 const nombreCoach = () => (S.coachNombre || '').trim() || (COACH && COACH.entrenador) || 'myCoach';
+// De dónde salen los datos ahora mismo. Al arrancar, la app aún no sabe si hay conector ('espera'):
+// decidir 'demo' en ese momento dejaba el peso, la fuerza o las series de ejemplo para siempre.
+const fuenteDatos = () => LIVE === undefined ? 'espera' : LIVE && S.modo === 'vivo' ? 'vivo' : 'demo';
+let esperandoConector = false;
+function cuandoHayaConector() {
+  if (esperandoConector) return; esperandoConector = true;
+  capListo.then(() => { esperandoConector = false; render(); if (sheetState) fillSheet(); });
+}
 const coachCall = (tool, input, fresh) => !LIVE ? Promise.reject(new Error('Sin conector')) : LIVE.callTool('Garmin', tool, input, { cache: fresh ? { refresh: true } : { staleTime: 20 * 60e3 } }).then(r => r.payload);
 
 async function cargarCoach(fresco) {
