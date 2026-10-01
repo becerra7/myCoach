@@ -361,6 +361,7 @@ document.addEventListener('change', e => {
   const el = e.target, a = el.dataset && el.dataset.a; if (!a) return;
   if (a === 'share-t') { S.share[el.dataset.v] = el.checked; save(); render(); }
   if (a === 'p-rutas') { S.pRutas = el.checked; save(); $$('#view .map').forEach(applyMapFilter); }
+  if (a === 'ver-peso') { S.verPeso = el.checked; save(); render(); document.getElementById('ver-peso')?.focus(); }
   if (a === 'hoy-forma') { S.hoyForma = el.checked; save(); render(); document.getElementById('hoy-forma')?.focus(); }
   if (a === 'sport-t') { const v = el.dataset.v; S.sports = el.checked ? [...new Set([...S.sports, v])] : S.sports.filter(x => x !== v); S.fSport = S.fSport.filter(x => S.sports.includes(x)); save(); render(); markFlow('deportes'); }
   if (a === 'set') { ponerAjuste(el.dataset.k, el.value); document.getElementById(el.id)?.focus(); }

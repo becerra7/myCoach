@@ -787,3 +787,12 @@ button.hp-encaje{cursor:pointer;align-items:center;min-height:44px}
 .coach-sentir .u{text-decoration:underline;text-underline-offset:3px}
 .coach-sentir .grow{flex:1;text-align:left;color:var(--label);font-weight:500}
 .coach-sentir:has(.grow){width:100%}
+/* Tu peso: el último, la media y la gráfica (puntos = pesajes, línea = media de 7 días) */
+.pz-hoy{display:flex;flex-direction:column;gap:2px}
+.pz-v{font-size:34px;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums}
+.pz-v small{font-size:16px;font-weight:600;color:var(--label-2)}
+.chart .pz-pt{fill:var(--tint);opacity:.35}
+.pz-tabla summary{min-height:44px;display:flex;align-items:center;cursor:pointer;font-weight:600;color:var(--tint)}
+.pz-tabla ul{list-style:none;margin:0;padding:0;max-height:240px;overflow:auto}
+.pz-tabla li{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--sep);font-variant-numeric:tabular-nums}
+.pz-chart .ax{font-size:20px}.pz-chart .lbl{font-size:22px}

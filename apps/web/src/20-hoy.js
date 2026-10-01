@@ -125,7 +125,9 @@ function chartLine(pts, { h = 170, min, max, unit = '', fmt = v => nf(v), bands 
 document.addEventListener('pointermove', e => {
   const h = e.target.closest && e.target.closest('.hit'); const charts = $$('.chart .tip.on'); charts.forEach(t => { if (!h || t.parentElement !== h.closest('.chart')) { t.classList.remove('on'); t.style.opacity = 0; } });
   if (!h) return; const c = h.closest('.chart'), tip = c.querySelector('.tip'); const r = c.getBoundingClientRect(); const hr = h.getBoundingClientRect();
-  tip.textContent = h.dataset.tip; tip.style.left = (hr.left - r.left + hr.width / 2) + 'px'; tip.style.top = '12px'; tip.style.opacity = 1; tip.classList.add('on');
+  tip.textContent = h.dataset.tip; const mitad = tip.offsetWidth / 2;
+  // Dentro del gráfico: cerca de los bordes, el recuadro no se sale de la tarjeta.
+  tip.style.left = Math.min(r.width - mitad, Math.max(mitad, hr.left - r.left + hr.width / 2)) + 'px'; tip.style.top = '12px'; tip.style.opacity = 1; tip.classList.add('on');
 });
 
 /* ===== HOY ===== */

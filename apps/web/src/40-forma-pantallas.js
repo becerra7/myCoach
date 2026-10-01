@@ -27,6 +27,7 @@ function tabForma() {
   return { title: 'Forma', html: head('Forma', 'Parte común y detalle de cada deporte') + `<div class="content">
     ${fchips('fSport', S.sports, S.fSport, 'Todos mis deportes')}
     <div class="bento">
+      ${cardPeso()}
       <div class="card hero b-side"><div class="row" style="align-items:flex-start"><span class="card-h grow">Forma general</span><button class="iconbtn" type="button" aria-label="Compartir tu ficha" data-a="push" data-v="compartir">${ic('share')}</button></div>
         <div class="bignum"><span class="v">${forma() == null ? '—' : nf(forma())}</span><span class="of">/10</span></div><span class="kind">${esc(tipo)}</span><p class="small muted">${esc(desc)}</p>
         <button class="btn tonal" type="button" data-a="push" data-v="evo">${ic('chart', 18)} Ver evolución</button></div>
@@ -169,6 +170,7 @@ function scrAjustes() {
       'Los planifico con pulso, ritmo, velocidad, potencia y cadencia. La fuerza entra como complemento.')}
     ${sec('Preferencias', `<div class="card stack" style="gap:16px">
       <label class="toggle-row" for="hoy-forma" style="padding:0"><span class="main"><b>Tu forma en Hoy</b><br><span class="small muted">Tu nota y tu tipo de deportista, debajo de la semana.</span></span><input class="switch" type="checkbox" id="hoy-forma" data-a="hoy-forma" ${S.hoyForma ? 'checked' : ''}></label>
+      <label class="toggle-row" for="ver-peso" style="padding:0"><span class="main"><b>Tu peso en Forma</b><br><span class="small muted">La gráfica con tus pesajes de Garmin.</span></span><input class="switch" type="checkbox" id="ver-peso" data-a="ver-peso" ${S.verPeso !== false ? 'checked' : ''}></label>
       ${seg('ai', 'Inteligencia artificial', [['claude', 'Con mi Claude'], ['off', 'Sin IA']], S.ai, S.ai === 'off' ? 'Todo funciona con reglas; sin fotos de comida ni chat.' : 'Usa tu cuenta de Claude: la app no paga otra IA.')}
       ${seg('clasif', 'Cómo se clasifican los días', [['min', 'Por mi pulso'], ['garmin', 'Por Garmin']], S.clasif, S.clasif === 'garmin' ? 'Con la etiqueta que pone Garmin a cada actividad.' : 'Por tus minutos en cada zona de pulso. Recomendado.')}
       ${LIVE ? seg('modo', 'De dónde salen tus datos', [['vivo', 'Mi Garmin'], ['demo', 'Demo']], S.modo, S.modo === 'demo' ? 'Datos de ejemplo para probar la app.' : 'Tus datos, en vivo.') : ''}</div>`)}
