@@ -334,7 +334,7 @@ body.framed .app[data-os="android"] .tabs{padding-bottom:22px}
 .close{width:32px;height:32px;min-width:32px;border-radius:50%;background:var(--fill);color:var(--label-2);border:0;display:grid;place-items:center;cursor:pointer}
 @container app (min-width:840px){
   .sheet,.app:not([data-os="android"]) .sheet.medium,.app:not([data-os="android"]) .sheet.auto{left:auto;right:16px;top:16px;bottom:16px;width:440px;height:auto!important;max-height:none;border-radius:28px;transform:translateX(110%)}
-  .sheet.in{transform:none}
+  .sheet.in,.app:not([data-os="android"]) .sheet.in{transform:none}
   .grab{display:none}
 }
 .dialog{position:absolute;left:50%;top:50%;width:min(320px,calc(100% - 48px));transform:translate(-50%,-46%) scale(.96);opacity:0;background:var(--card);border-radius:28px;padding:24px;pointer-events:auto;transition:transform .35s var(--spring-soft),opacity .2s;display:flex;flex-direction:column;gap:16px;box-shadow:0 20px 60px rgba(0,0,0,.3)}
