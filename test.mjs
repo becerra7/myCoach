@@ -1912,6 +1912,16 @@ const rpc = async (env, token, message) => {
 	check("sin nada, cada ejercicio con su ultima vez", todo.ejercicios.some((e) => e.ejercicio === "Peso muerto rumano" && e.veces === 2));
 
 	check("cada entreno dice cuanto dura, aproximadamente", lista.entrenos[0].min_estimados >= 10 && detalle.min_estimados === lista.entrenos[0].min_estimados);
+	// coach_proponer enlaza el dia con su entreno, lo conserva y rechaza uno que no existe
+	const dentro2 = new Date(Date.now() + 2 * 864e5).toISOString().slice(0, 10);
+	const enl = await llamar("coach_proponer", { cambios: { [dentro2]: { dep: "fuerza", t: "otros", d: "Pierna", min: 45, entreno: "Pierna A" } }, porque: "enlazar", guardar: true });
+	const planEnl = await llamar("app_leer", { doc: "estado/app" });
+	const diaEnl = (planEnl.plan || {})[dentro2] || (planEnl.next || {})[dentro2];
+	check("coach_proponer enlaza el dia con su entreno de fuerza", enl.guardado === true && diaEnl?.entreno === "pierna-a", JSON.stringify(enl).slice(0, 300));
+	await llamar("coach_proponer", { cambios: { [dentro2]: { dep: "fuerza", t: "otros", d: "Pierna, 40 min", min: 40 } }, porque: "acortar", guardar: true });
+	const planEnl2 = await llamar("app_leer", { doc: "estado/app" });
+	check("cambiar el dia sin tocar el deporte conserva el entreno", ((planEnl2.plan || {})[dentro2] || (planEnl2.next || {})[dentro2])?.entreno === "pierna-a");
+	check("un entreno que no existe se explica", /No hay ningun entreno de fuerza/.test((await llamar("coach_proponer", { cambios: { [dentro2]: { dep: "fuerza", t: "otros", d: "x", min: 30, entreno: "Brazos Z" } }, porque: "x" })).error || ""));
 	const dup = await llamar("fuerza_entreno_guardar", { nombre: "Pierna A", nuevo: true, ejercicios: pierna.ejercicios });
 	check("crear uno nuevo con un nombre que ya existe no lo pisa", /Ya tienes un entreno/.test(dup.error || ""));
 	const copia = await llamar("fuerza_entreno_guardar", { nombre: "Pierna A (copia)", nuevo: true, ejercicios: pierna.ejercicios });

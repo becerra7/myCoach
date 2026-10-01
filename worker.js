@@ -3560,6 +3560,8 @@ const esquemaSesion = {
 		ajustada: { type: "boolean", description: "true si viene de una propuesta de coach_hoy (no se vuelve a ajustar)" },
 		d: { type: "string", description: "Descripcion corta, p. ej. 'Umbral: 3 x 10 min a 160-166 ppm'" },
 		min: { type: "number", description: "Duracion en minutos" },
+		entreno: { type: "string", description: "Dia de fuerza: id del entreno con nombre que toca (fuerza_entrenos), p. ej. 'tren-superior-en-casa'." },
+		entreno_cardio: { type: "string", description: "Dia de bici o correr: id del entreno guiado (cardio_entrenos)." },
 	},
 };
 
@@ -3659,12 +3661,30 @@ const COACH_TOOLS = {
 			const objetivo = objetivoDe(estadoApp);
 			const plan = planCompleto(estadoApp);
 			const nuevo = { ...plan };
+			// El dia puede apuntar a su entreno (fuerza o bici/correr): se comprueba que existe.
+			const pideEntreno = Object.values(cambios).some((x) => x && (x.entreno || x.entreno_cardio));
+			const [docFuerza, docCardio] = pideEntreno
+				? await Promise.all([leerDoc(env, userId, "fuerza/entrenos"), leerDoc(env, userId, CARDIO_ENTRENOS)])
+				: [null, null];
 			for (const [f, s] of Object.entries(cambios)) {
-				if (s == null) delete nuevo[f];
-				else nuevo[f] = {
+				if (s == null) { delete nuevo[f]; continue; }
+				const antes = plan[f];
+				const enlace = {};
+				if (typeof s.entreno === "string" && s.entreno.trim()) {
+					const id = slugFuerza(s.entreno);
+					if (!docFuerza?.entrenos?.[id]) throw new HttpError(400, `No hay ningun entreno de fuerza "${s.entreno}". Los que hay: ${Object.keys(docFuerza?.entrenos || {}).join(", ") || "ninguno"}.`);
+					enlace.entreno = id;
+				} else if (antes?.entreno && antes.dep === s.dep) enlace.entreno = antes.entreno; // mismo deporte: se conserva
+				if (typeof s.entreno_cardio === "string" && s.entreno_cardio.trim()) {
+					const id = slugFuerza(s.entreno_cardio);
+					if (!docCardio?.entrenos?.[id]) throw new HttpError(400, `No hay ningun entreno de bici o correr "${s.entreno_cardio}".`);
+					enlace.entreno_cardio = id;
+				} else if (antes?.entreno_cardio && antes.dep === s.dep) enlace.entreno_cardio = antes.entreno_cardio;
+				nuevo[f] = {
 					dep: s.dep, t: s.t, d: String(s.d || "").slice(0, 120),
 					min: s.min == null ? undefined : Math.round(Number(s.min)),
 					...(s.ajustada === true ? { ajustada: true } : {}),
+					...enlace,
 				};
 			}
 			const colorHoy = hoyGuardado?.fecha === hoy ? hoyGuardado.semaforo?.color : null;
@@ -3968,7 +3988,7 @@ const instruccionesCoach = (nombre = NOMBRE_COACH) =>
 	"(entrenos guardados, lo que hizo la ultima vez y los nombres de ejercicio que ya usa: reutilicelos). Para repetir un entreno, " +
 	"proponga el ajuste con la ultima vez (si hizo todas las reps, mas reps o mas peso). Si le gusta, guardelo con " +
 	"fuerza_entreno_guardar con un nombre (p. ej. 'Pierna A') y el ejercicio de Garmin de cada uno (fuerza_ejercicios_garmin); en el " +
-	"plan, el dia de fuerza lleva entreno: '<id>'. Puede mandarlo al reloj con fuerza_enviar_garmin (escribe en Garmin: pida permiso). " +
+	"plan, el dia de fuerza lleva entreno: '<id>' (con coach_proponer: { dep: 'fuerza', t: 'otros', d, min, entreno: '<id>' }). Puede mandarlo al reloj con fuerza_enviar_garmin (escribe en Garmin: pida permiso). " +
 	"Al acabar: si lo hizo con el reloj, fuerza_desde_garmin; si no, fuerza_registrar con solo lo que cambio. Si subio peso o reps, " +
 	"pregunte si lo deja asi para la proxima (actualizar_entreno). El historico, con fuerza_historial." +
 	" SERIES Y ENTRENOS DE BICI O CORRER PARA EL RELOJ: con cardio_enviar_garmin, por pasos (calentamiento, bloques que se repiten, " +
