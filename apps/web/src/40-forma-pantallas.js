@@ -115,6 +115,7 @@ function scrActividad(scr) {
   const a = actById(scr.id);
   if (!a) return { title: 'Actividad', html: head('Actividad', '') + '<div class="content"><p>No encuentro esta actividad. Puede que se haya borrado en Garmin; vuelve a Hoy y actualiza.</p></div>' };
   const k = tipoAct(a); const cardio = SPORTS[a.dep].cardio;
+  detalleAlAbrir(a); const pidiendo = DET_PIDIENDO.has(a.id);
   const s = sesion(a.f); const plan = s && s.a && s.a.id === a.id && s.t !== 'descanso' ? s : null;
   const cifra = (v, u, l) => `<div class="field"><span class="l">${l}</span><span class="v">${v}${u ? ` <small>${u}</small>` : ''}</span></div>`;
   const cifras = [a.km && cardio ? cifra(nf(a.km), 'km', 'Distancia') : '', cifra(dur(a.min), '', 'Tiempo'), a.desn ? cifra(a.desn, 'm', 'Desnivel') : '', a.fc ? cifra(a.fc, 'ppm', 'Pulso medio') : ''].join('');
@@ -132,6 +133,7 @@ function scrActividad(scr) {
   const fuerza = a.dep === 'fuerza' ? `<section class="card" aria-labelledby="act-fz"><h2 class="card-t" id="act-fz">${plan ? 'El plan frente a lo que hiciste' : 'Tus ejercicios'}</h2>${bloqueFuerza(a.f, true)}</section>` : '';
   return { title: a.lugar, html: head(a.lugar, `${cap1(fLarga(a.f))} · ${SPORTS[a.dep].n}${a.sim ? ' · ' + simTag() : ''}`) + `<div class="content" style="max-width:760px">
     <div class="card"><div class="fields">${cifras}</div>${cardio ? '' : vsPlan}</div>
+    ${pidiendo ? '<p class="small muted" role="status">Leyendo el detalle de Garmin (zonas, llano, subidas y mapa)…</p>' : ''}
     ${semana}${fuerza}
     ${mejor ? `<section class="card" aria-labelledby="act-mejor"><h2 class="card-t" id="act-mejor" style="margin:0">Lo mejor de la salida</h2><ul class="act-mejor">${mejor}</ul></section>` : ''}
     ${(DSET.rutas || {})[a.id] ? `<div class="trackmap">${trackSvg(a.id)}</div>` : ''}

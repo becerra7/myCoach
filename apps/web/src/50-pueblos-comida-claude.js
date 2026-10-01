@@ -257,8 +257,7 @@ async function sync(manual, live = !!LIVE && S.modo === 'vivo') {
   // Detalle (pulso, subidas, llano) de lo reciente y del skimo; trazados para pueblos. Por tandas.
   const d60 = addDays(HOY, -60);
   const needDet = ds.acts.filter(a => !ds.det[a.id] && ((a.d > d60 && ['bici', 'correr', 'skimo', 'montana'].includes(FAM[a.t])) || FAM[a.t] === 'skimo')).slice(0, 15);
-  let i = 0; await pool(needDet, 4, async a => { msg(`Analizando actividades (${++i}/${needDet.length})…`); try { const r = await call('garmin_activity_detail', { activity_id: a.id }); const an = r.analisis || {}; const sb = (an.subidas || [])[0];
-      ds.det[a.id] = { h: an.histograma_fc_min || null, desn: r.elevation_gain_m ?? null, sub: sb ? [sb.largo_km, sb.desnivel_m, sb.minutos, sb.fc_media] : null, llano: an.llano ? [an.llano.km, an.llano.vel_media_kmh, an.llano.fc_media] : null }; } catch (e) { ds.det[a.id] = { err: e.code || 'error' }; } });
+  let i = 0; await pool(needDet, 4, async a => { msg(`Analizando actividades (${++i}/${needDet.length})…`); try { ds.det[a.id] = detalleDe(await call('garmin_activity_detail', { activity_id: a.id })); } catch (e) { ds.det[a.id] = { err: e.code || 'error' }; } });
   const needRuta = ds.acts.filter(a => !(a.id in ds.rutas) && a.km > 0.5 && ['bici', 'correr', 'skimo', 'montana', 'esqui', 'caminar'].includes(FAM[a.t])).slice(0, 25);
   i = 0; await pool(needRuta, 4, async a => { msg(`Buscando pueblos (${++i}/${needRuta.length})…`); try { const r = await call('garmin_activity_route', { activity_id: a.id, puntos: 5 }); ds.rutas[a.id] = r.polilinea || null; } catch (e) { ds.rutas[a.id] = null; } });
   // Evolución mensual (VO2máx, Endurance, Hill): un punto por mes; el mes en curso se refresca
@@ -273,6 +272,28 @@ async function sync(manual, live = !!LIVE && S.modo === 'vivo') {
   const pendientes = ds.acts.filter(a => !ds.det[a.id] && a.d > d60 && ['bici', 'correr', 'skimo'].includes(FAM[a.t])).length + ds.acts.filter(a => !(a.id in ds.rutas) && a.km > 0.5 && FAM[a.t] && FAM[a.t] !== 'fuerza' && FAM[a.t] !== 'raqueta').length;
   if (!errs.length) toast(`${nuevas ? `${nuevas} actividad${nuevas === 1 ? '' : 'es'} nueva${nuevas === 1 ? '' : 's'}. ` : ''}${pendientes ? `Faltan ${pendientes} por analizar: vuelve a actualizar.` : 'Todo al día con Garmin.'}`, { ms: 6000 });
   else { const e = errs[0] || {}; const m = { needs_reauth: 'Vuelve a conectar Garmin en claude.ai → Ajustes → Conectores', server_not_connected: 'Añade el conector de Garmin en claude.ai → Conectores', not_in_manifest: 'No has dado permiso a esta página para usar Garmin', selection_required: 'Elige qué conector de Garmin usar', server_unavailable: 'Garmin no responde ahora; prueba en un rato' + (e.message && e.message !== 'error' ? ` (${e.message})` : ''), tool_error: 'Garmin ha devuelto un error: ' + (e.message || '') }[e.code] || 'No he podido leer Garmin (' + (e.code || 'error') + ')'; toast(m, { ms: 8000 }); }
+}
+
+/** Lo que la app guarda del detalle de una actividad (pulso por zonas, desnivel, subida y llano). */
+function detalleDe(r) {
+  const an = r.analisis || {}; const sb = (an.subidas || [])[0];
+  return { h: an.histograma_fc_min || null, desn: r.elevation_gain_m ?? null, sub: sb ? [sb.largo_km, sb.desnivel_m, sb.minutos, sb.fc_media] : null, llano: an.llano ? [an.llano.km, an.llano.vel_media_kmh, an.llano.fc_media] : null };
+}
+
+/* Detalle a demanda: al abrir una actividad que este navegador aún no ha analizado (la sincronización
+   solo trae unas pocas de los últimos 60 días, y cada navegador guarda lo suyo), se pide en ese momento. */
+const DET_PIDIENDO = new Set(), DET_PEDIDO = new Set(); // pidiendo ahora · ya pedido en esta sesión (un intento)
+async function detalleAlAbrir(a) {
+  if (!LIVE || S.modo !== 'vivo' || !DSET || DSET.fuente !== 'vivo' || DET_PEDIDO.has(a.id)) return;
+  const det = DSET.det || (DSET.det = {}); const rutas = DSET.rutas || (DSET.rutas = {});
+  const falta = !det[a.id] || det[a.id].err; const faltaRuta = !(a.id in rutas) && a.km > 0.5 && SPORTS[a.dep].cardio;
+  if (!falta && !faltaRuta) return;
+  DET_PEDIDO.add(a.id); DET_PIDIENDO.add(a.id); setTimeout(render);
+  await Promise.all([
+    falta && coachCall('garmin_activity_detail', { activity_id: a.id }).then(r => { det[a.id] = detalleDe(r); }, e => { det[a.id] = { err: e.code || 'error' }; }),
+    faltaRuta && coachCall('garmin_activity_route', { activity_id: a.id, puntos: 5 }).then(r => { rutas[a.id] = r.polilinea || null; }, () => { rutas[a.id] = null; }),
+  ]);
+  DET_PIDIENDO.delete(a.id); construir(DSET); guardarCache(DSET); render();
 }
 
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { if (DB) cargarDeDB(); cargarCalendario(); } });
