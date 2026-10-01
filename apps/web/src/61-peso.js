@@ -24,7 +24,7 @@ function pesoDemo() {
   return { demo: true, pesajes, resumen: { ultimo: ult, media_7_dias: Math.round(ult7.reduce((a, p) => a + p.kg, 0) / ult7.length * 10) / 10, cambio_30_dias: ref(30), cambio_90_dias: ref(90) } };
 }
 
-const kgTxt = v => `${nf(v, 1)} kg`;
+const kgTxt = v => `${nf(v, 2)} kg`;
 const cambioTxt = (v, cuando) => v == null ? '' : v === 0 ? `igual que hace ${cuando}` : `${v > 0 ? '+' : '−'}${nf(Math.abs(v), 1)} kg en ${cuando}`;
 
 /** Media de los pesajes de los 7 días que acaban en cada uno: la línea de tendencia. */
@@ -51,7 +51,7 @@ function chartPeso(ps, desde) {
   }
   s += ps.map(p => `<circle cx="${X(p.fecha).toFixed(1)}" cy="${Y(p.kg).toFixed(1)}" r="2.5" class="pz-pt"/>`).join('');
   s += `<polyline points="${ps.map((p, i) => `${X(p.fecha).toFixed(1)},${Y(tend[i]).toFixed(1)}`).join(' ')}" fill="none" stroke="var(--tint)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
-  s += `<circle cx="${X(ult.fecha)}" cy="${Y(ult.kg)}" r="5" fill="var(--tint)" stroke="var(--card)" stroke-width="2"/><text class="lbl" x="${X(ult.fecha) + 8}" y="${Y(ult.kg) + 4}">${nf(ult.kg, 1)}</text>`;
+  s += `<circle cx="${X(ult.fecha)}" cy="${Y(ult.kg)}" r="5" fill="var(--tint)" stroke="var(--card)" stroke-width="2"/><text class="lbl" x="${X(ult.fecha) + 8}" y="${Y(ult.kg) + 4}">${nf(ult.kg, 2)}</text>`;
   // Zonas de toque: de punto medio a punto medio, para que el más cercano responda.
   ps.forEach((p, i) => {
     const a = i ? (X(ps[i - 1].fecha) + X(p.fecha)) / 2 : pl, b = i < ps.length - 1 ? (X(p.fecha) + X(ps[i + 1].fecha)) / 2 : W - pr;
@@ -73,7 +73,7 @@ function cardPeso() {
     const desde = rango === 'todo' ? d.pesajes[0].fecha : [addDays(HOY, -(+rango)), d.pesajes[0].fecha].sort()[1];
     const ps = d.pesajes.filter(p => p.fecha >= desde);
     const viejo = r.ultimo.fecha < addDays(HOY, -14);
-    cuerpo = `<div class="pz-hoy"><span class="pz-v">${nf(r.ultimo.kg, 1)} <small>kg</small></span><span class="small muted">${r.ultimo.fecha === HOY ? 'Hoy' : `El ${fDia(r.ultimo.fecha)}`}${r.media_7_dias ? ` · media de 7 días ${kgTxt(r.media_7_dias)}` : ''}</span>
+    cuerpo = `<div class="pz-hoy"><span class="pz-v">${nf(r.ultimo.kg, 2)} <small>kg</small></span><span class="small muted">${r.ultimo.fecha === HOY ? 'Hoy' : `El ${fDia(r.ultimo.fecha)}`}${r.media_7_dias ? ` · media de 7 días ${kgTxt(r.media_7_dias)}` : ''}</span>
         ${r.cambio_30_dias != null || r.cambio_90_dias != null ? `<span class="small">${[cambioTxt(r.cambio_30_dias, '30 días'), cambioTxt(r.cambio_90_dias, '3 meses')].filter(Boolean).join(' · ')}</span>` : ''}</div>
       <div class="seg" role="group" aria-label="Periodo">${RANGOS_PESO.map(([v, l]) => `<button type="button" data-a="peso-rango" data-v="${v}" aria-pressed="${rango === v}">${l}</button>`).join('')}</div>
       ${ps.length >= 2 ? chartPeso(ps, desde) : '<p class="small muted">Con dos pesajes en este periodo ya sale la gráfica.</p>'}
