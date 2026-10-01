@@ -3976,7 +3976,10 @@ const instruccionesCoach = (nombre = NOMBRE_COACH) =>
 	"vista previa y enseñarsela; solo con su si, confirm=true (escribe en Garmin). Rangos con sus zonas y umbrales; si no los sabe, zona de pulso del reloj." +
 	" COMIDA: en cuartos de plato (carbohidrato, proteina, verdura), sin calorias. Si le pasa una foto o le cuenta que ha comido, " +
 	"estime los cuartos, digaselo en una frase y guardelo con comida_registrar (desayuno, comida, merienda y cena son una por dia: " +
-	"registrarla otra vez la corrige). Para ver lo registrado, comidas.";
+	"registrarla otra vez la corrige). Para ver lo registrado, comidas." +
+	" PESO: si le dice lo que pesa, subalo con peso_registrar (confirm=true: decirlo ya es su si). Un historico (lista, Excel, captura " +
+	"de la bascula): vista previa primero y, con su si, por tandas. Para comentarlo, peso_historico: hable de tendencia (media de 7 dias), " +
+	"no del dato de un dia, y sin juicios.";
 const limpio_entrenador_invalido = (c) =>
 	c.entrenador !== undefined &&
 	(typeof c.entrenador !== "object" || !String(c.entrenador?.nombre || "").trim() || String(c.entrenador.nombre).trim().length > 24);
@@ -6092,6 +6095,113 @@ Object.assign(TOOLS, {
 			const desde = sumaDias(hasta, -(n - 1));
 			const meals = ((await leerDoc(env, userId, "estado/app"))?.meals || []).filter((m) => m && m.f >= desde && m.f <= hasta);
 			return { desde, hasta, comidas: meals.sort((a, b) => (a.f + a.h).localeCompare(b.f + b.h)).map(comidaParaFuera) };
+		},
+	},
+});
+
+// ──────────────────────────────── Peso ────────────────────────────────
+// Los pesajes viven en Garmin Connect (weight-service): de ahi los leen Garmin,
+// Intervals y la app. Se suben a mano (lo que el usuario le dice a Claude) y se
+// leen todos, tambien los de una bascula conectada a Garmin.
+
+const PESO_MAX_POR_LLAMADA = 40; // cada pesaje es una llamada a Garmin
+
+/** "AAAA-MM-DDTHH:MM:SS.00" en hora local de Madrid y en UTC, como lo pide Garmin. */
+function marcasPesaje(fecha, hora) {
+	const [h, m] = (hora || "08:00").split(":").map(Number);
+	const local = `${fecha}T${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:00`;
+	// Desfase de Madrid ese dia: se compara la misma hora vista en UTC y en Madrid.
+	const aprox = new Date(`${local}Z`);
+	const enMadrid = new Date(aprox.toLocaleString("en-US", { timeZone: ZONA_COACH }));
+	const enUtc = new Date(aprox.toLocaleString("en-US", { timeZone: "UTC" }));
+	const utc = new Date(aprox.getTime() - (enMadrid - enUtc));
+	return { dateTimestamp: `${local}.00`, gmtTimestamp: `${utc.toISOString().slice(0, 19)}.00` };
+}
+
+/** Pesajes de Garmin entre dos fechas: el ultimo de cada dia, en kg. */
+async function pesajesGarmin(env, userId, desde, hasta) {
+	const dias = [];
+	// Por tramos de un año: Garmin no devuelve rangos muy largos de una vez.
+	for (let ini = desde; ini <= hasta; ini = sumaDias(ini, 366)) {
+		const fin = sumaDias(ini, 365) < hasta ? sumaDias(ini, 365) : hasta;
+		const r = await apiGet(env, userId, `/weight-service/weight/range/${ini}/${fin}`, { includeAll: true });
+		for (const d of r?.dailyWeightSummaries || []) {
+			const w = d.latestWeight || (d.allWeightMetrics || []).at(-1);
+			const g = w?.weight;
+			if (g) dias.push({ fecha: d.summaryDate || w.calendarDate, kg: Math.round((g > 1000 ? g / 1000 : g) * 10) / 10, ...(w.bodyFat ? { grasa_pct: Math.round(w.bodyFat * 10) / 10 } : {}) });
+		}
+	}
+	return dias.filter((d) => d.fecha).sort((a, b) => a.fecha.localeCompare(b.fecha));
+}
+
+function resumenPeso(dias) {
+	if (!dias.length) return null;
+	const ult = dias.at(-1);
+	const enDias = (n) => dias.filter((d) => d.fecha > sumaDias(ult.fecha, -n));
+	const media = (l) => (l.length ? Math.round((l.reduce((a, d) => a + d.kg, 0) / l.length) * 10) / 10 : null);
+	const hace = (n) => { const ref = [...dias].reverse().find((d) => d.fecha <= sumaDias(ult.fecha, -n)); return ref ? Math.round((ult.kg - ref.kg) * 10) / 10 : null; };
+	return { ultimo: ult, media_7_dias: media(enDias(7)), cambio_30_dias: hace(30), cambio_90_dias: hace(90) };
+}
+
+Object.assign(TOOLS, {
+	peso_registrar: {
+		title: "Registrar el peso en Garmin",
+		write: true,
+		description:
+			"Sube a Garmin Connect uno o varios pesajes (kg, con fecha y, si se sabe, hora). Garmin es donde vive el peso: de ahi lo leen " +
+			"la app myCoach, Intervals y otras apps. Sin confirm devuelve la vista previa y NO escribe; los dias que ya tienen ese peso en " +
+			`Garmin se saltan. Con confirm=true los sube. Maximo ${PESO_MAX_POR_LLAMADA} por llamada: para un historico largo, por tandas. ` +
+			"Si el usuario te dice lo que pesa hoy, eso ya es su si: un solo pesaje con confirm=true.",
+		schema: {
+			type: "object",
+			properties: {
+				kg: { type: "number", description: "Un solo pesaje (con fecha y hora opcionales)." },
+				fecha: { type: "string", description: "AAAA-MM-DD; por defecto hoy." },
+				hora: { type: "string", description: "HH:MM (hora de España); por defecto ahora." },
+				pesajes: { type: "array", description: "Varios: [{ fecha, hora?, kg }].", items: { type: "object", properties: { fecha: { type: "string" }, hora: { type: "string" }, kg: { type: "number" } } } },
+				confirm: { type: "boolean" },
+			},
+		},
+		run: async (env, userId, args = {}) => {
+			const ahora = new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit", timeZone: ZONA_COACH });
+			const crudos = Array.isArray(args.pesajes) && args.pesajes.length ? args.pesajes : args.kg != null ? [{ kg: args.kg, fecha: args.fecha, hora: args.hora }] : [];
+			if (!crudos.length) throw new HttpError(400, "Pasa kg (un pesaje) o pesajes: [{ fecha, kg }].");
+			if (crudos.length > PESO_MAX_POR_LLAMADA) throw new HttpError(400, `Son ${crudos.length}: sube como mucho ${PESO_MAX_POR_LLAMADA} por llamada, por tandas.`);
+			const hoy = fechaLocal();
+			const pesajes = crudos.map((p, i) => {
+				const kg = Math.round(Number(String(p.kg).replace(",", ".")) * 10) / 10;
+				if (!(kg >= 25 && kg <= 300)) throw new HttpError(400, `Pesaje ${i + 1}: ${p.kg} no parece un peso en kg.`);
+				const fecha = /^\d{4}-\d{2}-\d{2}$/.test(p.fecha || "") ? p.fecha : hoy;
+				if (fecha > hoy) throw new HttpError(400, `Pesaje ${i + 1}: ${fecha} es una fecha futura.`);
+				const hora = /^\d{1,2}:\d{2}$/.test(p.hora || "") ? p.hora.padStart(5, "0") : fecha === hoy ? ahora : "08:00";
+				return { fecha, hora, kg };
+			}).sort((a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora));
+			const desde = pesajes[0].fecha, hasta = pesajes.at(-1).fecha;
+			const enGarmin = new Map((await pesajesGarmin(env, userId, desde, hasta)).map((d) => [d.fecha, d.kg]));
+			const nuevos = pesajes.filter((p) => !(enGarmin.has(p.fecha) && Math.abs(enGarmin.get(p.fecha) - p.kg) < 0.05));
+			const vista = { nuevos: nuevos.length, ya_estaban: pesajes.length - nuevos.length, desde, hasta, primero: nuevos[0] || null, ultimo: nuevos.at(-1) || null };
+			if (args.confirm !== true) return { vista_previa: vista, escrito: false, siguiente: nuevos.length ? "Enseñeselo y, si dice que si, llame otra vez con confirm=true." : "No hay nada nuevo que subir." };
+			const fallidos = [];
+			let subidos = 0;
+			for (const p of nuevos) {
+				try {
+					await apiPost(env, userId, "/weight-service/user-weight", { ...marcasPesaje(p.fecha, p.hora), unitKey: "kg", sourceType: "MANUAL", value: p.kg });
+					subidos++;
+				} catch (e) { fallidos.push({ ...p, error: String(e.message || e).slice(0, 120) }); }
+			}
+			return { escrito: subidos > 0, subidos, ya_estaban: vista.ya_estaban, fallidos, mensaje: subidos ? `${subidos} pesaje${subidos === 1 ? "" : "s"} en tu Garmin.` : "No se ha subido nada." };
+		},
+	},
+
+	peso_historico: {
+		title: "Historico de peso",
+		description: "El peso de cada dia (el ultimo pesaje del dia) desde Garmin Connect, con el ultimo, la media de 7 dias y el cambio en 30 y 90 dias. Sin juicios: tendencia, no culpa.",
+		schema: { type: "object", properties: { dias: { type: "integer", minimum: 7, maximum: 1830, description: "Cuantos dias hacia atras; por defecto 365." } } },
+		run: async (env, userId, { dias } = {}) => {
+			const hasta = fechaLocal();
+			const n = Math.min(1830, Math.max(7, Math.round(dias || 365)));
+			const lista = await pesajesGarmin(env, userId, sumaDias(hasta, -(n - 1)), hasta);
+			return { desde: sumaDias(hasta, -(n - 1)), hasta, pesajes: lista, resumen: resumenPeso(lista) };
 		},
 	},
 });

@@ -546,7 +546,7 @@ const rpc = async (env, token, message) => {
 	check("initialize con token valido", init.body.result?.serverInfo?.name === "garmin");
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("tools/list devuelve 42 herramientas", list.body.result.tools.length === 42);
+	check("tools/list devuelve 44 herramientas", list.body.result.tools.length === 44);
 	check("app_guardar se anuncia como escritura", anot0(list).app_guardar.readOnlyHint === false);
 	{
 		const call = (name, args) => rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name, arguments: args } });
@@ -1082,7 +1082,7 @@ const rpc = async (env, token, message) => {
 	check("el token de acceso vale sin leer del KV", init.body.result?.serverInfo?.name === "garmin");
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("las herramientas se listan igualmente", list.body.result.tools.length === 42);
+	check("las herramientas se listan igualmente", list.body.result.tools.length === 44);
 
 	// Y el dato que si vive en KV avisa en vez de mentir
 	const call = await rpc(env, tokens.access_token, {
@@ -1978,6 +1978,44 @@ const rpc = async (env, token, message) => {
 	check("los entrenos quedan guardados para repetirlos", lista.entrenos.length === 2 && lista.entrenos.some((e) => e.id === "tempo-3-km" && e.deporte === "correr"));
 	const otra = await llamar("cardio_enviar_garmin", { id: "tempo-3-km", fecha: "2026-10-09", confirm: true });
 	check("repetir uno guardado solo con su id y la fecha", otra.enviado && garmin.programados.at(-1).date === "2026-10-09");
+	globalThis.fetch = base;
+}
+
+// ── 17. Peso: a Garmin y de Garmin ──
+{
+	mockGarmin({ "ana@x.com": { password: "a", data: { displayName: "ana", hrv: 50 } } });
+	const base = globalThis.fetch;
+	const subidos = [];
+	// Garmin ya tiene un pesaje del 2026-09-20 (de la bascula, en gramos).
+	const enGarmin = [{ summaryDate: "2026-09-20", latestWeight: { weight: 71400, calendarDate: "2026-09-20" } }];
+	globalThis.fetch = async (url, init = {}) => {
+		const u = new URL(url);
+		if (u.pathname.startsWith("/weight-service/weight/range/")) {
+			const [, , , , ini, fin] = u.pathname.split("/");
+			const todos = [...enGarmin, ...subidos.map((b) => ({ summaryDate: b.dateTimestamp.slice(0, 10), latestWeight: { weight: b.value * 1000 } }))];
+			return new Response(JSON.stringify({ dailyWeightSummaries: todos.filter((d) => d.summaryDate >= ini && d.summaryDate <= fin) }));
+		}
+		if (u.pathname === "/weight-service/user-weight" && init.method === "POST") { subidos.push(JSON.parse(init.body)); return new Response(""); }
+		return base(url, init);
+	};
+	const env = makeEnv();
+	const ana = (await connect(env, "ana@x.com", "a")).tokens.access_token;
+	const llamar = async (name, args = {}) => {
+		const res = (await rpc(env, ana, { jsonrpc: "2.0", id: 41, method: "tools/call", params: { name, arguments: args } })).body.result;
+		return res.isError ? { error: res.content[0].text } : JSON.parse(res.content[0].text);
+	};
+	const lote = { pesajes: [{ fecha: "2026-09-20", kg: 71.4 }, { fecha: "2026-09-22", kg: "71,1" }, { fecha: "2026-09-25", hora: "07:30", kg: 70.8 }] };
+	const vista = await llamar("peso_registrar", lote);
+	check("peso: sin confirm, vista previa y nada escrito", vista.escrito === false && vista.vista_previa.nuevos === 2 && vista.vista_previa.ya_estaban === 1 && subidos.length === 0, JSON.stringify(vista));
+	const ok = await llamar("peso_registrar", { ...lote, confirm: true });
+	check("peso: con confirm sube solo los nuevos", ok.subidos === 2 && subidos.length === 2 && subidos[1].value === 70.8 && subidos[0].value === 71.1, JSON.stringify(ok));
+	check("peso: hora local de España y su hora en UTC, como lo pide Garmin",
+		subidos[1].dateTimestamp === "2026-09-25T07:30:00.00" && subidos[1].gmtTimestamp === "2026-09-25T05:30:00.00" && subidos[1].unitKey === "kg" && subidos[1].sourceType === "MANUAL", JSON.stringify(subidos[1]));
+	check("peso: un valor raro se explica", /no parece un peso/.test((await llamar("peso_registrar", { kg: 7, confirm: true })).error || ""));
+	check("peso: nada de fechas futuras", /futura/.test((await llamar("peso_registrar", { kg: 70, fecha: "2999-01-01" })).error || ""));
+	const hist = await llamar("peso_historico", { dias: 3650 });
+	check("peso_historico: un pesaje por dia, en kg y ordenados", hist.pesajes.length === 3 && hist.pesajes[0].kg === 71.4 && hist.pesajes.at(-1).fecha === "2026-09-25", JSON.stringify(hist.pesajes));
+	check("peso_historico: ultimo y media de 7 dias", hist.resumen.ultimo.kg === 70.8 && hist.resumen.media_7_dias === 71.1, JSON.stringify(hist.resumen));
 	globalThis.fetch = base;
 }
 
