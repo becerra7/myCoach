@@ -80,7 +80,7 @@ function cardEstado() {
     <div class="est-top"><h2 id="est-t" class="coach-estado ${sm.color}"><span class="coach-ico" aria-hidden="true">${ic(icono, 18)}</span>${col}: ${lectura}</h2></div>
     ${motivo ? `<p class="small muted est-motivo">${esc(cap1(motivo))}.</p>` : ''}
     ${sm.datos_que_faltan && sm.datos_que_faltan.length === 3 ? '<p class="small muted">Garmin aún no tiene tu noche: el semáforo se afinará cuando la tenga.</p>' : ''}
-    ${piezas ? `<ul class="mets" aria-label="Por qué">${piezas}</ul>` : ''}
+    ${piezas ? `<details class="est-datos"><summary>Ver los ${(sm.datos || []).length} datos</summary><ul class="mets" aria-label="Por qué">${piezas}</ul></details>` : ''}
     ${(r => `<button class="link coach-sentir" type="button" data-a="coach-sentir-hoja">${ic('edit', 18)} ${r ? `<span class="grow">${esc(r)}</span><span class="u">Cambiar</span>` : 'Cuéntame cómo te encuentras'}</button>`)(resumenSentir())}
   </section>`;
 }

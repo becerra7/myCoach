@@ -703,6 +703,13 @@ body.framed .mf-card{bottom:24px}
 .estado .est-top{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
 .estado .coach-estado{margin:0}
 .est-motivo{margin:6px 0 0 42px}
+.est-datos{margin-top:6px}
+.est-datos summary{display:flex;align-items:center;gap:6px;min-height:var(--tap);color:var(--tint);font-size:16px;font-weight:600;cursor:pointer;list-style:none}
+.est-datos summary::-webkit-details-marker{display:none}
+.est-datos summary::after{content:"";width:8px;height:8px;margin-left:2px;border:solid currentColor;border-width:0 2px 2px 0;transform:rotate(45deg) translateY(-2px);transition:transform .15s}
+.est-datos[open] summary::after{transform:rotate(-135deg) translateY(-2px)}
+@media (prefers-reduced-motion:reduce){.est-datos summary::after{transition:none}}
+.est-datos .mets{margin-top:4px}
 .mets{list-style:none;margin:14px 0 0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(98px,1fr));gap:8px}
 .met{width:100%;min-height:72px;display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:10px 12px;border:0;border-radius:14px;background:var(--card-2);color:inherit;font:inherit;text-align:left;cursor:pointer}
 .met:hover{background:var(--fill)}
