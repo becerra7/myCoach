@@ -52,7 +52,7 @@ function enviarCardioAlReloj(f) {
   const s = cardioDelDia(f); const e = s && CZ[s.entreno_cardio]; if (!e || typeof e !== 'object') return;
   ask({
     title: 'Enviar al reloj',
-    text: `Se crea "${e.nombre}" en tu Garmin Connect, paso a paso, y se programa para el ${fDia(f)}.${e.garmin && e.garmin.workout_id ? ' Sustituye la copia anterior.' : ''}`,
+    text: e.garmin && e.garmin.workout_id ? `Se actualiza "${e.nombre}" en tu Garmin Connect (el mismo entreno, no otro) y se programa para el ${fDia(f)}.` : `Se crea "${e.nombre}" en tu Garmin Connect, paso a paso, y se programa para el ${fDia(f)}.`,
     actions: [
       { label: 'Enviar al reloj', kind: 'fill', fn: async () => {
         try { const r = await coachCall('cardio_enviar_garmin', { id: e.id, fecha: f, confirm: true }, true); toast(r.programado ? 'En tu reloj: sincronízalo' : 'En Garmin, pero no en el calendario'); CZ[e.id] = undefined; cargarCardio(e.id, true); }

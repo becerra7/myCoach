@@ -97,7 +97,7 @@ function enviarAlReloj(f) {
   if (sin.length) { ask({ title: 'Falta un paso', text: `Para mandarlo al reloj, Claude tiene que elegir el ejercicio de Garmin de: ${sin.join(', ')}. Pídeselo y vuelve a probar.`, actions: [{ label: 'Entendido', kind: 'fill' }] }); return; }
   ask({
     title: 'Enviar al reloj',
-    text: `Se crea "myCoach · ${e.nombre}" en tu Garmin Connect con ${e.ejercicios.length} ejercicios (series, reps, peso y descanso) y se programa para el ${fDia(f)}.${e.garmin && e.garmin.workout_id ? ' Sustituye la copia anterior.' : ''}`,
+    text: `${e.garmin && e.garmin.workout_id ? `Se actualiza "${e.nombre}" en tu Garmin Connect (el mismo entreno, no otro)` : `Se crea "${e.nombre}" en tu Garmin Connect`} con ${e.ejercicios.length} ejercicios (series, reps, peso y descanso) y se programa para el ${fDia(f)}.`,
     actions: [
       { label: 'Enviar al reloj', kind: 'fill', fn: async () => {
         try { const r = await coachCall('fuerza_enviar_garmin', { entreno: e.id, fecha: f, confirm: true }, true); toast(r.programado ? 'En tu reloj: sincronízalo' : 'En Garmin, pero no en el calendario'); FZ[f] = undefined; cargarFuerza(f, true); }
