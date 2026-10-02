@@ -13,6 +13,8 @@ Objetivo: que un entreno exista una sola vez, lo crees donde lo crees (Garmin Co
 - **Nombre en Garmin sin prefijo** "myCoach · ": la pareja ya evita duplicados. Ojo: los que se mandaron antes del 2 oct se llaman "myCoach · …"; el importador debe tratarlos como nuestros.
 - Pareja guardada: `garmin: { workout_id, fecha, enviado, programados[] }`.
 
+- **Importador mínimo** (`entrenos_desde_garmin`, 2 oct 2026): lista los entrenos de Garmin y trae los de fuerza, bici y correr que no tienen pareja ni se llaman "myCoach · …". Con vista previa y `confirm`; máximo 40 por llamada. Guarda `origen: 'garmin'` y `garmin: { workout_id, actualizado_garmin }`. Los ejercicios que no están en el catálogo entran sin ejercicio de Garmin (no van al reloj hasta elegirlo). Falta: cambios en Garmin (flujo 5), borrados (6), huella (9), cron de la mañana y avisos en la app.
+
 ## Flujos y cómo se evita el duplicado
 
 | # | Flujo | Cómo |
