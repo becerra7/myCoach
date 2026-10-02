@@ -1787,7 +1787,7 @@ const rpc = async (env, token, message) => {
 {
 	mockGarmin({ "ana@x.com": { password: "a", data: { displayName: "ana", hrv: 50 } } });
 	const base = globalThis.fetch;
-	const garmin = { creados: [], programados: [], borrados: [], siguienteId: 500 };
+	const garmin = { creados: [], programados: [], borrados: [], actualizados: [], putFalla: false, siguienteId: 500 };
 	const HOY = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 	globalThis.fetch = async (url, init = {}) => {
 		const u = new URL(url);
@@ -1797,6 +1797,10 @@ const rpc = async (env, token, message) => {
 		}
 		if (u.pathname.startsWith("/workout-service/schedule/")) { garmin.programados.push([u.pathname.split("/").pop(), JSON.parse(init.body)]); return new Response("{}"); }
 		if (u.pathname.startsWith("/workout-service/workout/") && init.method === "DELETE") { garmin.borrados.push(u.pathname.split("/").pop()); return new Response(null, { status: 204 }); }
+		if (u.pathname.startsWith("/workout-service/workout/") && init.method === "PUT") {
+			if (garmin.putFalla) return new Response("{}", { status: 404 });
+			garmin.actualizados.push([u.pathname.split("/").pop(), JSON.parse(init.body)]); return new Response(null, { status: 204 });
+		}
 		if (u.pathname === "/activitylist-service/activities/search/activities")
 			return new Response(JSON.stringify([
 				{ activityId: 77, activityType: { typeKey: "road_biking" }, startTimeLocal: `${HOY} 08:00:00` },
@@ -1851,7 +1855,7 @@ const rpc = async (env, token, message) => {
 	const env1 = await llamar("fuerza_enviar_garmin", { entreno: "pierna-a", fecha: HOY, confirm: true });
 	const w = garmin.creados[0];
 	const g1 = w?.workoutSegments?.[0]?.workoutSteps?.[0];
-	check("se crea un entreno de fuerza en Garmin", env1.enviado === true && w.sportType.sportTypeKey === "strength_training" && w.workoutName === "myCoach · Pierna A");
+	check("se crea un entreno de fuerza en Garmin", env1.enviado === true && w.sportType.sportTypeKey === "strength_training" && w.workoutName === "Pierna A");
 	check("cada ejercicio es una repeticion de series con reps, peso y descanso",
 		g1.type === "RepeatGroupDTO" && g1.numberOfIterations === 3 &&
 		g1.workoutSteps[0].category === "SQUAT" && g1.workoutSteps[0].exerciseName === "GOBLET_SQUAT" &&
@@ -1862,8 +1866,19 @@ const rpc = async (env, token, message) => {
 	const plancha = w.workoutSegments[0].workoutSteps[2].workoutSteps[0];
 	check("la plancha va al reloj por tiempo", plancha.endCondition.conditionTypeKey === "time" && plancha.endConditionValue === 40);
 	check("y se programa para el dia", garmin.programados[0]?.[0] === "500" && garmin.programados[0][1].date === HOY);
-	await llamar("fuerza_enviar_garmin", { entreno: "pierna-a", fecha: HOY, confirm: true });
-	check("mandarlo otra vez sustituye la copia vieja", garmin.borrados.includes("500") && garmin.creados.length === 2);
+	// Pareja estable: reenviar actualiza el mismo entreno en Garmin y no apila programados
+	const otraVezMismo = await llamar("fuerza_enviar_garmin", { entreno: "pierna-a", fecha: HOY, confirm: true });
+	check("mandarlo otra vez actualiza el mismo entreno (no crea otro ni borra)",
+		otraVezMismo.actualizado === true && otraVezMismo.workout_id === "500" && garmin.creados.length === 1 && garmin.borrados.length === 0 &&
+		garmin.actualizados[0]?.[0] === "500" && garmin.actualizados[0][1].workoutId === 500, JSON.stringify(otraVezMismo));
+	check("el mismo dia no se programa dos veces", garmin.programados.length === 1);
+	const otroDia = new Date(Date.now() + 3 * 864e5).toISOString().slice(0, 10);
+	await llamar("fuerza_enviar_garmin", { entreno: "pierna-a", fecha: otroDia, confirm: true });
+	check("otro dia si se programa, con el mismo entreno", garmin.programados.length === 2 && garmin.programados[1][0] === "500" && garmin.creados.length === 1);
+	garmin.putFalla = true;
+	const trasBorrarlo = await llamar("fuerza_enviar_garmin", { entreno: "pierna-a", fecha: HOY, confirm: true });
+	garmin.putFalla = false;
+	check("si Garmin ya no lo tiene, se crea otro y se apunta el nuevo", trasBorrarlo.actualizado === false && trasBorrarlo.workout_id === "501" && garmin.creados.length === 2 && garmin.borrados.includes("500"));
 
 	const lista = await llamar("fuerza_entrenos");
 	check("la lista de entrenos trae los nombres de ejercicio que ya usa", lista.entrenos[0].nombre === "Pierna A" && lista.nombres_de_ejercicio.includes("Sentadilla goblet"));
@@ -1972,7 +1987,7 @@ const rpc = async (env, token, message) => {
 	const ok = await llamar("cardio_enviar_garmin", { ...series, confirm: true });
 	const w = garmin.creados[0];
 	const pasos = w.workoutSegments[0].workoutSteps;
-	check("se crea un entreno de ciclismo en Garmin", ok.enviado === true && w.sportType.sportTypeKey === "cycling" && w.workoutName === "myCoach · 5 × 4 min umbral");
+	check("se crea un entreno de ciclismo en Garmin", ok.enviado === true && w.sportType.sportTypeKey === "cycling" && w.workoutName === "5 × 4 min umbral");
 	check("calentamiento por tiempo con zona de pulso del reloj",
 		pasos[0].stepType.stepTypeKey === "warmup" && pasos[0].endConditionValue === 900 && pasos[0].targetType.workoutTargetTypeKey === "heart.rate.zone" && pasos[0].zoneNumber === 2);
 	const bloque = pasos[1];

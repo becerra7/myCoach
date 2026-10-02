@@ -367,7 +367,7 @@ async function apiGet(env, userId, path, params) {
  * cuerpo de Garmin literal: el esquema de recorridos no esta documentado y
  * su mensaje de validacion es la unica forma de saber que falta.
  */
-async function apiPost(env, userId, path, payload) {
+async function apiPost(env, userId, path, payload, method = "POST") {
 	let user = await env.GARMIN.get(userKey(userId), "json");
 	// Si el usuario acaba de conectar, su registro puede tardar hasta un
 	// minuto en propagarse por el KV: conviene decirlo en vez de dar a
@@ -376,7 +376,7 @@ async function apiPost(env, userId, path, payload) {
 
 	const call = (u) =>
 		fetch(`${API}${path}`, {
-			method: "POST",
+			method,
 			headers: {
 				...NATIVE_HEADERS,
 				Authorization: `Bearer ${u.di_token}`,
@@ -5424,11 +5424,40 @@ function entrenoParaGarmin(entreno) {
 		};
 	});
 	return {
-		workoutName: `myCoach · ${entreno.nombre}`.slice(0, 80),
+		workoutName: String(entreno.nombre).slice(0, 80), // sin prefijo: la pareja (workout_id) ya evita duplicados
 		description: "Creado por myCoach",
 		sportType: deporte,
 		workoutSegments: [{ segmentOrder: 1, sportType: deporte, workoutSteps: pasos }],
 	};
+}
+
+/**
+ * Pareja estable myCoach ↔ Garmin. Si el entreno ya tiene su copia en Garmin, se actualiza esa
+ * misma (el id no cambia, asi no hay duplicados al importar ni historial perdido en Garmin); si no
+ * la tiene, o Garmin rechaza la actualizacion, se crea y se borra la copia vieja. Un solo programado
+ * por dia: si ya estaba programado esa fecha, no se apila otro.
+ */
+async function enviarConPareja(env, userId, previo, cuerpo, fecha) {
+	let workoutId = previo?.workout_id ? String(previo.workout_id) : null;
+	let actualizado = false;
+	if (workoutId) {
+		try {
+			await apiPost(env, userId, `/workout-service/workout/${workoutId}`, { ...cuerpo, workoutId: Number(workoutId) }, "PUT");
+			actualizado = true;
+		} catch { /* no esta o no la acepta: se crea otra */ }
+	}
+	if (!actualizado) {
+		const creado = await apiPost(env, userId, "/workout-service/workout", cuerpo);
+		if (!creado?.workoutId) throw new HttpError(502, "Garmin no devolvio el id del entreno.");
+		workoutId = String(creado.workoutId);
+	}
+	const programados = actualizado ? (previo.programados || (previo.fecha ? [previo.fecha] : [])) : [];
+	let programado = true;
+	if (!programados.includes(fecha)) {
+		try { await apiPost(env, userId, `/workout-service/schedule/${workoutId}`, { date: fecha }); programados.push(fecha); } catch { programado = false; }
+	}
+	if (!actualizado && previo?.workout_id && String(previo.workout_id) !== workoutId) await borrarEntrenoGarmin(env, userId, previo.workout_id);
+	return { workoutId, programado, actualizado, pareja: { workout_id: workoutId, fecha, enviado: fechaLocal(), programados: programados.slice(-20) } };
 }
 
 async function borrarEntrenoGarmin(env, userId, workoutId) {
@@ -5688,7 +5717,7 @@ Object.assign(TOOLS, {
 		write: true,
 		description:
 			"Crea el entreno en Garmin Connect como entreno de fuerza guiado (ejercicio, reps, peso y descanso por serie) y lo programa para la fecha, " +
-			"para que el reloj lo tenga al sincronizar. Todos los ejercicios necesitan el campo garmin. Si ya se mando antes, sustituye la copia vieja. " +
+			"para que el reloj lo tenga al sincronizar. Todos los ejercicios necesitan el campo garmin. Si ya se mando antes, actualiza ese mismo entreno en Garmin (no crea otro). " +
 			"ESCRIBE en la cuenta de Garmin del usuario: pida su confirmacion y pase confirm=true solo cuando la de.",
 		schema: {
 			type: "object",
@@ -5708,17 +5737,12 @@ Object.assign(TOOLS, {
 			const sin = entreno.ejercicios.filter((e) => !e.garmin).map((e) => e.nombre);
 			if (sin.length) throw new HttpError(400, `Para mandarlo al reloj falta el ejercicio de Garmin de: ${sin.join(", ")}. Buscalos con fuerza_ejercicios_garmin y guarde el entreno.`);
 
-			const creado = await apiPost(env, userId, "/workout-service/workout", entrenoParaGarmin(entreno));
-			const workoutId = creado?.workoutId;
-			if (!workoutId) throw new HttpError(502, "Garmin no devolvio el id del entreno.");
-			let programado = true;
-			try { await apiPost(env, userId, `/workout-service/schedule/${workoutId}`, { date: fecha }); } catch { programado = false; }
-			if (entreno.garmin?.workout_id && String(entreno.garmin.workout_id) !== String(workoutId)) await borrarEntrenoGarmin(env, userId, entreno.garmin.workout_id);
-			entreno.garmin = { workout_id: String(workoutId), fecha, enviado: fechaLocal() };
+			const { workoutId, programado, actualizado, pareja } = await enviarConPareja(env, userId, entreno.garmin, entrenoParaGarmin(entreno), fecha);
+			entreno.garmin = pareja;
 			await guardarDoc(env, userId, FUERZA_ENTRENOS, doc);
 			await enlazarEnPlan(env, userId, fecha, entreno.id);
 			return {
-				enviado: true, workout_id: String(workoutId), fecha, programado,
+				enviado: true, workout_id: workoutId, fecha, programado, actualizado,
 				mensaje: programado
 					? `"${entreno.nombre}" esta en tu calendario de Garmin para el ${fecha}. Sincroniza el reloj y lo tendras en Entrenamientos.`
 					: `"${entreno.nombre}" esta en tus entrenos de Garmin, pero no he podido ponerlo en el calendario: buscalo en Entrenamientos del reloj.`,
@@ -5914,7 +5938,7 @@ function cardioParaGarmin(entreno) {
 	});
 	const deporte = DEPORTES_CARDIO[entreno.deporte];
 	return {
-		workoutName: `myCoach · ${entreno.nombre}`.slice(0, 80),
+		workoutName: String(entreno.nombre).slice(0, 80), // sin prefijo: la pareja (workout_id) ya evita duplicados
 		description: (entreno.nota || "Creado por myCoach").slice(0, 512),
 		sportType: deporte,
 		workoutSegments: [{ segmentOrder: 1, sportType: deporte, workoutSteps: convertir(entreno.pasos, null) }],
@@ -5995,18 +6019,13 @@ Object.assign(TOOLS, {
 			if (args.confirm !== true)
 				return { vista_previa: vista, escrito: false, siguiente: "Enseñeselo al usuario y, si dice que si, llame otra vez con confirm=true." };
 
-			const creado = await apiPost(env, userId, "/workout-service/workout", cardioParaGarmin(entreno));
-			const workoutId = creado?.workoutId;
-			if (!workoutId) throw new HttpError(502, "Garmin no devolvio el id del entreno.");
-			let programado = true;
-			try { await apiPost(env, userId, `/workout-service/schedule/${workoutId}`, { date: fecha }); } catch { programado = false; }
 			const previo = doc.entrenos[entreno.id];
-			if (previo?.garmin?.workout_id && String(previo.garmin.workout_id) !== String(workoutId)) await borrarEntrenoGarmin(env, userId, previo.garmin.workout_id);
-			doc.entrenos[entreno.id] = { ...entreno, creado: previo?.creado || fechaLocal(), garmin: { workout_id: String(workoutId), fecha, enviado: fechaLocal() } };
+			const { workoutId, programado, actualizado, pareja } = await enviarConPareja(env, userId, previo?.garmin, cardioParaGarmin(entreno), fecha);
+			doc.entrenos[entreno.id] = { ...entreno, creado: previo?.creado || fechaLocal(), garmin: pareja };
 			await guardarDoc(env, userId, CARDIO_ENTRENOS, doc);
 			const enlazado = await enlazarCardioEnPlan(env, userId, fecha, entreno);
 			return {
-				enviado: true, ...vista, workout_id: String(workoutId), programado, enlazado_al_plan: enlazado,
+				enviado: true, ...vista, workout_id: workoutId, programado, actualizado, enlazado_al_plan: enlazado,
 				mensaje: programado
 					? `"${entreno.nombre}" esta en tu calendario de Garmin para el ${fecha}. Sincroniza el reloj y lo tendras en Entrenamientos.`
 					: `"${entreno.nombre}" esta en tus entrenos de Garmin, pero no he podido ponerlo en el calendario: buscalo en Entrenamientos del reloj.`,
