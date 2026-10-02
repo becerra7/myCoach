@@ -3997,6 +3997,7 @@ const instruccionesCoach = (nombre = NOMBRE_COACH) =>
 	" COMIDA: en cuartos de plato (carbohidrato, proteina, verdura), sin calorias. Si le pasa una foto o le cuenta que ha comido, " +
 	"estime los cuartos, digaselo en una frase y guardelo con comida_registrar (desayuno, comida, merienda y cena son una por dia: " +
 	"registrarla otra vez la corrige). Para ver lo registrado, comidas." +
+	" ENTRENOS CREADOS EN GARMIN CONNECT: entrenos_desde_garmin los trae a myCoach (vista previa y, con su si, confirm=true)." +
 	" PESO: si le dice lo que pesa, subalo con peso_registrar (confirm=true: decirlo ya es su si). Un historico (lista, Excel, captura " +
 	"de la bascula): vista previa primero y, con su si, por tandas. Para comentarlo, peso_historico: hable de tendencia (media de 7 dias), " +
 	"no del dato de un dia, y sin juicios.";
@@ -6134,6 +6135,110 @@ Object.assign(TOOLS, {
 			const desde = sumaDias(hasta, -(n - 1));
 			const meals = ((await leerDoc(env, userId, "estado/app"))?.meals || []).filter((m) => m && m.f >= desde && m.f <= hasta);
 			return { desde, hasta, comidas: meals.sort((a, b) => (a.f + a.h).localeCompare(b.f + b.h)).map(comidaParaFuera) };
+		},
+	},
+});
+
+// ──────────────────────────────── Importar de Garmin ────────────────────────────────
+// Los entrenos que creas en Garmin Connect pasan a myCoach (fuerza, bici y correr) con su pareja
+// (workout_id): los que ya tienen pareja, o se crearon desde myCoach, no se importan otra vez.
+// Plan completo (cambios en Garmin, borrados, calendario): docs/PLAN-SYNC-GARMIN.md en myCoach.
+
+const DEPORTE_DE_GARMIN = { strength_training: "fuerza", cycling: "bici", running: "correr" };
+const PASO_DE_GARMIN = { warmup: "calentamiento", cooldown: "vuelta_calma", interval: "intervalo", recovery: "recuperacion", rest: "descanso" };
+const humano = (codigo) => { const t = String(codigo || "").toLowerCase().replace(/_/g, " ").trim(); return t ? t[0].toUpperCase() + t.slice(1) : "Ejercicio"; };
+const pasosPlanos = (pasos) => (pasos || []).flatMap((p) => (p.type === "RepeatGroupDTO" ? [{ ...p, _grupo: true }] : [p]));
+
+function fuerzaDesdeGarmin(w) {
+	const ejercicios = [];
+	for (const p of pasosPlanos(w.workoutSegments?.[0]?.workoutSteps)) {
+		const grupo = p._grupo ? p.workoutSteps || [] : [p];
+		const ej = grupo.find((x) => x.stepType?.stepTypeKey !== "rest" && (x.exerciseName || x.category));
+		if (!ej) continue;
+		const rest = grupo.find((x) => x.stepType?.stepTypeKey === "rest");
+		const porTiempo = ej.endCondition?.conditionTypeKey === "time";
+		const base = {
+			nombre: (String(ej.description || "").split(" · ")[0] || humano(ej.exerciseName || ej.category)).slice(0, 60),
+			series: p._grupo ? p.numberOfIterations || 1 : 1,
+			...(porTiempo ? { segundos: ej.endConditionValue, reps: 1 } : { reps: ej.endConditionValue || 10 }),
+			...(ej.weightValue ? { peso_kg: ej.weightValue > 500 ? ej.weightValue / 1000 : ej.weightValue } : {}),
+			descanso_s: rest ? rest.endConditionValue || 0 : 0,
+		};
+		try { ejercicios.push(normalizarEjercicioFuerza({ ...base, garmin: { categoria: ej.category, ejercicio: ej.exerciseName } }, ejercicios.length)); }
+		catch { ejercicios.push(normalizarEjercicioFuerza(base, ejercicios.length)); } // ejercicio que no esta en el catalogo: sin reloj
+	}
+	return ejercicios;
+}
+
+function objetivoDesdeGarmin(x) {
+	const k = x.targetType?.workoutTargetTypeKey;
+	const tipo = { "heart.rate.zone": "fc", "power.zone": "potencia", cadence: "cadencia", "speed.zone": "velocidad", "pace.zone": "ritmo" }[k];
+	if (!tipo) return undefined;
+	if (x.zoneNumber) return { tipo, zona: x.zoneNumber };
+	const a = x.targetValueOne, b = x.targetValueTwo;
+	if (a == null || b == null) return undefined;
+	const ritmo = (ms) => { const sk = Math.round(1000 / ms); return `${Math.floor(sk / 60)}:${String(sk % 60).padStart(2, "0")}`; };
+	if (tipo === "ritmo") return { tipo, min: ritmo(a), max: ritmo(b) };
+	if (tipo === "velocidad") return { tipo, min: Math.round(a * 36) / 10, max: Math.round(b * 36) / 10 };
+	return { tipo, min: Math.round(a), max: Math.round(b) };
+}
+
+function pasosCardioDesdeGarmin(pasos) {
+	return (pasos || []).map((x) => {
+		if (x.type === "RepeatGroupDTO") return { repetir: x.numberOfIterations || 2, pasos: pasosCardioDesdeGarmin(x.workoutSteps) };
+		const fin = x.endCondition?.conditionTypeKey;
+		return {
+			tipo: PASO_DE_GARMIN[x.stepType?.stepTypeKey] || "intervalo",
+			...(fin === "time" ? { duracion_s: Math.round(x.endConditionValue) } : fin === "distance" ? { distancia_m: Math.round(x.endConditionValue) } : {}),
+			...(objetivoDesdeGarmin(x) ? { objetivo: objetivoDesdeGarmin(x) } : {}),
+			...(x.description ? { nota: String(x.description).slice(0, 80) } : {}),
+		};
+	});
+}
+
+Object.assign(TOOLS, {
+	entrenos_desde_garmin: {
+		title: "Traer mis entrenos de Garmin Connect",
+		write: true,
+		description:
+			"Importa a myCoach los entrenos de fuerza, bici y correr creados en Garmin Connect, para verlos en la app, editarlos, " +
+			"ponerlos en el plan y mandarlos al reloj sin duplicarlos (cada uno guarda su pareja en Garmin). Los que ya estan en myCoach " +
+			"no se importan otra vez. Sin confirm, la lista de nuevos (vista previa); con confirm=true, los importa.",
+		schema: { type: "object", properties: { confirm: { type: "boolean" } } },
+		run: async (env, userId, { confirm } = {}) => {
+			const lista = await apiGet(env, userId, "/workout-service/workouts", { start: 0, limit: 200 });
+			const [docF, docC] = await Promise.all([leerDoc(env, userId, FUERZA_ENTRENOS), leerDoc(env, userId, CARDIO_ENTRENOS)]);
+			const fuerza = docF?.entrenos || {}, cardio = docC?.entrenos || {};
+			const conPareja = new Set([...Object.values(fuerza), ...Object.values(cardio)].map((e) => String(e.garmin?.workout_id || "")).filter(Boolean));
+			const nuevos = (Array.isArray(lista) ? lista : []).filter((w) =>
+				DEPORTE_DE_GARMIN[w.sportType?.sportTypeKey] && !conPareja.has(String(w.workoutId)) && !/^myCoach · /.test(w.workoutName || ""));
+			const vista = nuevos.map((w) => ({ nombre: w.workoutName, deporte: DEPORTE_DE_GARMIN[w.sportType.sportTypeKey] }));
+			if (confirm !== true) return { nuevos: vista, escrito: false, siguiente: vista.length ? "Enseñeselos y, si dice que si, llame con confirm=true." : "No hay entrenos nuevos en Garmin." };
+			const importados = [], fallidos = [];
+			for (const w of nuevos.slice(0, 40)) {
+				try {
+					const det = await apiGet(env, userId, `/workout-service/workout/${w.workoutId}`);
+					const dep = DEPORTE_DE_GARMIN[w.sportType.sportTypeKey];
+					const destino = dep === "fuerza" ? fuerza : cardio;
+					let id = slugFuerza(w.workoutName || `garmin ${w.workoutId}`);
+					if (destino[id]) id = `${id}-garmin`;
+					const pareja = { workout_id: String(w.workoutId), actualizado_garmin: w.updateDate || null };
+					const comun = { id, nombre: String(w.workoutName || "Entreno de Garmin").slice(0, 60), origen: "garmin", creado: fechaLocal(), garmin: pareja };
+					if (dep === "fuerza") {
+						const ejercicios = fuerzaDesdeGarmin(det);
+						if (!ejercicios.length) throw new Error("sin ejercicios");
+						fuerza[id] = { ...comun, ejercicios };
+					} else {
+						const pasos = pasosCardioDesdeGarmin(det.workoutSegments?.[0]?.workoutSteps).map((p, i) => normalizarPasoCardio(p, `Paso ${i + 1}`));
+						if (!pasos.length) throw new Error("sin pasos");
+						cardio[id] = { ...comun, deporte: dep, pasos };
+					}
+					importados.push({ id, nombre: comun.nombre, deporte: dep });
+				} catch (e) { fallidos.push({ nombre: w.workoutName, motivo: String(e.message || e).slice(0, 120) }); }
+			}
+			if (importados.some((x) => x.deporte === "fuerza")) await guardarDoc(env, userId, FUERZA_ENTRENOS, { ...(docF || {}), entrenos: fuerza });
+			if (importados.some((x) => x.deporte !== "fuerza")) await guardarDoc(env, userId, CARDIO_ENTRENOS, { ...(docC || {}), entrenos: cardio });
+			return { importados, fallidos, escrito: importados.length > 0 };
 		},
 	},
 });

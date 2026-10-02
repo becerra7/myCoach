@@ -556,7 +556,7 @@ const rpc = async (env, token, message) => {
 	check("un navegador en la raiz sigue viendo la pagina", (await (await get(env, "/")).text()).includes("<h1>"));
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("tools/list devuelve 44 herramientas", list.body.result.tools.length === 44);
+	check("tools/list devuelve 45 herramientas", list.body.result.tools.length === 45);
 	check("app_guardar se anuncia como escritura", anot0(list).app_guardar.readOnlyHint === false);
 	{
 		const call = (name, args) => rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name, arguments: args } });
@@ -1092,7 +1092,7 @@ const rpc = async (env, token, message) => {
 	check("el token de acceso vale sin leer del KV", init.body.result?.serverInfo?.name === "garmin");
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("las herramientas se listan igualmente", list.body.result.tools.length === 44);
+	check("las herramientas se listan igualmente", list.body.result.tools.length === 45);
 
 	// Y el dato que si vive en KV avisa en vez de mentir
 	const call = await rpc(env, tokens.access_token, {
@@ -2053,6 +2053,53 @@ const rpc = async (env, token, message) => {
 	const hist = await llamar("peso_historico", { dias: 3650 });
 	check("peso_historico: un pesaje por dia, en kg y ordenados, con sus dos decimales", hist.pesajes.length === 4 && hist.pesajes[0].kg === 71.4 && hist.pesajes.at(-1).kg === 70.85, JSON.stringify(hist.pesajes));
 	check("peso_historico: ultimo y media de 7 dias", hist.resumen.ultimo.kg === 70.85 && hist.resumen.media_7_dias === 70.9, JSON.stringify(hist.resumen));
+	globalThis.fetch = base;
+}
+
+// ── 18. Importar entrenos de Garmin Connect ──
+{
+	mockGarmin({ "ana@x.com": { password: "a", data: { displayName: "ana", hrv: 50 } } });
+	const base = globalThis.fetch;
+	const lista = [
+		{ workoutId: 11, workoutName: "Pecho gym", sportType: { sportTypeKey: "strength_training" } },
+		{ workoutId: 12, workoutName: "Rodillo 4x8", sportType: { sportTypeKey: "cycling" } },
+		{ workoutId: 13, workoutName: "Natacion", sportType: { sportTypeKey: "lap_swimming" } },
+		{ workoutId: 14, workoutName: "myCoach · Pierna A", sportType: { sportTypeKey: "strength_training" } },
+	];
+	const detalle = {
+		11: { workoutSegments: [{ workoutSteps: [{ type: "RepeatGroupDTO", numberOfIterations: 4, workoutSteps: [
+			{ type: "ExecutableStepDTO", stepType: { stepTypeKey: "interval" }, category: "BENCH_PRESS", exerciseName: "BARBELL_BENCH_PRESS", endCondition: { conditionTypeKey: "reps" }, endConditionValue: 8, weightValue: 60000 },
+			{ type: "ExecutableStepDTO", stepType: { stepTypeKey: "rest" }, endCondition: { conditionTypeKey: "time" }, endConditionValue: 120 }] }] }] },
+		12: { workoutSegments: [{ workoutSteps: [
+			{ type: "ExecutableStepDTO", stepType: { stepTypeKey: "warmup" }, endCondition: { conditionTypeKey: "time" }, endConditionValue: 600, targetType: { workoutTargetTypeKey: "heart.rate.zone" }, zoneNumber: 2 },
+			{ type: "RepeatGroupDTO", numberOfIterations: 4, workoutSteps: [
+				{ type: "ExecutableStepDTO", stepType: { stepTypeKey: "interval" }, endCondition: { conditionTypeKey: "time" }, endConditionValue: 480, targetType: { workoutTargetTypeKey: "power.zone" }, targetValueOne: 250, targetValueTwo: 270 },
+				{ type: "ExecutableStepDTO", stepType: { stepTypeKey: "recovery" }, endCondition: { conditionTypeKey: "time" }, endConditionValue: 240 }] }] }] },
+	};
+	globalThis.fetch = async (url, init = {}) => {
+		const u = new URL(url);
+		if (u.pathname === "/workout-service/workouts") return new Response(JSON.stringify(lista));
+		const m = u.pathname.match(/^\/workout-service\/workout\/(\d+)$/);
+		if (m && (!init.method || init.method === "GET")) return new Response(JSON.stringify(detalle[m[1]] || {}));
+		return base(url, init);
+	};
+	const env = makeEnv();
+	const ana = (await connect(env, "ana@x.com", "a")).tokens.access_token;
+	const llamar = async (name, args = {}) => {
+		const res = (await rpc(env, ana, { jsonrpc: "2.0", id: 42, method: "tools/call", params: { name, arguments: args } })).body.result;
+		return res.isError ? { error: res.content[0].text } : JSON.parse(res.content[0].text);
+	};
+	const vista = await llamar("entrenos_desde_garmin");
+	check("importar: vista previa con fuerza y bici, sin natacion ni los de myCoach", vista.escrito === false && vista.nuevos.length === 2, JSON.stringify(vista));
+	const imp = await llamar("entrenos_desde_garmin", { confirm: true });
+	check("importar: entran los dos", imp.importados.length === 2 && imp.fallidos.length === 0, JSON.stringify(imp));
+	const pecho = (await llamar("fuerza_entrenos", { id: "pecho-gym" }));
+	const e0 = pecho.ejercicios?.[0] || {};
+	check("fuerza importada: series, reps, kg, descanso y ejercicio de Garmin", e0.series === 4 && e0.reps === 8 && e0.peso_kg === 60 && e0.descanso_s === 120 && e0.garmin?.ejercicio === "BARBELL_BENCH_PRESS" && pecho.garmin?.workout_id === "11", JSON.stringify(pecho).slice(0, 300));
+	const rod = await llamar("cardio_entrenos", { id: "rodillo-4x8" });
+	check("bici importada: series con potencia y zona de pulso", rod.resumen.includes("4 ×") && rod.resumen.some((l) => /250-270 W/.test(l)) && /zona 2/.test(rod.resumen[0]), JSON.stringify(rod.resumen));
+	const otra = await llamar("entrenos_desde_garmin");
+	check("importar otra vez no duplica", otra.nuevos.length === 0);
 	globalThis.fetch = base;
 }
 
