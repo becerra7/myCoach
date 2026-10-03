@@ -1,6 +1,6 @@
 # Arquitectura de myCoach en C4
 
-Cuatro niveles, de fuera hacia dentro: con quién habla myCoach, qué se despliega, qué hay dentro de cada pieza y cómo viaja una llamada concreta. Cubre este repo y `garmin-mcp`. Estado a 3 de octubre de 2026.
+Cuatro niveles, de fuera hacia dentro: con quién habla myCoach, qué se despliega, qué hay dentro de cada pieza y cómo viaja una llamada concreta. Cubre todo el repo, conector incluido (`apps/conector`). Estado a 3 de octubre de 2026.
 
 Versión dibujada (más legible, claro y oscuro): https://claude.ai/artifact/JJxEwkUSQ2j51EmHubinio
 
@@ -12,7 +12,7 @@ Dos puertas al mismo entrenador: la app (web o PWA) y el Claude de cada uno. Las
 C4Context
   Person(atleta, "Deportista", "Bici, correr y skimo; reloj Garmin")
   System_Ext(claude, "Claude", "claude.ai y apps: conversa con las skills del coach y abre la app en el chat")
-  System(mycoach, "myCoach", "Web/PWA + conector MCP con el motor del entrenador")
+  System(mycoach, "myCoach", "Web/PWA y conector MCP con el motor, en un solo Worker")
   System_Ext(gc, "Garmin Connect", "API no oficial: sueño, VFC, readiness, actividades")
   System_Ext(reloj, "Reloj Garmin", "Graba actividades; recibe entrenos y rutas")
   System_Ext(icu, "Intervals.icu", "Opcional: potencia, curvas, desacople")
@@ -43,11 +43,13 @@ C4Container
   System_Ext(icu, "Intervals.icu")
   System_Ext(brouter, "BRouter")
 
-  System_Boundary(cf, "myCoach · Cloudflare Workers") {
-    Container(web, "App web", "index.html, JS sin framework, PWA", "Hoy, Plan, Forma, Pueblos, Ajustes")
+  System_Boundary(cf, "myCoach · Cloudflare") {
+    Container(web, "App web", "index.html, JS sin framework, PWA", "Hoy, Plan, Comer, Progreso, Pueblos")
     Container(mcpapp, "App en Claude", "mcp-app.html, MCP App", "La misma app en un iframe; sin red propia")
-    Container(wweb, "Worker de la web", "Worker mycoach", "Estáticos, /api/*, cliente OAuth PKCE, lista blanca de herramientas")
-    Container(con, "Conector garmin-mcp", "Worker garmin, garmin-2", "Servidor MCP y OAuth 2.1, motor coach_*, cron 05:30 UTC")
+    Container_Boundary(worker, "Worker mycoach (apps/worker/src/unico.js reparte por ruta)") {
+      Container(wweb, "Web y API", "apps/worker/src/index.js", "Estáticos, /api/*, cliente OAuth PKCE, lista blanca de herramientas")
+      Container(con, "Conector MCP", "apps/conector/worker.js", "/mcp, /oauth/*, /cuenta, /panel; motor coach_*; cron 05:30 UTC")
+    }
     ContainerDb(kv, "Workers KV", "Un solo namespace", "mc:* sesiones web; user:*, cuenta:*, app:* del conector")
     ContainerDb(d1, "D1 garmin-diag", "SQLite", "activities, days, sync_state, registro de llamadas")
   }
@@ -57,8 +59,8 @@ C4Container
   Rel(mcpapp, wweb, "Carga mcp-app.js")
   BiRel(claude, mcpapp, "postMessage JSON-RPC (tools/call)")
   Rel(claude, con, "MCP + OAuth 2.1")
-  Rel(wweb, con, "/oauth, /mcp, /cuenta", "service binding GARMIN_SVC")
-  Rel(con, wweb, "Pide /mcp-app", "service binding MYCOACH")
+  Rel(wweb, con, "/oauth, /mcp, /cuenta", "en proceso (GARMIN_SVC)")
+  Rel(con, wweb, "Pide /mcp-app", "en proceso (MYCOACH)")
   Rel(wweb, cal, "Descarga iCal")
   Rel(wweb, kv, "mc:s:* sesiones, mc:ics:* caché")
   Rel(con, kv, "Tokens, cuentas y documentos")
@@ -68,22 +70,23 @@ C4Container
   Rel(con, brouter, "Rutas")
 ```
 
+- Una URL para todo: `unico.js` manda `/mcp`, `/oauth/*`, `/cuenta`, `/panel`, `/.well-known/*` y los GPX al conector, y el resto a la web. Tu Claude se conecta a `…/mcp` del mismo dominio.
+- Las dos partes se llaman en proceso: `unico.js` les da un `GARMIN_SVC` y un `MYCOACH` que llaman al `fetch()` de la otra, así que su código no cambió al juntarlas.
 - `SESIONES` (web) y `GARMIN` (conector) son el mismo namespace de KV; la web escribe bajo `mc:`.
-- Entre Workers de la misma cuenta la URL pública da 404: por eso los service bindings `GARMIN_SVC` y `MYCOACH`.
 - La app en Claude no tiene flecha hacia el conector: no tiene red y todo se lo pide a Claude.
-- `mycoach-pruebas` y `garmin-pruebas` comparten KV y D1 con producción (datos reales). `garmin-2` es el mismo conector en otra URL.
-- Despliegue: GitHub Actions, `npm run check` en cada push; en `main`, `wrangler deploy` y comprobación de `/api/me` y del login.
+- `mycoach-pruebas` (sin cron) comparte KV y D1 con producción: datos reales.
+- Despliegue: GitHub Actions, `npm run check` (web, Worker y tests del conector) en cada push; en `main`, `wrangler deploy` con `SIGNING_KEY` como secreto y comprobación de la web, la API y el login.
 
 ## C3 · Componentes
 
-### Conector `garmin-mcp` (`worker.js`)
+### Conector MCP (`apps/conector/worker.js`)
 
 ```mermaid
 C4Component
-  Container_Ext(wweb, "Worker de la web", "service binding")
-  System_Ext(claude, "Claude", "HTTPS")
+  Container_Ext(wweb, "Web y API", "mismo Worker")
+  System_Ext(claude, "Claude", "HTTPS /mcp")
 
-  Container_Boundary(con, "Conector garmin-mcp · worker.js") {
+  Container_Boundary(con, "Conector MCP · apps/conector/worker.js") {
     Component(cron, "Cron diario", "scheduled(), 05:30 UTC", "sincronizarTodos() y calcularHoy() → coach/hoy")
     Component(router, "Router HTTP", "fetch()", "/oauth/*, /cuenta/*, /mcp, /panel, /.well-known/*")
     Component(panel, "Panel de progreso", "/panel", "Gráficas desde D1")
@@ -107,7 +110,7 @@ C4Component
   System_Ext(brouter, "BRouter")
   System_Ext(icu, "Intervals.icu")
 
-  Rel(wweb, router, "GARMIN_SVC")
+  Rel(wweb, router, "En proceso")
   Rel(claude, router, "HTTPS")
   Rel(router, oauth, "")
   Rel(router, rpc, "")
@@ -138,7 +141,7 @@ C4Component
 ```mermaid
 C4Component
   Container_Boundary(web, "App web · apps/web/src (un HTML por destino)") {
-    Component(pant, "Pantallas", "20-hoy, 30-plan, 35-agenda, 40-forma-pantallas, 60-mapa")
+    Component(pant, "Pantallas v1", "62-v1-base, 63…67-v1-*", "Hoy, Plan, Comer, Progreso, Pueblos; navegación y hojas en 20-hoy")
     Component(coach, "Entrenador", "55-coach", "Semáforo de coach_hoy; aplica el cambio con coach_proponer")
     Component(entrenos, "Entrenos", "57-cardio, 58-fuerza, 59-entrenos", "Librería, registro, envío al reloj")
     Component(cuenta, "Cuenta y fuentes", "56-cuenta, 57-intervals, 61-peso")
@@ -149,7 +152,7 @@ C4Component
     Component(pweb, "platform/web.js", "--target web → index.html", "fetch POST /api/mcp con la cookie")
     Component(pmcp, "platform/mcpapp.js", "--target mcpapp → mcp-app.html", "postMessage JSON-RPC")
   }
-  Container_Ext(wweb, "Worker de la web", "/api/mcp")
+  Container_Ext(wweb, "Web y API", "/api/mcp")
   System_Ext(host, "Claude, anfitrión del iframe", "MCP Apps")
   System_Ext(art, "Claude, runtime de artifact", "--target claude → claude.html, window.claude nativo")
 
@@ -176,7 +179,7 @@ El semáforo de Hoy propone recortar la sesión y tocas el botón.
 sequenceDiagram
   participant H as 55-coach.js
   participant P as platform/web.js
-  participant W as index.js (Worker de la web)
+  participant W as index.js (web y API)
   participant R as handleRpc (conector)
   participant M as coach_proponer (motor)
   participant K as Workers KV
@@ -184,7 +187,7 @@ sequenceDiagram
   H->>P: coachCall('coach_proponer', { cambios, porque, guardar: true })
   P->>W: POST /api/mcp { tool, input }
   Note over W: TOOLS.has(tool): lista blanca<br/>acceso(): renueva el token si caducó
-  W->>R: tools/call · Bearer (GARMIN_SVC)
+  W->>R: tools/call · Bearer (en proceso, GARMIN_SVC)
   Note right of R: Claude entra aquí
   R->>M: coach_proponer(input)
   Note over M: validarSemana(): intensos, horas,<br/>semáforo, fuerza, lesiones
@@ -203,5 +206,5 @@ Desde Claude la llamada entra directamente en `handleRpc` y desde ahí es idént
 
 - **API privada de Garmin.** Ya se rompió en marzo de 2026 y el programa oficial no acepta solicitudes. Intervals.icu es el plan B.
 - **Pruebas y producción comparten datos.** Un cambio guardado desde `mycoach-pruebas` se ve en la web de siempre.
-- **Un archivo para todo el conector.** `worker.js` (~6.500 líneas) mezcla OAuth, cliente de Garmin, motor y entrenos; separar el motor a `packages/domain` está en el plan.
+- **Un archivo para todo el conector.** `apps/conector/worker.js` (~6.500 líneas) mezcla OAuth, cliente de Garmin, motor y entrenos; separar el motor a `packages/domain` está en el plan.
 - **HTML pesado.** La geografía va incrustada en la web; el plan es cargarla bajo demanda.
