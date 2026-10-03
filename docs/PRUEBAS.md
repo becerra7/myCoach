@@ -1,4 +1,5 @@
 # Probar el entrenador (trabajo de la noche del 28 de septiembre)
+> **Desde el 3 de octubre de 2026** web y conector son un solo Worker: producción en `https://mycoach.albertbecervas.workers.dev` (conector en `/mcp`) y pruebas en `mycoach-pruebas` (workflow **CI**, "Run workflow" desde una rama). Los pasos que hablan del workflow del conector por separado ya no aplican.
 
 Nada de esto está en `main` ni en producción. Todo está en ramas
 `ccr-3045247d-qwz39a` de los dos repos, y se prueba en **dos Workers de pruebas
@@ -18,7 +19,7 @@ Es el primer paso del plan (`docs/PLAN-COACH.md`): **el motor decide, el modelo 
   - Cada mañana, el cron deja calculado el semáforo de quien usa myCoach (preparado para los avisos que vendrán).
   - Hay 45 tests nuevos (216 en total, todos en verde).
 - **En la web (repo `myCoach`)** hay una tarjeta nueva en Hoy, **"Tu entrenador"**. Enseña el semáforo, sus razones y el mensaje. Tiene los botones **Aplicar** y **Hablarlo con Claude**, y los de "¿Cómo te encuentras?" (Reventado, Cansado, Normal, Genial, Me duele algo). No calcula nada: se lo pide al conector. En modo demo enseña un ejemplo con las mismas reglas.
-- **Entorno de pruebas:** `garmin-pruebas` y `mycoach-pruebas`, otros dos Workers con el código de estas ramas.
+- **Entorno de pruebas:** `mycoach-pruebas`, otro Worker (web y conector juntos) con el código de estas ramas.
 
 ![Tarjeta del entrenador en vivo (con datos simulados)](img/semaforo-vivo.png)
 
@@ -51,7 +52,7 @@ Es el primer paso del plan (`docs/PLAN-COACH.md`): **el motor decide, el modelo 
 ## 2. Cómo se conecta con tu Claude
 
 ```
-                    ┌──────────────── Worker del conector (garmin / garmin-pruebas) ───────────────┐
+                    ┌──────────────── Worker mycoach (web + conector) ───────────────┐
 Tu Claude ──MCP──►  │ garmin_*  (lee Garmin)                                                       │
  (claude.ai,        │ coach_*   (MOTOR: semáforo, reglas del plan, validación)  ◄── cron 7:30      │
   app, móvil)       │ app_*     (estado de la app)                                                 │
@@ -72,9 +73,9 @@ Web myCoach (mycoach / mycoach-pruebas) ─────────────�
 ### A. En tu Claude (lo importante, unos 10 minutos)
 
 1. **Despliega el conector de pruebas.** GitHub → repo myCoach → *Actions* → **Conector** → *Run workflow* → en *Use workflow from* elige la rama **`ccr-3045247d-qwz39a`** → *Run*.
-   - Desde una rama que no es `main`, el workflow **solo** despliega `garmin-pruebas`. Tus conectores `garmin` y `garmin-2` no se tocan.
-   - Cuando acabe en verde, comprueba que `https://garmin-pruebas.albertbecervas.workers.dev/.well-known/oauth-authorization-server` contesta.
-2. **Añádelo en Claude.** Ajustes → Conectores → Añadir conector personalizado → nombre `myCoach pruebas`, URL `https://garmin-pruebas.albertbecervas.workers.dev/mcp`. Te sale la pantalla de login de Garmin de siempre.
+   - Desde una rama que no es `main`, el workflow **solo** despliega `mycoach-pruebas`. Producción no se toca.
+   - Cuando acabe en verde, comprueba que `https://mycoach-pruebas.albertbecervas.workers.dev/.well-known/oauth-authorization-server` contesta.
+2. **Añádelo en Claude.** Ajustes → Conectores → Añadir conector personalizado → nombre `myCoach pruebas`, URL `https://mycoach-pruebas.albertbecervas.workers.dev/mcp`. Te sale la pantalla de login de Garmin de siempre.
 3. **Abre un chat nuevo y deja activo solo este conector.** En el menú de herramientas del chat, desactiva "Garmin" y "Garmin-Paula" para esa conversación: tienen herramientas con el mismo nombre y Claude podría usar la versión vieja.
 4. **Prueba estas frases** (y mira qué herramientas llama Claude, se ve en el chat):
 
@@ -96,7 +97,7 @@ Web myCoach (mycoach / mycoach-pruebas) ─────────────�
 
 ### B. En la web (opcional, unos 5 minutos)
 
-1. Primero hay que tener hecho el paso A.1 (la web de pruebas habla con `garmin-pruebas`).
+1. Primero hay que tener hecho el paso A.1 (web y conector de pruebas van juntos en `mycoach-pruebas`).
 2. GitHub → repo `myCoach` → *Actions* → **CI** → *Run workflow* → rama **`ccr-3045247d-qwz39a`**. Despliega `mycoach-pruebas`.
    - Necesita los secretos `CLOUDFLARE_API_TOKEN` y `CLOUDFLARE_ACCOUNT_ID` **en el repo myCoach**. Si no están, el paso "Sin credenciales no hay despliegue" falla y lo dice. Son los mismos que tenía `garmin-mcp`.
 3. Abre `https://mycoach-pruebas.albertbecervas.workers.dev`, conecta Garmin y, en **Hoy**, busca la tarjeta **Tu entrenador**.
