@@ -27,3 +27,16 @@ test('la web habla con el conector en proceso y con su propia URL', async () => 
   const home = await unico.fetch(new Request('https://ejemplo.dev/'), env, ctx);
   assert.match(await home.text(), /web/);
 });
+
+test('si cambia SIGNING_KEY, la web vuelve a registrarse y la pantalla de entrar abre', async () => {
+  const kv = new Map();
+  const KV = { get: async (k, t) => { const v = kv.get(k); return v == null ? null : t === 'json' ? JSON.parse(v) : v; }, put: async (k, v) => { kv.set(k, v); }, delete: async k => { kv.delete(k); }, list: async () => ({ keys: [] }) };
+  const ctx = { waitUntil() {} };
+  const base = { GARMIN: KV, SESIONES: KV, ASSETS: { fetch: async () => new Response('web') } };
+  const entrar = async env => {
+    const login = await unico.fetch(new Request('https://ejemplo.dev/api/login'), env, ctx);
+    return (await unico.fetch(new Request(login.headers.get('Location')), env, ctx)).status;
+  };
+  assert.equal(await entrar({ ...base, SIGNING_KEY: 'vieja' }), 200);
+  assert.equal(await entrar({ ...base, SIGNING_KEY: 'nueva' }), 200, 'con la clave nueva no reutiliza el registro firmado con la vieja');
+});
