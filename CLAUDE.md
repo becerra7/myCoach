@@ -28,6 +28,16 @@ Antes de dar por buena una pantalla, repásala con esta lista y **mírala en el 
 - Se usan los componentes que ya existen (`card`, `card-h`, `btn fill|tonal|text`, `li`, `chip`, `sheet`, `toast`), no estilos sueltos.
 - Los tokens de color, radio y tipografía de `app.css` mandan.
 
+## Que no parezca hecho por IA
+
+- Diseño propio de myCoach, no plantilla. No uses un patrón solo porque es habitual: gradientes morados o azules, vidrio, sombras de más, pastillas en todo, tres tarjetas iguales, manchas decorativas, animaciones gratuitas. Se permiten si encajan de verdad con el producto.
+- Primero tipografía, espacio, color, densidad y jerarquía; los efectos, después.
+- Móvil y escritorio se diseñan, no se encogen: decide qué se apila, se pliega, desaparece o cambia de interacción.
+- La animación comunica estado o continuidad; si no, sobra.
+- Cambio visual importante: ábrelo con Playwright (móvil y escritorio, estados e interacciones), arregla y vuelve a mirar. Que compile no significa que se vea bien.
+- Al acabar, una pasada de `impeccable` buscando aspecto genérico, jerarquía floja o espacios incoherentes. Arregla lo que importa y para.
+- Ante la duda: específico, simple e intencionado gana a moda, genérico y decorativo.
+
 ## Skills de diseño: cuál usar y cuándo
 
 Las reglas de este archivo y los tokens de `app.css` mandan siempre sobre cualquier skill. Se usa **una** skill por tarea, la primera que encaje:
