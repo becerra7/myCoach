@@ -29,12 +29,13 @@ De arriba abajo:
 
 1. **Titular con la decisión.** "Rodaje suave · 60 min" en grande. Debajo, el porqué en una frase: "Has dormido poco y tu VFC está por debajo de tu normal". El semáforo va como etiqueta con palabra e icono (✓ Verde, · Ámbar), no como círculo.
 2. **Franja de carga de hoy.** Barra con la franja recomendada según tu estado y la sesión como marca. Si la cambias, la marca se mueve en directo y dice si entra (antes → después). Aplicar o deshacer.
-3. **Por qué (contribuyentes).** Plegado: sueño, VFC, pulso en reposo, carga reciente y cómo te encuentras, cada uno con un punto sobre *tu* normalidad y una palabra ("Normal", "Algo peor", "Mejor"). Sin 0-100.
-4. **Comer hoy (una línea).** "Día de hidrato alto · te faltan ~120 g · proteína al 60 %" → abre Comer.
+3. **Tus métricas de Garmin, siempre a la vista.** Una fila compacta con sueño, VFC, pulso en reposo, readiness y carga reciente: cifra + palabra frente a *tu* normalidad ("Normal", "Algo peor", "Mejor"). Sin 0-100 y sin plegar: se leen sin tocar nada. Lo que se pliega es la explicación de cada una (qué es y cómo la lee el entrenador), que se abre al tocarla.
+4. **El día en una línea de tiempo.** Comidas y sesión en orden: desayuno → salida de 3 h (con lo que llevar: 60 g/h) → comida de recuperación → cena. Cada comida con su nivel de hidrato según la sesión y lo registrado; arriba, "te faltan ~120 g de hidrato · proteína al 60 %". Tocar abre Comer.
 5. **Semana en 7 casillas** con franja lateral: lleno = hecho, contorno = pendiente, rayado = cambiado. Palabras, nunca rojo.
 6. **"No estoy al 100 %"** (secundario): enfermo, molestia o semana cargada. Enseña el plan ajustado antes de aplicarlo.
 
 **Según la hora:** después de entrenar, el titular pasa a ser el resumen de la sesión hecha ("Hecho · 62 min, más suave de lo previsto, bien") comparado con tu historia.
+**Día sin nada planificado:** el titular dice "Día libre" o "Descanso", y las métricas de Garmin pasan a ser lo principal, con una frase de qué te pide el cuerpo ("Buen día para algo suave si te apetece"). La comida se ajusta a un día suave.
 **Primer uso o pocos datos:** "Aprendiendo tu normalidad · 4 de 14 días" en vez de un color inventado.
 
 ## Plan
@@ -54,6 +55,20 @@ De arriba abajo:
 - **Histórico:** semana y mes, hidrato y proteína por día frente a su franja, con los días duros marcados. Se lee "en los días duros te quedas corto de hidrato", no un juicio.
 - **Registrar:** se hace con Claude (foto o texto, como ya haces). La app enseña lo registrado y deja corregir o borrar.
 - **Sin calorías ni culpa.** Gramos de hidrato y proteína sí, porque son lo que cambia tu rendimiento; calorías no.
+
+## Cómo se cruzan comida y entreno
+
+Comer tiene su sección, pero no va por un camino aparte. Los dos se cuentan sobre el mismo día y la misma sesión:
+
+| Dónde | Qué se ve |
+|---|---|
+| Hoy | La línea de tiempo junta comidas y sesión; el objetivo de hidrato sale de la sesión de hoy |
+| Plan | Cada día lleva su carga y su nivel de hidrato ("Alto", "Medio", "Bajo"); si mueves una sesión, se mueve también la comida que la acompaña |
+| Actividad | "Cómo llegaste y qué tomaste": hidrato de las comidas previas, g/h durante (de `salida_guardar`) y si cuadró con lo que pedía la salida |
+| Comer, histórico | Las barras de hidrato por día van alineadas con las sesiones (los días duros marcados), para ver si comes según entrenas |
+| Progreso | El indicador de combustible y, con datos suficientes, el cruce: "en las salidas largas en las que tomaste menos de 40 g/h, tu stamina mínima bajó de 30 %" |
+
+Las correlaciones solo salen cuando hay datos suficientes (mínimo de salidas comparables) y se marcan como observación, no como regla.
 
 ## Progreso
 
