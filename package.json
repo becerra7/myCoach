@@ -7,7 +7,7 @@
     "build:claude": "node apps/web/build.mjs --target claude",
     "check": "node apps/web/build.mjs --target web --check && node apps/web/build.mjs --target mcpapp --check && node --test tests/*.test.mjs && node apps/conector/test.mjs",
     "dev": "npm run build && wrangler dev -c apps/worker/wrangler.toml",
-    "deploy": "npm run build && wrangler deploy -c apps/worker/wrangler.toml"
+    "deploy": "npm run build && wrangler deploy -c apps/worker/wrangler.toml --secrets-file .secrets.json"
   },
   "devDependencies": {
     "es-atlas": "^0.6.0",

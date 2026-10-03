@@ -1,3 +1,5 @@
+> **Ahora vive en el repo myCoach** (`apps/conector`) y se despliega dentro del Worker `mycoach` junto a la web: el conector está en `https://mycoach.albertbecervas.workers.dev/mcp`. Lo que este README dice de `wrangler.toml`, `garmin`, `garmin-2` y `garmin-pruebas` es historia.
+
 # garmin-mcp
 
 Servidor MCP que expone los datos de Garmin Connect a Claude, sobre un único

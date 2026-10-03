@@ -60,4 +60,4 @@ Las reglas de este archivo y los tokens de `app.css` mandan siempre sobre cualqu
 
 ## Comprobaciones
 - `npm run check` antes de cada commit.
-- Nada va a `main` sin que lo pida el usuario. Las pruebas van en `mycoach-pruebas` / `garmin-pruebas`.
+- Nada va a `main` sin que lo pida el usuario. Las pruebas van en `mycoach-pruebas` (web y conector juntos).

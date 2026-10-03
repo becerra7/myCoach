@@ -1,0 +1,32 @@
+name: Borrar un Worker antiguo
+
+# A mano. Tras pasar a un solo Worker (mycoach), los del conector antiguo sobran:
+# garmin (cuando ya hayas reconectado tu Claude a …/mcp), garmin-2 y garmin-pruebas.
+# Borrar un Worker no se puede deshacer: hay que escribir BORRAR para confirmar.
+on:
+  workflow_dispatch:
+    inputs:
+      worker:
+        description: Worker a borrar
+        type: choice
+        options: [garmin-2, garmin-pruebas, garmin]
+      confirmar:
+        description: Escribe BORRAR para confirmar
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  borrar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirmación
+        run: test "${{ inputs.confirmar }}" = "BORRAR" || { echo "No has escrito BORRAR: no se borra nada"; exit 1; }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Borrar
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4 delete --name "${{ inputs.worker }}" --force
