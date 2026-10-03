@@ -3982,7 +3982,7 @@ const instruccionesCoach = (nombre = NOMBRE_COACH) =>
 	"esta conectado, intervals_actividades, intervals_actividad (intervalos y series), intervals_bienestar e intervals_curvas " +
 	"(mejores marcas) dan aun mas detalle: eficiencia, desacople, W', zonas de potencia y ritmo, dinamicas de carrera y clima." +
 	" PANTALLAS: si el usuario quiere ver su app, su plan, su semana, su forma o sus pueblos, o acaba de cambiar el plan, " +
-	"abra la app dentro de la conversacion con mycoach_abrir (pantalla hoy, plan, forma, pueblos o ajustes). Es la app de " +
+	"abra la app dentro de la conversacion con mycoach_abrir (pantalla hoy, plan, comer, progreso, pueblos o ajustes). Es la app de " +
 	"verdad, con sus datos: no dibuje una tarjeta, un grafico ni un artefacto propio imitandola." +
 	" FUERZA: cada sesion con ejercicio, series x reps, peso, material y descanso. Antes de proponer, mire fuerza_entrenos " +
 	"(entrenos guardados, lo que hizo la ultima vez y los nombres de ejercicio que ya usa: reutilicelos). Para repetir un entreno, " +
@@ -4422,15 +4422,16 @@ async function htmlDeLaApp(env) {
 <b>mycoach.albertbecervas.workers.dev</b> en el navegador.</p></body></html>`;
 }
 
-const PANTALLAS_APP = ["hoy", "plan", "forma", "pueblos", "ajustes"];
+const PANTALLAS_APP = ["hoy", "plan", "comer", "progreso", "pueblos", "ajustes", "forma"];
 
 Object.assign(TOOLS, {
 	mycoach_abrir: {
 		title: "Abrir myCoach",
 		ui: APP_UI,
 		description:
-			"Abre la app myCoach dentro de la conversacion, en la pantalla indicada: hoy (el entrenador y la semana), plan, " +
-			"forma, pueblos o ajustes. Uselo cuando el usuario quiera ver su app, su plan, su semana, su forma o sus pueblos, " +
+			"Abre la app myCoach dentro de la conversacion, en la pantalla indicada: hoy (que toca, sus datos, su dia y la semana), " +
+			"plan, comer (comida del dia, historico y peso), progreso (forma e indicadores por deporte), pueblos (resumen de lo hecho y mapa) o ajustes. " +
+			"Uselo cuando el usuario quiera ver su app, su plan, su comida, su progreso o sus pueblos, " +
 			"y despues de guardar un cambio de plan, para que lo vea. La app lee y guarda lo mismo que estas herramientas.",
 		schema: {
 			type: "object",
