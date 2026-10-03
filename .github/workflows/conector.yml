@@ -1,0 +1,95 @@
+name: Conector
+
+# El conector (apps/conector) es otro Worker de Cloudflare: el servidor MCP que usan
+# tu Claude y la web. Se despliega solo cuando cambia su código.
+on:
+  push:
+    branches: [main]
+    paths: ['apps/conector/**', '.github/workflows/conector.yml']
+  pull_request:
+    paths: ['apps/conector/**', '.github/workflows/conector.yml']
+  # A mano: desde main vuelve a desplegar producción; desde cualquier otra rama
+  # despliega SOLO el Worker de pruebas (garmin-pruebas), sin tocar los conectores de la gente.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  conector:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: apps/conector
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # Sin tests en verde no se despliega: el servidor solo se ejerce de verdad
+      # contra Garmin en producción, así que lo que se puede comprobar antes, se comprueba antes.
+      - name: Tests
+        run: node test.mjs
+
+      # En una PR solo se prueba; desplegar es cosa de main o de una ejecución a mano.
+      # El secreto viaja con el código: un `wrangler deploy` a secas dejó el Worker
+      # sin SIGNING_KEY y tiró el servicio.
+      - name: Preparar secretos
+        if: github.event_name != 'pull_request'
+        run: |
+          test -n "$SIGNING_KEY" || { echo "Falta el secreto SIGNING_KEY en el repositorio myCoach (el mismo que tenía garmin-mcp)"; exit 1; }
+          printf '{"SIGNING_KEY":"%s"}' "$SIGNING_KEY" > .secrets.json
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+
+      - name: Deploy
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: apps/conector
+          command: deploy --secrets-file .secrets.json
+
+      # Segunda instancia, para tener dos cuentas de Garmin conectadas a la vez en el mismo Claude.
+      - name: Deploy del segundo Worker
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: apps/conector
+          command: deploy --env segundo --secrets-file .secrets.json
+
+      - name: Deploy del Worker de pruebas
+        if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: apps/conector
+          command: deploy --env pruebas --secrets-file .secrets.json
+
+      - name: Borrar el fichero de secretos
+        if: always()
+        run: rm -f .secrets.json
+
+      # Un despliegue no está bien hasta que el servidor contesta.
+      - name: Comprobación post-despliegue
+        if: github.event_name != 'pull_request'
+        run: |
+          comprobar() {
+            for intento in 1 2 3; do
+              if curl -fsS "$1/.well-known/oauth-authorization-server" | grep -q '"issuer"'; then echo "OK: $1"; return 0; fi
+              echo "Intento $intento sin éxito en $1; reintentando..."; sleep 5
+            done
+            echo "FALLO: $1 no responde con su metadata OAuth tras desplegar."; return 1
+          }
+          if [ "$GITHUB_REF" = "refs/heads/main" ]; then
+            comprobar "https://garmin.albertbecervas.workers.dev"
+            comprobar "https://garmin-2.albertbecervas.workers.dev"
+          else
+            comprobar "https://garmin-pruebas.albertbecervas.workers.dev"
+          fi

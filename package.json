@@ -5,7 +5,7 @@
   "scripts": {
     "build": "node apps/web/build.mjs --target web && node apps/web/build.mjs --target mcpapp",
     "build:claude": "node apps/web/build.mjs --target claude",
-    "check": "node apps/web/build.mjs --target web --check && node apps/web/build.mjs --target mcpapp --check && node --test tests/*.test.mjs",
+    "check": "node apps/web/build.mjs --target web --check && node apps/web/build.mjs --target mcpapp --check && node --test tests/*.test.mjs && node apps/conector/test.mjs",
     "dev": "npm run build && wrangler dev -c apps/worker/wrangler.toml",
     "deploy": "npm run build && wrangler deploy -c apps/worker/wrangler.toml"
   },

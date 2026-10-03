@@ -54,7 +54,7 @@ Las reglas de este archivo y los tokens de `app.css` mandan siempre sobre cualqu
 - Las demás skills de `.claude/skills` (`brand`, `banner-design`, `slides`, `design`, `design-system`, `ui-styling`) no se usan en myCoach salvo que el usuario las pida.
 
 ## Producto
-- El método (semáforo, reglas del plan) vive en el conector (`garmin-mcp`, herramientas `coach_*`). La web lo enseña, no lo recalcula.
+- El método (semáforo, reglas del plan) vive en el conector (`apps/conector`, herramientas `coach_*`). La web lo enseña, no lo recalcula. Si la web necesita un dato nuevo, se añade al conector en el mismo cambio.
 - Solo se planifican bici, correr y skimo (y fuerza como complemento). El resto de deportes cuenta como carga.
 - `docs/PLAN-COACH.md` recoge las decisiones de producto; `docs/PRUEBAS.md`, cómo probar.
 

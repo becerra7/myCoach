@@ -5,7 +5,7 @@
 ```
 Navegador (web / PWA / luego app)          Cloudflare
 ┌───────────────────────────┐   /api/*    ┌──────────────────────┐  OAuth 2.1 + MCP  ┌─────────────────────┐
-│ apps/web  (un solo HTML)  │ ──────────► │ apps/worker          │ ────────────────► │ garmin-mcp (Worker) │ ─► Garmin Connect
+│ apps/web  (un solo HTML)  │ ──────────► │ apps/worker          │ ────────────────► │ apps/conector (Worker) │ ─► Garmin Connect
 │  módulos 00..60           │             │  login PKCE, sesión, │                   │  garmin_* + app_*   │
 │  platform/web.js          │ ◄────────── │  proxy de herramientas│                   │  KV por usuario     │
 └───────────────────────────┘  estáticos  └──────────────────────┘                   └─────────▲───────────┘

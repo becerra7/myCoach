@@ -8,7 +8,7 @@ aparte** que tienes que desplegar tú con un botón.
 
 Es el primer paso del plan (`docs/PLAN-COACH.md`): **el motor decide, el modelo explica.**
 
-- **En el conector (repo `garmin-mcp`)** hay 6 herramientas nuevas, `coach_*`, que son el método de myCoach:
+- **En el conector (`apps/conector`)** hay 6 herramientas nuevas, `coach_*`, que son el método de myCoach:
   - `coach_hoy` es el **semáforo del día** (🟢 🟠 🔴) con sus razones. Mira el readiness, la VFC y el pulso en reposo comparados con tu mediana de 28 días, las horas de sueño, la frescura (TSB, del modelo de carga que ya tenía el panel) y lo que hayas anotado. Si hace falta, **propone** cambiar, recortar o mover la sesión de hoy, y trae un mensaje ya redactado.
   - `coach_semana`: lo previsto frente a lo hecho, día a día. Incluye la carga de la semana frente a tu media de 4 semanas y avisos (subes demasiado rápido, toca descarga, falta fuerza…).
   - `coach_proponer`: cualquier cambio de plan pasa por aquí. El motor lo **valida** con las reglas: máximo de intensos según tu objetivo, nada de intensos seguidos, nada exigente en rojo, horas, fuerza y lesiones. Si no cumple, **no guarda** y devuelve una versión corregida. El porqué de cada cambio queda en un registro de decisiones.
@@ -71,7 +71,7 @@ Web myCoach (mycoach / mycoach-pruebas) ─────────────�
 
 ### A. En tu Claude (lo importante, unos 10 minutos)
 
-1. **Despliega el conector de pruebas.** GitHub → repo `garmin-mcp` → *Actions* → **Deploy** → *Run workflow* → en *Use workflow from* elige la rama **`ccr-3045247d-qwz39a`** → *Run*.
+1. **Despliega el conector de pruebas.** GitHub → repo myCoach → *Actions* → **Conector** → *Run workflow* → en *Use workflow from* elige la rama **`ccr-3045247d-qwz39a`** → *Run*.
    - Desde una rama que no es `main`, el workflow **solo** despliega `garmin-pruebas`. Tus conectores `garmin` y `garmin-2` no se tocan.
    - Cuando acabe en verde, comprueba que `https://garmin-pruebas.albertbecervas.workers.dev/.well-known/oauth-authorization-server` contesta.
 2. **Añádelo en Claude.** Ajustes → Conectores → Añadir conector personalizado → nombre `myCoach pruebas`, URL `https://garmin-pruebas.albertbecervas.workers.dev/mcp`. Te sale la pantalla de login de Garmin de siempre.
@@ -98,7 +98,7 @@ Web myCoach (mycoach / mycoach-pruebas) ─────────────�
 
 1. Primero hay que tener hecho el paso A.1 (la web de pruebas habla con `garmin-pruebas`).
 2. GitHub → repo `myCoach` → *Actions* → **CI** → *Run workflow* → rama **`ccr-3045247d-qwz39a`**. Despliega `mycoach-pruebas`.
-   - Necesita los secretos `CLOUDFLARE_API_TOKEN` y `CLOUDFLARE_ACCOUNT_ID` **en el repo myCoach**. Si no están, el paso "Sin credenciales no hay despliegue" falla y lo dice. Son los mismos que tiene `garmin-mcp`.
+   - Necesita los secretos `CLOUDFLARE_API_TOKEN` y `CLOUDFLARE_ACCOUNT_ID` **en el repo myCoach**. Si no están, el paso "Sin credenciales no hay despliegue" falla y lo dice. Son los mismos que tenía `garmin-mcp`.
 3. Abre `https://mycoach-pruebas.albertbecervas.workers.dev`, conecta Garmin y, en **Hoy**, busca la tarjeta **Tu entrenador**.
    - Prueba **Aplicar** si hay propuesta. La sesión cambia en el plan y, si le preguntas a Claude, la ve cambiada.
    - Prueba **¿Cómo te encuentras? → Reventado**: el semáforo se recalcula.
