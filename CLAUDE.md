@@ -45,12 +45,12 @@ Las reglas de este archivo y los tokens de `app.css` mandan siempre sobre cualqu
 | Tarea | Skill |
 |---|---|
 | Revisar, criticar, pulir, auditar accesibilidad, simplificar o afinar una pantalla que ya existe | `impeccable` |
-| Crear una pantalla o componente nuevo desde cero | `frontend-design` |
+| Crear una pantalla o componente nuevo desde cero | `frontend-design` (dirección visual) + `ui-ux-pro-max` (UX, patrones y gráficos) |
 | Elegir estilo, paleta, tipografía o tipo de gráfico, o consultar guías de UX | `ui-ux-pro-max` (solo como consulta de datos) |
 
-- No se encadenan dos skills sobre la misma pantalla. Si hay duda entre dos, gana `impeccable`.
-- `frontend-design` tiende a proponer estéticas llamativas: aquí se limita a los componentes y tokens existentes (`card`, `btn`, `sheet`…), sin fuentes, colores ni estilos nuevos.
-- `ui-ux-pro-max` solo aconseja: nunca se aplica su paleta o tipografía si choca con `app.css`.
+- No se encadenan más skills sobre la misma pantalla, salvo la pareja `frontend-design` + `ui-ux-pro-max` al crear. Si hay duda, gana `impeccable`.
+- En la app actual, `frontend-design` se limita a los componentes y tokens existentes (`card`, `btn`, `sheet`…). En un rediseño acordado puede proponer identidad nueva, que se vuelca en tokens, no en estilos sueltos.
+- `ui-ux-pro-max` aconseja en UX (flujos, guías, tipo de gráfico); su paleta o tipografía no se aplican si chocan con los tokens.
 - Las demás skills de `.claude/skills` (`brand`, `banner-design`, `slides`, `design`, `design-system`, `ui-styling`) no se usan en myCoach salvo que el usuario las pida.
 
 ## Producto
