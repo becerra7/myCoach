@@ -50,7 +50,7 @@ De arriba abajo:
 
 - **Hoy:** dos barras con franja objetivo (mínimo-máximo): **hidrato** y **proteína**, en gramos, según la sesión de hoy y tu peso. Cifra grande con lo que falta o sobra: "Te faltan 120 g de hidrato". Se marca como estimado.
 - **Comidas del día:** desayuno, comida, merienda, snack, cena y durante el entreno. Cada una con su nivel de hidrato recomendado (Alto, Medio, Bajo, en palabra) y lo registrado.
-- **Durante el entreno:** gramos por hora para la sesión de hoy si dura más de 90 min.
+- **Durante el entreno:** gramos por hora para la sesión de hoy si dura más de 90 min. Lo que tomaste de verdad (guardado con `salida_guardar`) alimenta el indicador de combustible de Progreso.
 - **Histórico:** semana y mes, hidrato y proteína por día frente a su franja, con los días duros marcados. Se lee "en los días duros te quedas corto de hidrato", no un juicio.
 - **Registrar:** se hace con Claude (foto o texto, como ya haces). La app enseña lo registrado y deja corregir o borrar.
 - **Sin calorías ni culpa.** Gramos de hidrato y proteína sí, porque son lo que cambia tu rendimiento; calorías no.
@@ -60,15 +60,22 @@ De arriba abajo:
 Segmentos: **Forma · Bici · Correr · Skimo · Pueblos** (solo los deportes que haces).
 
 - **Forma:** zonas de forma con nombre y frase (Óptimo, Fresco, Riesgo…, como Intervals.icu, explicadas), peso con su tendencia, objetivo.
-- **Bici** (lo que pides): gráficas y marcadores top, cada uno con su tendencia y una frase de qué significa.
-  - Curva de potencia (mejores 5 s, 1, 5, 20 y 60 min) frente a hace 3 meses (`intervals_curvas`).
-  - FTP estimado y W/kg.
-  - VAM en subidas largas.
-  - Eficiencia: vatios por pulso en fondos (EF) y desacople aeróbico (si el pulso se dispara al final de las salidas largas).
-  - Velocidad y pulso en llano a igual esfuerzo.
-  - Reparto por zonas de las últimas 4 semanas (¿cuánto suave de verdad?).
-  - Cadencia media en llano y en subida.
-  - Récords recientes ("Nuevo mejor 20 min: 265 W").
+- **Bici.** Seis indicadores, sacados de tu análisis con Claude del 3 de octubre. Cada uno lleva gráfica por salida o por semana, su línea de referencia y una frase:
+
+  | Área | Indicador | Gráfica | Referencia |
+  |---|---|---|---|
+  | Motor aeróbico | FC media y metros por latido, comparando solo la misma ruta o un tramo fijo (La Roca en llano) | Barras por salida con el tramo de referencia destacado | Subir metros por latido a igual pulso |
+  | Base aeróbica | Desacople en el tramo fijo | Puntos por salida | Por debajo del 5 % (confianza media) |
+  | Disciplina | % del tiempo por debajo del techo de Z2 (144 ppm) en los fondos | Barras por salida con líneas de Z2 (135) y techo (144) | ~80 % suave (dato de entrenados) |
+  | Durabilidad | Stamina mínima en salidas largas | Barras por salida (más alto es mejor; 1 % = vaciado) | Sin cifra verificada: se compara contigo |
+  | Combustible | Gramos de hidrato por hora en ruta | Barras por salida frente a la línea del plan (60 g/h) | 30-60 g/h; hasta 90 g/h en más de 2,5 h |
+  | Volumen | Horas de bici por semana | Barras por semana (la actual, marcada como incompleta) | Tu objetivo de horas |
+
+  El peso (media de 7 días) va en Forma, no aquí.
+
+  **Comparar con la misma ruta.** Si repites recorrido, la actividad enseña "19 sep → 3 oct": FC media (151 → 142), metros por latido (2,60 → 2,89), stamina mínima (26 → 51 %) y velocidad (23,6 → 24,7 km/h), con el contexto que cambia la lectura (6 °C más, otra bici). Es la forma más honesta de ver progreso.
+
+  **Más adelante:** curva de potencia y FTP o W/kg cuando haya potenciómetro (vía Intervals.icu), VAM en subidas largas y récords recientes.
 - **Correr y Skimo:** lo mismo adaptado (ritmo, ritmo en subida, VAM, eficiencia, desacople).
 - **Pueblos:** el mapa y la lista que ya tienes.
 
@@ -126,7 +133,9 @@ Hevy para registrar fuerza, ficha para compartir, tests guiados, hidratación, n
 
 - **Objetivos de comida del día** (gramos de hidrato y proteína, por comida y durante el entreno) calculados en el conector, como el semáforo.
 - **Franja de carga del día** ligada al estado.
-- **Marcadores de progreso** por deporte en `coach_progreso` (con Intervals.icu si está conectado).
+- **`coach_kpis`:** los seis indicadores en series listas en una sola llamada. Para tu panel, Claude tuvo que traer 50 actividades enteras: es justo el gasto de tokens que hay que evitar.
+- **Detección de "misma ruta"** en el servidor: `garmin_activity_detail` devuelve la salida de referencia con la que comparar.
+- **`salida_guardar`** (actividad, puntos clave, combustible en g de hidrato, ml y sal, sensaciones): el analista la llama al cerrar el análisis y los puntos clave quedan en myCoach, no en la memoria de Claude. Alimenta el indicador de combustible y la comparación con la misma ruta.
 - **Proponer la semana** desde el conector.
 - Comprobar que `comidas` devuelve lo que registra Claude.
 
@@ -140,5 +149,5 @@ Hevy para registrar fuerza, ficha para compartir, tests guiados, hidratación, n
 
 ## Pendiente
 
-- El análisis de bici que querías pasar no llegó a este chat: con él ajusto la lista de marcadores.
+- Los avisos de tu análisis: las FC máximas salen del sensor óptico, algunas salidas no tienen desnivel y el 3 sep fue con otra bici. Los indicadores tienen que decir cuándo un dato no es comparable.
 - Política de Strava y pausa de la API de Garmin: comprobar a mano antes de abrir al público.
