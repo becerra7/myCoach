@@ -14,8 +14,13 @@ for intento in 1 2 3 4 5; do
 done
 mcp=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$base/mcp" -H 'Content-Type: application/json' -d '{}')
 echo "/mcp sin token: $mcp"; [ "$mcp" = 401 ] || exit 1
-loc=$(curl -sS -o /dev/null -w '%{redirect_url}' "$base/api/login")
-echo "login -> $loc"; echo "$loc" | grep -q "^$base/oauth/authorize?" || exit 1
-auth=$(curl -sS -o /tmp/entrar.html -w '%{http_code}' "$loc")
-echo "pantalla de entrar: $auth"
-if [ "$auth" != 200 ]; then sed -e 's/<[^>]*>/ /g' /tmp/entrar.html | tr -s ' \n' ' ' | head -c 400; echo; exit 1; fi
+# Justo después de desplegar, algunas peticiones aún las atiende la versión anterior: se reintenta.
+for intento in 1 2 3 4 5; do
+  loc=$(curl -sS -o /dev/null -w '%{redirect_url}' "$base/api/login")
+  auth=$(curl -sS -o /tmp/entrar.html -w '%{http_code}' "$loc")
+  echo "login -> pantalla de entrar: $auth"
+  if echo "$loc" | grep -q "^$base/oauth/authorize?" && [ "$auth" = 200 ]; then exit 0; fi
+  sed -e 's/<[^>]*>/ /g' /tmp/entrar.html | tr -s ' \n' ' ' | head -c 300; echo
+  sleep 10
+done
+exit 1
