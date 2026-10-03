@@ -1,57 +1,3 @@
-/* ===== FORMA: parte común + detalle por deporte ===== */
-function barDim(d) {
-  const pct = v => (v - 1) / 9 * 100;
-  const fill = d.est ? `<i class="fill est" style="width:${pct(d.v)}%"></i>` : `<i class="fill" style="width:${pct(d.v)}%"></i>`;
-  return `<span class="bar" aria-hidden="true"><i class="rail"></i>${fill}<i class="tick" style="left:${pct(7)}%"></i><i class="tick" style="left:calc(100% - 2px)"></i></span>`;
-}
-const dimRow = (k, x) => x.v == null ? `<button type="button" class="dim" data-a="dim" data-v="${k}"><span class="n">${esc(x.n)}</span><span class="v">—</span>${ic('chev', 18, 'chev')}<span class="u">Falta dato: ${esc(x.falta || '')}</span></button>` : `<button type="button" class="dim" data-a="dim" data-v="${k}"><span class="n">${esc(x.n)} ${x.est ? '<span class="q" title="Estimado">?</span>' : ''}</span><span class="v">${nf(x.v)}</span>${ic('chev', 18, 'chev')}${barDim(x)}<span class="u">${esc(x.u)}</span></button>`;
-function sportDetail(k) {
-  const all = acts().filter(x => x.dep === k); if (!all.length) return null;
-  const tiles = sportStats(k); const txt = [], warn = [];
-  if (k === 'bici') { const ll = all.filter(x => x.llano).sort((a, b) => b.llano.kmh - a.llano.kmh)[0]; if (ll) { tiles.push([nf(ll.llano.kmh), 'km/h', `mejor llano a ${ll.llano.fc} ppm`]); txt.push(`Mejor llano: ${nf(ll.llano.kmh)} km/h a ${ll.llano.fc} ppm (${fDia(ll.f)}, ${ll.llano.km} km).`); } const b = M.ind.best; if (b) tiles.push([nf(b.sub.wkg, 1), 'W/kg', 'subida estimada ?']); else warn.push('Sin subidas de 10 min o más en 90 días: no puedo estimar tus W/kg.'); }
-  if (k === 'skimo') { const bs = all.filter(x => x.sub && !x.sub.remonte).sort((a, b) => b.sub.vam - a.sub.vam)[0]; const rem = all.filter(x => x.sub && x.sub.remonte); if (bs) txt.push(`Mejor subida: ${bs.sub.desn} m en ${dur(bs.sub.min)} a ${bs.sub.fc} ppm (${esc(bs.lugar)}, ${fDia(bs.f)}): ${bs.sub.vam} m/h.`); if (rem.length) warn.push(`${rem.length} subida${rem.length === 1 ? '' : 's'} descartada${rem.length === 1 ? '' : 's'}: ritmo imposible con ese pulso (remonte).`); const sin = all.filter(x => !x.sub).length; if (sin) warn.push(`${sin} salida${sin === 1 ? '' : 's'} sin detalle todavía.`); const vel = all.filter(x => x.g === 'SPEED' && x.fc && x.fc < 135).length; if (vel) warn.push(`Garmin etiqueta ${vel} salida${vel === 1 ? '' : 's'} suaves como "velocidad"; aquí cuentan como fondo por su pulso.`); }
-  if (k === 'correr') { if (M.perfil.vo2) tiles.push([nf(M.perfil.vo2), 'VO2máx', 'Garmin']); const h = M.evo.filter(e => e.hill).slice(-1)[0]; if (h) tiles.push([h.hill, 'Hill Score', fDia(h.f)]); }
-  if (k === 'raqueta') { const fc = all.filter(x => x.fc); if (fc.length) tiles.push([Math.round(fc.reduce((s, x) => s + x.fc, 0) / fc.length), 'ppm', 'pulso medio']); txt.push('Juego: suma variedad. No lo cuento como intensidad salvo que el pulso lo diga.'); }
-  if (k === 'fuerza') { const sem = M.weeks.filter(([, v]) => v.fuerza).length; if (sem < M.weeks.length / 2) warn.push(`Solo ${sem} de ${M.weeks.length} semanas con fuerza. Lo recomendado son 2 sesiones por semana.`); }
-  if (k === 'montana') txt.push('Volumen suave: suma fondo sin cansarte.');
-  return { tiles: tiles.slice(0, 4), txt: txt.join(' '), warn: warn.join(' '), dims: k === 'bici' ? ['subida'] : [] };
-}
-function tabForma() {
-  const d = dims(), [tipo, desc] = tipoAtleta(); const sel = S.fSport.length ? S.fSport : S.sports;
-  const secs = sel.map(k => [k, sportDetail(k)]).filter(([, x]) => x).map(([k, x]) => {
-    return `<section class="b-full stack" style="gap:10px"><div class="sporth"><span class="dotb" style="background:${scol(k)}">${ic(SPORTS[k].ic, 20)}</span><h2>${SPORTS[k].n}</h2></div>
-      <div class="tiles">${x.tiles.map(([v, u, s]) => `<div class="tile" style="cursor:default"><span class="v">${v} <small>${u}</small></span><span class="s">${s}</span></div>`).join('')}</div>
-      ${(x.dims || []).map(k2 => `<div class="card" style="padding-top:4px;padding-bottom:4px"><div class="dims">${dimRow(k2, d[k2])}</div></div>`).join('')}
-      <p class="small muted" style="padding:0 4px">${esc(x.txt)}</p>${x.warn ? `<p class="small" style="padding:0 4px;color:var(--warn)">${ic('info', 14)} ${esc(x.warn)}</p>` : ''}</section>`; }).join('');
-  const comunes = ['motor', 'fondo', 'volumen', 'equilibrio'];
-  return { title: 'Forma', html: head('Forma', 'Parte común y detalle de cada deporte') + `<div class="content">
-    ${fchips('fSport', S.sports, S.fSport, 'Todos mis deportes')}
-    <div class="bento">
-      ${cardPeso()}
-      <div class="card hero b-side"><div class="row" style="align-items:flex-start"><span class="card-h grow">Forma general</span><button class="iconbtn" type="button" aria-label="Compartir tu ficha" data-a="push" data-v="compartir">${ic('share')}</button></div>
-        <div class="bignum"><span class="v">${forma() == null ? '—' : nf(forma())}</span><span class="of">/10</span></div><span class="kind">${esc(tipo)}</span><p class="small muted">${esc(desc)}</p>
-        <button class="btn tonal" type="button" data-a="push" data-v="evo">${ic('chart', 18)} Ver evolución</button></div>
-      <div class="b-hero stack" style="gap:8px"><div class="section-h" style="padding-top:0"><h2>Común a todos</h2></div><div class="card" style="padding-top:4px;padding-bottom:4px"><div class="dims">${comunes.map(k => dimRow(k, d[k])).join('')}</div></div>
-        <p class="xs" style="padding:0 4px">Marcas: grupeta fuerte (7) y profesional (10). Barra rayada: estimación.</p></div>
-      ${secs}
-      <div class="b-half">${cardObjetivo(true)}</div>
-      <div class="card b-half"><div class="card-h"><span class="grow">Tests para afinar</span></div><div class="list" style="background:transparent;margin:0 -16px">
-        <button type="button" class="li" data-a="push" data-v="test">${ic('mountain')}<span class="main"><b>Test de subida en bici</b><span>${S.testDone ? 'Hecho' : '20 min a tope · quita el "?"'}</span></span>${ic('chev', 18, 'chev')}</button>
-        <button type="button" class="li" data-a="toast" data-v="Iría igual: instrucciones y resultado">${ic('run')}<span class="main"><b>5 km corriendo</b><span>Confirma tu VO2máx</span></span>${ic('chev', 18, 'chev')}</button></div></div>
-    </div></div>` };
-}
-function sheetDim(k) {
-  openSheet({ title: dims()[k].n, size: 'large', id: 'dim', body: () => { const x = dims()[k];
-    if (x.v == null) return `<p><b>Falta dato.</b> ${esc(x.falta || '')}</p><button class="btn fill wide" type="button" data-a="dim-cta" data-v="${x.cta[1]}">${esc(x.cta[0])}</button>`;
-    const hist = x.histPts ? `<div class="stack" style="gap:4px"><b class="small">${esc(x.histLbl)} ${M.fuente === 'vivo' ? '<span class="live">Real</span>' : ''}</b>${chartLine(x.histPts, { fmt: v => nf(v, k === 'motor' ? 1 : 0), bands: k === 'fondo' ? [[5800, 'Entrenado'], [6600, 'Muy entr.']] : [] })}</div>` : '';
-    return `<div class="row"><div class="bignum"><span class="v" style="font-size:64px">${nf(x.v)}</span><span class="of">/10</span></div><div class="grow stack" style="gap:6px;align-items:flex-start"><span class="conf ${x.conf}">Confianza ${x.conf}</span><span class="small muted">${esc(x.u)}</span></div></div>
-      <div class="stack"><b>Por qué</b><p class="muted">${esc(x.por)}</p></div>${hist}
-      <div class="list"><div class="li" style="cursor:default"><span class="main"><b>Grupeta fuerte</b><span>nota 7</span></span><span class="num" style="font-size:20px">${esc(x.ref[0])}</span></div><div class="li" style="cursor:default"><span class="main"><b>Profesional</b><span>nota 10</span></span><span class="num" style="font-size:20px">${esc(x.ref[1])}</span></div></div>
-      <div class="stack"><b>Cómo mejorar</b><p class="muted">${esc(x.mejora)}</p></div>
-      <button class="btn fill wide" type="button" data-a="dim-cta" data-v="${x.cta[1]}">${esc(x.cta[0])}</button>`; } });
-  markFlow('forma');
-}
-
 /* ===== EVOLUCIÓN (datos reales) ===== */
 function scrEvo() {
   const sel = S.fSport.length ? S.fSport : SPORT_ORDER.filter(k => k !== 'otros');
@@ -95,19 +41,6 @@ function scrObjetivo(scr) {
     <button class="btn fill wide" type="button" data-a="goal-save">Guardar</button>
     <p class="xs">Puedes cambiarlo cuando quieras. El plan y los avisos de cada semana se adaptan solos.</p></div>` };
 }
-/* ===== TEST DE SUBIDA (resumido) ===== */
-function scrTest(scr) {
-  const t = scr.t || (scr.t = { km: '', desn: '', min: '', fc: '' }); const P = M.perfil;
-  const ok = +t.km > 0 && +t.desn > 0 && +t.min > 0; const w = ok ? wkgFisica(+t.km, +t.desn, +t.min, P.peso) : null; const ftp = w ? w * 0.95 : null;
-  const inp = (k, l, u, st) => `<label class="stack" for="t-${k}" style="gap:4px"><span class="small muted">${l}</span><span class="row"><input id="t-${k}" class="search" inputmode="decimal" value="${esc(t[k])}" data-a="test-in" data-k="${k}" placeholder="${st}"><span class="small">${u}</span></span></label>`;
-  return { title: 'Test de subida', html: head('Test de subida', 'Bici · 20 minutos a tope') + `<div class="content" style="max-width:640px">
-    <p class="muted">Sube 20 min a tope en una subida constante del 5-7 %. Después pon aquí los datos del tramo (los tienes en Garmin). Con tu peso${P.peso ? ` (${P.peso} kg)` : ''} calculo tus vatios reales.</p>
-    <div class="card">${inp('km', 'Distancia de la subida', 'km', '6,2')}${inp('desn', 'Desnivel', 'm', '380')}${inp('min', 'Tiempo', 'min', '20')}${inp('fc', 'Pulso medio', 'ppm', '172')}</div>
-    ${ok ? `<div class="card"><div class="fields"><div class="field"><span class="l">Umbral</span><span class="v">${nf(ftp, 2)} <small>W/kg</small></span></div><div class="field"><span class="l">Vatios</span><span class="v">${Math.round(ftp * (P.peso || 75))} <small>W</small></span></div><div class="field"><span class="l">Nota subida</span><span class="v">${nf(half(wkgScore(ftp)))}</span></div>${+t.fc ? `<div class="field"><span class="l">Umbral pulso</span><span class="v">${Math.round(+t.fc * 0.95)} <small>ppm</small></span></div>` : ''}</div></div>` : ''}
-    <button class="btn fill wide" type="button" data-a="test-save" ${ok ? '' : 'disabled'}>Guardar resultado</button>
-    <p class="xs">Cálculo por física: gravedad, rodadura y aire, con ${P.peso ? P.peso : 75} kg más 9 kg de bici. Error típico: ±5-10 %.</p></div>` };
-}
-
 /* ===== ACTIVIDAD ===== */
 /* Responde "¿cómo ha ido y cuenta como lo que tocaba?": cifras, plan frente a lo hecho, lo mejor
    de la salida (o los ejercicios si es fuerza), el mapa y los pueblos nuevos. */
@@ -138,17 +71,6 @@ function scrActividad(scr) {
     ${mejor ? `<section class="card" aria-labelledby="act-mejor"><h2 class="card-t" id="act-mejor" style="margin:0">Lo mejor de la salida</h2><ul class="act-mejor">${mejor}</ul></section>` : ''}
     ${(DSET.rutas || {})[a.id] ? `<div class="trackmap">${trackSvg(a.id)}</div>` : ''}
     ${a.nuevos.length ? `<section class="card" aria-labelledby="act-pue"><h2 class="card-t" id="act-pue" style="margin:0">${a.nuevos.length} pueblo${a.nuevos.length === 1 ? '' : 's'} nuevo${a.nuevos.length === 1 ? '' : 's'}</h2><div class="towns">${a.nuevos.map(n => `<span class="town new">${esc(n)}</span>`).join('')}</div></section>` : ''}</div>` };
-}
-/* ===== COMPARTIR ===== */
-function scrCompartir() {
-  const d = dims(), [tipo] = tipoAtleta(), sh = S.share;
-  const bars = ['motor', 'fondo', 'volumen', 'equilibrio'].map(k => `<div class="mb"><div class="l"><span>${d[k].n.split(' ')[0]}</span><b>${nf(d[k].v)}</b></div><div class="t"><i style="width:${(d[k].v - 1) / 9 * 100}%"></i></div></div>`).join('');
-  const row = (k, t, s) => `<label class="toggle-row" for="sh-${k}"><span class="main"><b>${t}</b>${s ? `<br><span class="xs">${s}</span>` : ''}</span><input class="switch" type="checkbox" id="sh-${k}" data-a="share-t" data-v="${k}" ${sh[k] ? 'checked' : ''}></label>`;
-  return { title: 'Compartir', html: head('Compartir ficha', 'Así la verán tus amigos') + `<div class="content" style="max-width:640px"><div class="share-card" role="img" aria-label="Vista previa">
-    <div class="row"><span style="font:700 15px var(--font-ui);opacity:.8">myCoach</span><span class="grow"></span><span class="small" style="opacity:.8">${MC[dte(HOY).getMonth()]} ${dte(HOY).getFullYear()}</span></div>${sh.nombre && S.nombre ? `<b style="font-size:22px">${esc(S.nombre)}</b>` : ''}
-    <div class="bignum"><span class="v" style="font-size:72px">${forma() == null ? '—' : nf(forma())}</span><span class="of" style="color:rgba(255,255,255,.7)">/10</span></div>${sh.tipo ? `<b style="font-size:19px;line-height:1.2">${esc(tipo)}</b>` : ''}${sh.notas ? `<div class="minibars">${bars}</div>` : ''}<span class="grow"></span>${sh.pueblos ? `<span class="small">${ic('pueblos', 16)} ${Object.keys(M.towns).length} pueblos recorridos</span>` : ''}</div>
-    <div class="list">${row('nombre', 'Tu nombre')}${row('tipo', 'Tu tipo de deportista')}${row('notas', 'Notas')}${row('pueblos', 'Pueblos', 'Solo el número')}</div><p class="xs">Nunca se comparten readiness, sueño, pulso ni recorridos.</p>
-    <button class="btn fill wide" type="button" data-a="do-share">${ic('share', 20)} Compartir</button></div>` };
 }
 /* ===== AJUSTES ===== */
 /* Ajustes, agrupados por lo que viene a hacer el usuario: conectar, su entrenador,

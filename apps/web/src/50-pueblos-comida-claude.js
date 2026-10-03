@@ -38,46 +38,6 @@ function cargaDia(f) {
   if (min >= 60) return { k: 'medio', n: 'Día moderado', c: 1.5, txt: `${dur(min)} de entreno` };
   return { k: 'suave', n: 'Día suave', c: 1, txt: min ? `${dur(min)} suave` : 'descanso' };
 }
-function nutriInsights(rows) {
-  const con = rows.filter(r => r.ms.length); if (!con.length) return [['warn', 'Aún no has registrado comidas esta semana. Con 2-3 al día ya vemos si cuadra con tu entreno.']];
-  const out = []; const bajos = con.filter(r => r.real < r.c.c - .4); const altos = con.filter(r => r.c.k === 'suave' && r.real > r.c.c + .9);
-  for (const r of bajos.slice(0, 2)) out.push(['warn', `El ${fCorta(r.f).toLowerCase()} (${r.c.txt}) comiste poco carbohidrato: ${nf(r.real)} de 4 cuartos, tocaban ${nf(r.c.c)}.`]);
-  for (const r of altos.slice(0, 1)) out.push(['warn', `El ${fCorta(r.f).toLowerCase()} fue un día suave y el carbohidrato llegó a ${nf(r.real)} cuartos: con 1 basta.`]);
-  const tot = con.reduce((a, r) => a + r.ms.length, 0), prot = con.reduce((a, r) => a + r.prot, 0), veg = con.reduce((a, r) => a + r.ms.filter(m => m.v >= 1).length, 0);
-  out.push([prot === tot ? 'good' : 'warn', prot === tot ? `Proteína en las ${tot} comidas registradas.` : `Proteína en ${prot} de ${tot} comidas: intenta un cuarto en cada una.`]);
-  if (veg < tot) out.push(['warn', `Verdura en ${veg} de ${tot} comidas.`]);
-  if (!bajos.length && !altos.length) out.push(['good', 'El carbohidrato ha ido acorde con tu entreno.']);
-  return out;
-}
-/* Qué comer según el plan de los próximos días (cuartos de plato + avituallamiento) */
-function cardComerSemana() {
-  const ds = [0, 1, 2, 3, 4, 5, 6].map(i => addDays(HOY, i)).filter(f => sesion(f) || acts().some(a => a.f === f)).slice(0, 7);
-  if (!ds.length) return `<div class="card"><div class="card-h"><span class="grow">Qué comer los próximos días</span></div><p class="small muted">Planifica tu semana y aquí te digo cuánto carbohidrato, proteína y verdura toca cada día.</p></div>`;
-  return `<div class="card"><div class="card-h"><span class="grow">Qué comer los próximos días</span><span class="small muted">según tu plan</span></div><div class="list">${ds.map(f => { const c = cargaDia(f); const s = sesion(f); const min = s && SPORTS[s.dep]?.cardio ? s.min : 0;
-    return `<div class="li" style="min-height:44px"><span class="main"><b>${cap1(fCorta(f))} · ${esc(c.n.toLowerCase())}</b><span>C ${nf(c.c)} · P 1 · V ${nf(4 - c.c - 1)} cuartos${min >= 120 ? ` · en ruta ${Math.round((min - 60) / 60 * 75)} g de carbohidrato (60-90 g/h desde la 2.ª hora)` : ''}</span></span></div>`; }).join('')}</div></div>`;
-}
-function scrNutri() {
-  const ds = days7(SEM).filter(f => f <= HOY); const hoy = S.meals.filter(m => m.f === HOY); const cg = cargaDia(HOY);
-  const avg = (ms, k) => ms.length ? ms.reduce((a, m) => a + m[k], 0) / ms.length : 0;
-  const rows = ds.map(f => { const ms = S.meals.filter(m => m.f === f); const c = cargaDia(f); return { f, ms, c, real: avg(ms, 'c'), prot: ms.filter(m => m.p >= 1).length }; });
-  const W = 600, H = 150, pl = 34, pb = 22, n = rows.length, X = i => pl + (i + .5) * (W - pl - 8) / n, Y = v => 8 + (H - 8 - pb) * (1 - v / 4);
-  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Cuartos de plato de carbohidrato por día frente a lo recomendado">`;
-  for (const t of [0, 2, 4]) svg += `<line class="g" x1="${pl}" x2="${W - 8}" y1="${Y(t)}" y2="${Y(t)}"/><text class="ax" x="${pl - 6}" y="${Y(t) + 4}" text-anchor="end">${t}/4</text>`;
-  rows.forEach((r, i) => { const bw = 22; if (r.ms.length) svg += `<path d="M${X(i) - bw / 2},${Y(0)}V${Y(r.real) + 4}q0,-4 4,-4h${bw - 8}q4,0 4,4V${Y(0)}z" fill="var(--s-montana)"/>`; svg += `<line x1="${X(i) - 16}" x2="${X(i) + 16}" y1="${Y(r.c.c)}" y2="${Y(r.c.c)}" stroke="var(--label)" stroke-width="2"/><text class="ax" x="${X(i)}" y="${H - 6}" text-anchor="middle">${DL[dte(r.f).getDay()]}</text><rect class="hit" x="${X(i) - 30}" y="8" width="60" height="${H - 30}" data-tip="${esc(`${fCorta(r.f)} · ${r.c.n}: ${r.ms.length ? nf(r.real) + ' de 4 cuartos de carbohidrato' : 'sin registros'} (toca ${nf(r.c.c)})`)}"/>`; });
-  svg += '</svg>';
-  return { title: 'Comida', html: head('Comida', `${labTag()} · sin calorías: cuartos de plato`) + `<div class="content" style="max-width:760px">
-    <div class="card hero"><div class="card-h"><span class="grow">Hoy · ${cg.n.toLowerCase()} (${esc(cg.txt)})</span>${M.fuente === 'demo' ? simTag('Comidas de ejemplo') : ''}</div>
-      <p>En un día así, <b>${cg.c === 2 ? 'la mitad' : cg.c === 1.5 ? 'algo más de un tercio' : 'un cuarto'} de cada plato</b> debería ser carbohidrato, un cuarto proteína y el resto verdura.</p>
-      <div class="plate">${[['Carbohidrato', 'c', cg.c], ['Proteína', 'p', 1], ['Verdura', 'v', 4 - cg.c - 1]].map(([n, k, t]) => { const v = avg(hoy, k); const ok = hoy.length && Math.abs(v - t) <= .5; return `<div class="pp"><span class="v">${hoy.length ? nf(v) : '—'}</span><span class="l">${n}</span><span class="t" style="color:${!hoy.length ? 'var(--label-2)' : ok ? 'var(--good)' : 'var(--warn)'}">toca ${nf(t)}/4</span></div>`; }).join('')}<div class="pp"><span class="v">${hoy.length}</span><span class="l">Comidas</span><span class="t">hoy</span></div></div>
-      ${cg.k === 'duro' ? `<p class="say">Para el fondo largo: 60-90 g de carbohidratos por hora a partir de la segunda hora (una barrita o un gel cada 30-40 min).</p>` : ''}
-      <div class="btns"><button class="btn fill" type="button" data-a="meal-add">${ic('plus', 18)} Añadir comida</button></div></div>
-    <div class="card"><div class="card-h"><span class="grow">Esta semana: carbohidrato por día</span></div>
-      <p class="small">Barra: tu media de cuartos de carbohidrato por plato. Raya: lo que tocaba por tu entreno de ese día.</p><div class="chart">${svg}<div class="tip"></div></div>
-      <ul class="insights">${nutriInsights(rows).map(([k, t]) => `<li class="ins-${k}"><span class="ic">${ic(k === 'good' ? 'check' : 'food', 16)}</span><span>${esc(t)}</span></li>`).join('')}</ul></div>
-    ${cardComerSemana()}
-    <div class="card"><div class="card-h"><span class="grow">Registradas</span></div>${S.meals.slice().reverse().map(m => `<div class="meal"><span class="ph">${m.img ? `<img src="${m.img}" alt="">` : ic('food', 22)}</span><div class="grow stack" style="gap:2px"><b>${esc(m.tipo)} · ${fCorta(m.f)} ${esc(m.h)}</b><span class="small muted">${esc(m.txt)} · C ${m.c} · P ${m.p} · V ${m.v}</span></div>${m.sim ? simTag() : m.ia ? aiTag('Claude') : ''}</div>`).join('')}</div>
-    <p class="xs">Por qué cuartos y no calorías: las apps de fotos fallan un 30-40 % en gramos y calorías. Contar porciones es más fiable y más rápido. Referencias: Athlete's Plate (fácil, moderado, duro) y ACSM (carbohidrato según la carga).</p></div>` };
-}
 function sheetMeal() {
   const st = S.mealDraft || (S.mealDraft = { tipo: horaTipo(), c: 2, p: 1, v: 1, txt: '', img: null, ia: false });
   openSheet({ title: 'Añadir comida', size: 'large', id: 'meal', body: () => `
@@ -306,7 +266,7 @@ const ACTIONS = {
   'push-close': el => { closeSheet(); ACTIONS.push(el); },
   toast: el => toast(el.dataset.v),
   fsel: el => { const k = el.dataset.k, v = el.dataset.v; if (!v) S[k] = []; else S[k] = S[k].includes(v) ? S[k].filter(x => x !== v) : [...S[k], v]; save(); render(); markFlow(k === 'pSport' ? 'pueblos' : 'deportes'); const mf = $('#mapfull'); if (mf) { mf.querySelector('.mf-chips').innerHTML = fchips('pSport', ['bici', 'correr', 'montana', 'skimo'], S.pSport); applyMapFilter(mf.querySelector('#mf-view svg')); } },
-  sportsel: el => { S.fSport = [el.dataset.v]; S.tab = 'forma'; S.stack = []; save(); vt(() => render(true)); markFlow('deportes'); },
+  sportsel: el => { S.fSport = [el.dataset.v]; V.prog = el.dataset.v; S.tab = 'progreso'; S.stack = []; save(); vt(() => render(true)); markFlow('deportes'); },
   adapt: el => { const v = el.dataset.v; markFlow('ajustar'); if (v === 'mantener') { S.adapt = 'mantener'; save(); render(); toast('Mantienes el plan: por debajo de 150 ppm.', { undo: () => { S.adapt = null; save(); render(); } }); return; }
     commit(v === 'suave' ? 'Hoy suave; el largo, mañana' : 'Hoy descansas; el largo, mañana', () => { const largo = { ...S.plan[HOY] }; S.plan[HOY] = v === 'suave' ? { dep: 'bici', t: 'rec', d: '1 h muy suave, <130 ppm', min: 60 } : { dep: 'bici', t: 'descanso', d: 'Descanso', min: 0 }; S.plan[addDays(HOY, 1)] = largo; S.adapt = v; }); },
   otro: el => { closeSheet(true); sheetOtro(el.dataset.v || HOY); },
@@ -315,7 +275,6 @@ const ACTIONS = {
   'seen-sim': () => { S.seenSim = true; save(); go('pueblos'); },
   week: el => { S.week = el.dataset.v; save(); render(); markFlow(el.dataset.v < SEM ? 'revision' : el.dataset.v === PROX ? 'planificar' : 'semana'); },
   day: el => sheetDia(el.dataset.v), move: el => sheetMover(el.dataset.v), 'move-to': el => doMove(el.dataset.v, el.dataset.to),
-  'mark-done': el => { closeSheet(); toast('Marcada como hecha (sin datos del reloj)'); },
   'draft-dep': el => { const d = S.nextDraft; const v = el.dataset.v; d.deps = d.deps.includes(v) ? d.deps.filter(x => x !== v) : [...d.deps, v]; save(); render(); },
   'gen-week': () => { const d = S.nextDraft; if (!d.deps.some(k => SPORTS[k].cardio)) { ask({ title: 'Elige un deporte de resistencia', text: 'Bici, correr, skimo o montaña.', actions: [{ label: 'Vale', kind: 'fill' }] }); return; }
     const w = semSel(); const p = generarSemana(d.deps, d.h, S.goal.modo, w); if (w === SEM) for (const f of Object.keys(p)) if (f < HOY) delete p[f];
@@ -327,13 +286,10 @@ const ACTIONS = {
   'cal-quitar': async () => { try { await PLATFORM.calendario.quitar(); } catch (e) { } CAL = null; S.calOk = false; save(); render(); toast('Calendario quitado'); },
   replan: () => { commit('Plan de la próxima semana borrado', () => { S.next = null; }); },
   'goal-edit': () => push({ s: 'objetivo' }),
-  claude: el => { closeSheet(true); openClaude(el.dataset.v); },
+  // Sin Claude en esta vista no hay chat de imitación: se prepara el encargo para tu Claude.
+  claude: el => { closeSheet(true); if (claudeReal()) openClaude(el.dataset.v); else enClaude(el.dataset.v || ENCARGOS[0][1]); },
   'claude-ext': () => enClaude(PROMPT_EXT()), 'ai-on': () => { S.ai = 'claude'; save(); closeSheet(); openClaude(); },
-  dim: el => sheetDim(el.dataset.v),
-  'dim-cta': el => { const v = el.dataset.v; closeSheet(); if (v === 'test') push({ s: 'test', step: 0 }); else if (v === 'plan') go('plan'); else if (v === 'evo') push({ s: 'evo' }); },
   'evo-range': el => { S.evoRange = +el.dataset.v; save(); render(); },
-  'test-next': () => { const s = S.stack[S.stack.length - 1]; s.step = 1; save(); vt(() => render(true)); },
-  'test-save': () => { const t = S.stack[S.stack.length - 1].t; const w = wkgFisica(+t.km, +t.desn, +t.min, M.perfil.peso); if (!w) return; const ftp = w * 0.95; const old = dims().subida.v; S.testRes = { v: half(wkgScore(ftp)), wkg: ftp, km: +t.km, desn: +t.desn, min: +t.min, fc: +t.fc || null, f: HOY }; S.stack = []; S.tab = 'forma'; save(); vt(() => render(true)); toast(`Subida: ${old == null ? 'sin nota' : nf(old)} → ${nf(S.testRes.v)}`); },
   'goal-modo': el => { const s = S.stack[S.stack.length - 1]; s.g = { modo: el.dataset.v }; save(); render(); },
   'goal-set': el => { const s = S.stack[S.stack.length - 1]; s.g[el.dataset.k] = el.dataset.v; save(); render(); },
   'goal-pro-on': () => { const s = S.stack[S.stack.length - 1]; s.pro = true; save(); render(); },
@@ -348,7 +304,6 @@ const ACTIONS = {
   'town-all': () => { S.townAll = true; render(); },
   'fix-type': el => { const id = el.dataset.v; openSheet({ title: 'Cómo cuenta', size: 'auto', body: () => `<div class="opts">${['rec', 'fondo', 'tempo', 'int'].map(k => `<button type="button" class="radio" style="border:0;font:inherit;color:inherit;text-align:left" data-a="fix-to" data-v="${id}" data-k="${k}">${chip(k)}</button>`).join('')}</div>` }); },
   'fix-to': el => { closeSheet(); S.overrides[el.dataset.v] = el.dataset.k; save(); render(); toast(`Ahora cuenta como ${TIPOS[el.dataset.k].n.toLowerCase()}`); },
-  'do-share': () => { toast('En la app real se abre el menú de compartir con la imagen'); markFlow('compartir'); },
   'meal-add': () => { S.mealDraft = null; sheetMeal(); markFlow('comida'); },
   'meal-set': el => { S.mealDraft[el.dataset.k] = el.dataset.v; fillSheet(); },
   'meal-step': el => { const st = S.mealDraft, k = el.dataset.k; st[k] = Math.max(0, Math.min(4, st[k] + +el.dataset.v)); fillSheet(); },
@@ -358,7 +313,7 @@ const ACTIONS = {
   'sheet-detent': () => { if (!sheetState) return; const sh = sheetState.sh; if (sh.classList.contains('large')) { sh.classList.remove('large'); sh.classList.add('medium'); } else { sh.classList.remove('medium', 'auto'); sh.classList.add('large'); } },
   'chat-send': () => { const t = $('#chat-in'); claudeSend(t ? t.value : ''); }, 'chat-sug': el => claudeSend(el.dataset.v), 'chat-stop': () => CHAT.ctl && CHAT.ctl.abort(),
   'prop-apply': () => aplicarPropuesta(), 'prop-discard': () => { CHAT.pending = null; fillSheet(); },
-  'ob-next': () => { S.obStep++; save(); vt(() => renderOnboarding()); },
+  'ob-next': () => { S.obStep = S.obStep === 2 ? 4 : S.obStep + 1; save(); vt(() => renderOnboarding()); },
   'ob-conn': async el => { el.disabled = true; el.textContent = 'Conectando…'; if (LIVE === undefined) await capListo; if (!LIVE && window.PLATFORM && PLATFORM.login) { PLATFORM.login(); return; } if (LIVE) { S.modo = 'vivo'; sync(false); } else { S.modo = 'demo'; cargarModo(); } S.obConn = true; save(); renderOnboarding(); },
   'ob-sport': el => { const v = el.dataset.v; S.sports = S.sports.includes(v) ? S.sports.filter(x => x !== v) : [...S.sports, v]; save(); renderOnboarding(); },
   'ob-var': el => { S.variant = el.dataset.v; save(); renderOnboarding(); }, 'ob-ai': el => { S.ai = el.dataset.v; save(); renderOnboarding(); },
@@ -413,21 +368,24 @@ function renderOnboarding() {
   let ob = $('#ob'); if (S.onboarded) { ob && ob.remove(); return; }
   if (!ob) { ob = document.createElement('div'); ob.id = 'ob'; ob.className = 'ob'; app.append(ob); }
   if (COMPROBANDO) { ob.innerHTML = `<span class="card-h">myCoach</span><p class="lead" role="status">${ic('sync', 20, 'spin')} Abriendo tu myCoach…</p>`; return; }
-  const st = S.obStep; const steps = `<div class="steps">${[0, 1, 2, 3, 4, 5].map(i => `<i class="${i <= st ? 'on' : ''}"></i>`).join('')}</div>`; let h = '';
+  const st = S.obStep; const steps = `<div class="steps">${[0, 1, 2, 4].map(i => `<i class="${i <= st ? 'on' : ''}"></i>`).join('')}</div>`; let h = '';
   const horas = horasPorDeporte(); const nA = M.acts.length, desde = nA ? fDia(M.acts[nA - 1].f) : '';
-  if (st === 0) h = `<span class="card-h">myCoach</span><h1>Tu forma, fácil de entender</h1><p class="lead">Lee tu Garmin y te lo cuenta en claro: tu semana, tu forma y qué hacer, en todos tus deportes.</p><span class="spacer"></span><button class="btn fill wide" type="button" data-a="ob-next">Empezar</button>`;
+  if (st === 0) h = `<span class="card-h">myCoach</span><h1>Tu entrenador, con tu Garmin y tu Claude</h1><p class="lead">Qué hacer hoy y por qué, qué comer según entrenas y si mejoras. En bici, correr y skimo, con la fuerza como complemento.</p><span class="spacer"></span><button class="btn fill wide" type="button" data-a="ob-next">Empezar</button>`;
   if (st === 1 && enWeb()) h = obCuentaWeb(steps, nA, desde);
   else if (st === 1) h = `${steps}<h1>Conecta tu Garmin</h1><p class="lead">Leemos actividades, sueño y readiness. No publicamos nada.</p><div class="card">${S.obConn ? `<div class="row">${ic('check', 28)}<div class="grow"><b>Conectado</b><p class="small muted">${nA ? `${nA} actividades desde el ${desde}` : 'Leyendo tu histórico…'}</p></div></div>` : `<button class="btn fill" type="button" data-a="ob-conn">Conectar con Garmin</button>`}</div><span class="spacer"></span><button class="btn fill wide" type="button" data-a="ob-next" ${S.obConn ? '' : 'disabled'}>Seguir</button>`;
   if (st === 2) h = `${steps}<h1>¿Qué deportes analizo?</h1><p class="lead">He encontrado estos en tu Garmin. La app se adapta: parte común y detalle de cada uno.</p><div class="stack" style="gap:8px">${(Object.keys(horas).length ? '' : (syncing ? '<p class="small muted">Leyendo tus actividades de Garmin… aparecerán aquí en unos segundos. Puedes elegir ya o esperar.</p>' : '<p class="small muted">Aún no he leído tus actividades. Elige a mano o sigue y actualiza luego.</p>'))}${ENTRENABLES.map(k => [k, horas[k] || 0]).map(([k, v]) => `<button type="button" class="choice" aria-pressed="${S.sports.includes(k)}" data-a="ob-sport" data-v="${k}"><span class="ico" style="background:${scol(k)};color:#fff">${ic(SPORTS[k].ic)}</span><span><b>${SPORTS[k].n}</b><span>${nf(v)} h desde el ${desde}</span></span></button>`).join('')}</div><button class="btn fill wide" type="button" data-a="ob-next" ${S.sports.length ? '' : 'disabled'}>Seguir</button>`;
   if (st === 3) h = `${steps}<h1>¿Qué quieres ver primero?</h1><div class="stack" style="gap:10px">${[['semana', 'plan', 'Mi semana', 'Plan, % cumplido y qué toca hoy.'], ['forma', 'forma', 'Mi forma', 'Una nota clara y en qué flojeo.'], ['objetivo', 'target', 'Mi objetivo', 'Si voy en camino.']].map(([v, i, t, s]) => `<button type="button" class="choice" aria-pressed="${S.variant === v}" data-a="ob-var" data-v="${v}"><span class="ico">${ic(i)}</span><span><b>${t}</b><span>${s}</span></span></button>`).join('')}</div><span class="spacer"></span><button class="btn fill wide" type="button" data-a="ob-next">Seguir</button>`;
-  if (st === 4) h = `${steps}<h1>¿Usamos IA?</h1><p class="lead">Lo básico funciona sin IA. Con IA, usa tu propia cuenta de Claude: no pagas nada extra a la app.</p><div class="stack" style="gap:10px">${[['claude', 'claude', 'Sí, con mi Claude', 'Chat, fotos de comida y planes afinados. Necesitas Claude con el conector de Garmin.'], ['off', 'check', 'No, solo reglas', 'Plan, balance y avisos funcionan igual.']].map(([v, i, t, s]) => `<button type="button" class="choice" aria-pressed="${S.ai === v}" data-a="ob-ai" data-v="${v}"><span class="ico">${ic(i)}</span><span><b>${t}</b><span>${s}</span></span></button>`).join('')}</div><span class="spacer"></span><button class="btn fill wide" type="button" data-a="ob-next">Seguir</button>`;
+  if (st === 4) h = `${steps}<h1>¿Usamos IA?</h1><p class="lead">Lo básico funciona sin IA. Con IA, usa tu propia cuenta de Claude: no pagas nada extra a la app.</p><div class="stack" style="gap:10px">${[['claude', 'claude', 'Sí, con mi Claude', 'Chat, fotos de comida y planes afinados. Necesitas Claude con el conector de Garmin.'], ['off', 'check', 'No, solo reglas', 'Plan, balance y avisos funcionan igual.']].map(([v, i, t, s]) => `<button type="button" class="choice" aria-pressed="${S.ai === v}" data-a="ob-ai" data-v="${v}"><span class="ico">${ic(i)}</span><span><b>${t}</b><span>${s}</span></span></button>`).join('')}</div><span class="spacer"></span><button class="btn fill wide" type="button" data-a="ob-done">Entrar en myCoach</button>`;
   if (st === 5) h = `${steps}<h1>Preparando tu app</h1><ul class="checks" id="ob-checks">${[`Leyendo ${nA} actividades`, 'Clasificando tus días por pulso', `Analizando ${S.sports.length} deportes`, 'Buscando tus pueblos'].map(t => `<li><span class="ck">${ic('check', 16)}</span>${t}</li>`).join('')}</ul><div class="skel" style="height:120px"></div><span class="spacer"></span><button class="btn fill wide" type="button" data-a="ob-done" disabled id="ob-go">Entrar</button>`;
   ob.innerHTML = `<div class="ob-in">${h}</div>`;
   if (st === 5 && !ob.dataset.anim) { ob.dataset.anim = 1; const lis = $$('#ob-checks li', ob); lis.forEach((li, i) => setTimeout(() => li.classList.add('done'), 400 + i * 450)); setTimeout(() => { const b = $('#ob-go'); if (b) b.disabled = false; }, 400 + lis.length * 450); }
   if (st !== 5) delete ob.dataset.anim;
 }
-const TABSCR = { hoy: tabHoy, plan: tabPlan, forma: tabForma, pueblos: tabPueblos };
-const SCREENS = { entrenos: scrEntrenos, entreno: scrEntreno, actividad: scrActividad, test: scrTest, objetivo: scrObjetivo, compartir: scrCompartir, ajustes: scrAjustes, evo: scrEvo, nutri: scrNutri };
+// Pantallas del rediseño v1 (63-67). Las de la versión anterior que sigan haciendo falta se usan desde ellas.
+const TABSCR = { hoy: () => tabHoyV1(), plan: () => tabPlanV1(), comer: () => tabComerV1(), progreso: () => tabProgresoV1(), pueblos: () => tabPueblosV1() };
+if (!['hoy', 'plan', 'comer', 'progreso', 'pueblos'].includes(S.tab)) S.tab = S.tab === 'forma' ? 'progreso' : 'hoy';
+const SCREENS = { entrenos: scrEntrenos, entreno: scrEntreno, actividad: scrActividad, objetivo: scrObjetivo, ajustes: scrAjustes, evo: scrEvo };
+S.stack = (S.stack || []).filter(x => SCREENS[x.s]);
 
 /* ===== Panel de prototipo ===== */
 const FLOWS = [

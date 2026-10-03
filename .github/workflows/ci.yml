@@ -16,61 +16,57 @@ jobs:
       - run: npm ci
       - run: npm run check
   deploy:
-    # Despliega solo desde main y solo si hay credenciales de Cloudflare configuradas.
+    # Un solo Worker (mycoach): la web, su API y el conector MCP. Despliega desde main.
     needs: check
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
-      - name: Deploy
-        if: env.CLOUDFLARE_API_TOKEN != ''
-        run: npm run deploy
-      # Un despliegue no está bien hasta que la web y la API contestan.
-      - name: Comprobación post-despliegue
-        if: env.CLOUDFLARE_API_TOKEN != ''
+      # Sin las tres credenciales no se despliega: un Worker sin SIGNING_KEY tira el conector.
+      - name: Credenciales
         run: |
-          for intento in 1 2 3 4 5; do
-            me=$(curl -fsS https://mycoach.albertbecervas.workers.dev/api/me || true)
-            html=$(curl -fsS https://mycoach.albertbecervas.workers.dev/ | head -c 200 || true)
-            if echo "$me" | grep -q '"conectado"' && echo "$html" | grep -qi '<!doctype html'; then echo "OK web y API: $me"; break; fi
-            echo "Intento $intento: api=$me"; sleep 6
-            [ "$intento" = 5 ] && exit 1
-          done
-          # Login con Garmin: registra la web en el conector y redirige a su pantalla de autorizar
-          code=$(curl -sS -o /tmp/login.txt -w '%{http_code}' https://mycoach.albertbecervas.workers.dev/api/login)
-          loc=$(curl -sS -o /dev/null -w '%{redirect_url}' https://mycoach.albertbecervas.workers.dev/api/login)
-          echo "login: $code -> $loc"; cat /tmp/login.txt; echo
-          [ "$code" = 302 ] && echo "$loc" | grep -q '^https://garmin.albertbecervas.workers.dev/oauth/authorize?' || exit 1
-          auth=$(curl -sS -o /tmp/auth.html -w '%{http_code}' "$loc")
-          echo "pantalla de autorizar: $auth"; head -c 300 /tmp/auth.html; echo
-          [ "$auth" = 200 ] || exit 1
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "Falta CLOUDFLARE_API_TOKEN en los secretos del repo"; exit 1; }
+          test -n "$SIGNING_KEY" || { echo "Falta SIGNING_KEY en los secretos del repo"; exit 1; }
+      # El secreto viaja con el código: un `wrangler deploy` a secas dejó una vez el conector sin SIGNING_KEY.
+      - name: Deploy
+        run: |
+          npm run build
+          printf '{"SIGNING_KEY":"%s"}' "$SIGNING_KEY" > .secrets.json
+          npx wrangler deploy -c apps/worker/wrangler.toml --secrets-file .secrets.json
+          rm -f .secrets.json
+      # Un despliegue no está bien hasta que la web, la API y el conector contestan.
+      - name: Comprobación post-despliegue
+        run: bash .github/comprobar.sh https://mycoach.albertbecervas.workers.dev
   deploy-pruebas:
+    # A mano ("Run workflow") desde una rama que no sea main: mycoach-pruebas, con los mismos datos.
     needs: check
     if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
     runs-on: ubuntu-latest
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
-      - name: Sin credenciales no hay despliegue
-        run: test -n "$CLOUDFLARE_API_TOKEN" || { echo "Faltan CLOUDFLARE_API_TOKEN y CLOUDFLARE_ACCOUNT_ID en los secretos del repo"; exit 1; }
-      - name: Deploy de pruebas
-        run: npm run build && npx wrangler deploy -c apps/worker/wrangler.toml --env pruebas
-      - name: Comprobación post-despliegue
+      - name: Credenciales
         run: |
-          for intento in 1 2 3 4 5; do
-            me=$(curl -fsS https://mycoach-pruebas.albertbecervas.workers.dev/api/me || true)
-            if echo "$me" | grep -q '"conectado"'; then echo "OK pruebas: $me"; exit 0; fi
-            echo "Intento $intento: $me"; sleep 6
-          done
-          exit 1
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "Falta CLOUDFLARE_API_TOKEN en los secretos del repo"; exit 1; }
+          test -n "$SIGNING_KEY" || { echo "Falta SIGNING_KEY en los secretos del repo"; exit 1; }
+      - name: Deploy de pruebas
+        run: |
+          npm run build
+          printf '{"SIGNING_KEY":"%s"}' "$SIGNING_KEY" > .secrets.json
+          npx wrangler deploy -c apps/worker/wrangler.toml --env pruebas --secrets-file .secrets.json
+          rm -f .secrets.json
+      - name: Comprobación post-despliegue
+        run: bash .github/comprobar.sh https://mycoach-pruebas.albertbecervas.workers.dev

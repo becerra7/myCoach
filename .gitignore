@@ -7,3 +7,4 @@ apps/web/dist/
 .claude/skills/impeccable/scripts/bin/
 # Impeccable: estado local del servidor de pruebas en vivo
 .impeccable/live/
+.secrets.json

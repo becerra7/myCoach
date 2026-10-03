@@ -2,80 +2,7 @@
 /* Semana elegida: la que tocaste si sigue en la lista; si no, la actual */
 const semSel = () => (S.week && semanas().includes(S.week) ? S.week : SEM);
 const semanas = () => { const out = []; let w = addDays(SEM, -7 * 8); while (w <= PROX) { out.push(w); w = addDays(w, 7); } return out; };
-function weekChips() {
-  return `<div class="weeks" role="group" aria-label="Semana" id="weeks">${semanas().map(w => {
-    const r = resumen(w); const lbl = w === SEM ? 'Esta semana' : w === PROX ? 'Próxima' : `${fDia(w)}`;
-    const sub = w === PROX ? (planDe(PROX) ? 'planificada' : 'sin planificar') : r.n ? `${nf(r.min / 60)} h · ${r.n} act.` : 'sin actividad';
-    const tot = Object.values(r.dep).reduce((a, b) => a + b, 0) || 1;
-    return `<button type="button" class="wkc" data-a="week" data-v="${w}" aria-pressed="${semSel() === w}"><b>${lbl}</b><small>${sub}</small><span class="mini">${SPORT_ORDER.filter(k => r.dep[k]).map(k => `<i style="width:${r.dep[k] / tot * 100}%;background:${scol(k)}"></i>`).join('')}</span></button>`;
-  }).join('')}</div>`;
-}
-function saludMix(r, o) {
-  const rows = [
-    ['Cardio', 'heart', r.cardioMin / 60, [o.h[0] * .8, o.h[1]], v => `${nf(v)} h de ${nf(o.h[0] * .8)}-${o.h[1]} h`, 'cardio', 12],
-    ['Fuerza', 'dumbbell', r.fuerza, [o.fuerza, o.fuerza + 1], v => `${v} de ${o.fuerza} sesiones`, 'fuerza', 4],
-    ['Intensidad', 'flame', r.tipos.int, o.int, v => `${v} de ${o.int[0]}-${o.int[1]} días`, 'int', 4],
-    ...(r.juego ? [['Juego', 'racket', r.juego, [0, 2], v => `${v} partido${v === 1 ? '' : 's'}`, 'raqueta', 4]] : []),
-  ];
-  return `<div class="hm">${rows.map(([n, i, v, [lo, hi], f, col, mx]) => {
-    const st = v < lo ? 'lo' : v > hi ? 'hi' : 'ok'; const pc = x => Math.min(100, x / mx * 100);
-    return `<div class="hmr"><span class="n">${ic(i, 18)}${n}</span><span class="v st-${st}">${f(v)} ${st === 'ok' ? '✓' : st === 'lo' ? '· falta' : '· de más'}</span>
-      <span class="tk" aria-hidden="true"><i class="fl" style="width:${pc(v)}%;background:${col === 'int' ? 'var(--int)' : scol(col === 'cardio' ? 'bici' : col)}"></i><i class="band" style="left:${pc(lo)}%;width:${Math.max(2, pc(hi) - pc(lo))}%"></i></span></div>`;
-  }).join('')}</div><p class="xs">El recuadro es lo recomendado para tu objetivo (${esc((MODOS[S.goal.modo] || MODOS.forma).n.toLowerCase())}). Fuerza: 2 días por semana, como recomienda la OMS.</p>`;
-}
-function listaDias(w) {
-  const p = planDe(w);
-  return days7(w).map(f => {
-    const s = p ? sesion(f) : null; const d = dte(f); const as = acts().filter(a => a.f === f);
-    if (!s && !as.length) return `<div class="li" style="cursor:default"><span class="day"><small>${DC[d.getDay()]}</small><b>${d.getDate()}</b></span><span class="main"><span>Sin actividad</span></span></div>`;
-    if (!s) return as.map((a, j) => `<button type="button" class="li" data-a="push" data-v="actividad" data-id="${a.id}"><span class="day">${j ? '' : `<small>${DC[d.getDay()]}</small><b>${d.getDate()}</b>`}</span><span class="main"><b>${sportDot2(a.dep)} ${esc(a.lugar)}</b><span>${a.km && SPORTS[a.dep].cardio ? nf(a.km) + ' km · ' : ''}${dur(a.min)}${a.fc ? ' · ' + a.fc + ' ppm' : ''}</span></span>${SPORTS[a.dep].cardio ? chip(tipoAct(a)) : `<span class="chip k-otros">${SPORTS[a.dep].n}</span>`}</button>`).join('');
-    let st = '';
-    if (s.a) st = SPORTS[s.dep]?.cardio && tipoAct(s.a) !== s.t && !S.overrides[s.a.id] ? `<span class="st dev">Plan: ${TIPOS[s.t].n.toLowerCase()}</span>` : `<span class="st done">${ic('check', 14)} Hecho</span>`;
-    else if (f === HOY) st = '<span class="st hoy">Hoy</span>'; else if (f < HOY && s.t !== 'descanso') st = '<span class="st" style="color:var(--bad)">No hecho</span>'; else if (w === PROX) st = '<span class="st plan">Planeado</span>';
-    return `<button type="button" class="li ${f === HOY ? 'today' : ''}" data-a="day" data-v="${f}"><span class="day"><small>${DC[d.getDay()]}</small><b>${d.getDate()}</b></span>
-      <span class="main"><b>${s.t === 'descanso' ? '' : sportDot2(s.dep) + ' '}${esc(s.a ? `${s.a.lugar}${s.a.km && SPORTS[s.a.dep].cardio ? ` · ${nf(s.a.km)} km` : ''}` : s.d)}</b><span>${s.a ? `${dur(s.a.min)}${s.a.fc ? ` · ${s.a.fc} ppm` : ''}` : `${s.h ? s.h + ' · ' : ''}${s.ruta ? `Ruta: ${esc(s.ruta)}` : s.min ? dur(s.min) : ''}${f >= HOY && resumenAgenda(f) ? ` · ${resumenAgenda(f)}` : ''}`}</span></span>
-      <span class="stack" style="align-items:flex-end;gap:4px">${s.dep === 'fuerza' || s.dep === 'raqueta' ? `<span class="chip k-otros">${SPORTS[s.dep].n}</span>` : chip(tipoSes(s))}${st}</span></button>`;
-  }).join('');
-}
 const sportDot2 = k => `<i class="dot" style="background:${scol(k)};vertical-align:1px"></i>`;
-function tabPlan() {
-  const w = semSel(); const r = resumen(w), o = objetivos();
-  let body = '';
-  if ((w === PROX || w === SEM) && !planDe(w)) body = planificador(w) + (w === SEM ? `<div class="list split" style="margin-top:16px">${listaDias(SEM)}</div>` : '');
-  else {
-    const ins = insightsSemana(w);
-    const cabecera = w === SEM && !r.plan ? `<div class="row"><div class="cring" style="--p:0"><span><b>${r.n}</b><small>hechas</small></span></div><div class="grow stack" style="gap:2px"><b style="font-size:17px">Sin plan esta semana</b><span class="small muted">${nf(r.min / 60)} h hechas · planifica la próxima con el botón "Próxima"</span></div></div>`
-      : w === SEM ? `<div class="row"><div class="cring" style="--p:${Math.round(r.hechas / r.plan * 100)}"><span><b>${r.hechas}/${r.plan}</b><small>hechas</small></span></div><div class="grow stack" style="gap:2px"><b style="font-size:17px">${Math.round(r.hechas / r.plan * 100)} % cumplido</b><span class="small muted">${nf(r.min / 60)} h hechas de ${nf(Object.values(planDe(SEM) || {}).reduce((a, s) => a + s.min, 0) / 60)} h planeadas</span></div></div>`
-      : w === PROX ? `<div class="row"><div class="grow stack" style="gap:2px"><b style="font-size:17px">Semana planificada</b><span class="small muted">${nf(Object.values(planDe(PROX) || {}).reduce((a, s) => a + s.min, 0) / 60)} h · ${Object.values(planDe(PROX) || {}).filter(s => s.t !== 'descanso').length} sesiones</span></div><button class="btn plain" type="button" data-a="replan">Rehacer</button></div>`
-      : `<div class="fields"><div class="field"><span class="l">Horas</span><span class="v">${nf(r.min / 60)}</span></div><div class="field"><span class="l">Actividades</span><span class="v">${r.n}</span></div><div class="field"><span class="l">Días activos</span><span class="v">${r.dias.size}</span></div><div class="field"><span class="l">Plan</span><span class="v" style="font-size:16px">sin plan</span></div></div>`;
-    const rp = w === PROX ? resumenPlan(planDe(PROX)) : r;
-    // Plan responde "¿qué toca esta semana y cómo voy?": una línea de resumen, los días (cada uno se
-    // abre con sus ejercicios o pasos y "Enviar al reloj") y lo que necesitas por tipo. El análisis, plegado.
-    const planeadas = Object.values(planDe(w) || {}).reduce((a, x) => a + (x.min || 0), 0) / 60;
-    const linea = w === SEM && r.plan ? `<b>${r.hechas} de ${r.plan}</b> sesiones hechas · ${nf(r.min / 60)} de ${nf(planeadas)} h`
-      : w === SEM ? `<b>Sin plan</b> · ${nf(r.min / 60)} h hechas`
-      : w === PROX ? `<b>${Object.values(planDe(PROX) || {}).filter(x => x.t !== 'descanso').length} sesiones</b> · ${nf(planeadas)} h planeadas`
-      : `<b>${nf(r.min / 60)} h</b> · ${r.n} actividad${r.n === 1 ? '' : 'es'} · ${r.dias.size} días activos${planDe(w) ? ` · ${r.hechas} de ${r.plan} del plan` : ''}`;
-    body = `<div class="bento plan-v">
-      <div class="b-hero stack" style="gap:12px">
-        <div class="plan-res"><p>${linea}</p>${w === PROX ? '<button class="btn text" type="button" data-a="replan">Rehacer</button>' : ''}</div>
-        <div class="list split">${listaDias(w)}</div>
-        ${w !== PROX && w !== SEM ? '' : `<div class="list"><button type="button" class="li" data-a="push" data-v="entrenos">${ic('dumbbell')}<span class="main"><b>Tus entrenos</b><span>Fuerza, bici y correr: velos, ajústalos y mándalos al reloj</span></span>${ic('chev', 18, 'chev')}</button></div>`}
-      </div>
-      <div class="b-side stack" style="gap:12px">
-        <section class="card" aria-labelledby="nec-t"><h2 class="card-t" id="nec-t">${w === PROX ? 'Lo que llevas planeado' : 'Lo que necesitas esta semana'}</h2>${saludMix(rp, o)}</section>
-        ${w !== PROX ? `<details class="card plan-ins"><summary><span class="grow">Lo que dice tu semana</span><span class="small muted">${ins.length}</span></summary><ul class="insights">${ins.map(([k, i, t]) => `<li class="ins-${k}"><span class="ic">${ic(i, 16)}</span><span>${esc(t)}</span></li>`).join('')}</ul></details>`
-        : `<div class="btns"><button class="btn tonal" type="button" data-a="claude" data-v="Revisa mi semana que viene y afínala">${ic('claude', 18)} Afinarla con Claude</button></div>`}
-      </div></div>`;
-  }
-  const sub = w === SEM ? `${rangoSem(SEM)} · en curso` : w === PROX ? `${rangoSem(PROX)} · planificar` : `Semana del ${fDia(w)} · revisión`;
-  return { title: 'Plan', html: head('Plan', sub) + `<div class="content">${weekChips()}${body}</div>` };
-}
-function resumenPlan(p) {
-  const r = { min: 0, n: 0, dep: {}, tipos: { rec: 0, fondo: 0, tempo: 0, int: 0 }, fuerza: 0, juego: 0, cardioMin: 0, dias: new Set() };
-  for (const [f, s] of Object.entries(p || {})) { if (s.t === 'descanso') continue; r.n++; r.min += s.min; r.dep[s.dep] = (r.dep[s.dep] || 0) + s.min; if (s.t in r.tipos) r.tipos[s.t]++; if (s.dep === 'fuerza') r.fuerza++; if (s.dep === 'raqueta') r.juego++; if (SPORTS[s.dep].cardio) r.cardioMin += s.min; }
-  return r;
-}
 function planificador(w = PROX) {
   const opts = ['bici', 'correr', 'skimo', 'montana', 'raqueta', 'fuerza'];
   // Por defecto: tus deportes y tus horas habituales (media del último mes)
@@ -114,7 +41,7 @@ function sheetDia(f) {
       ${pasado ? `<p class="small" style="color:var(--bad)">${ic('info', 16)} No consta en Garmin. Si la hiciste sin reloj, márcala como hecha.</p>` : ''}
       ${cuerpo}
       <div class="list">
-        ${pasado ? `<button class="li" type="button" data-a="mark-done" data-v="${f}">${ic('check')}<span class="main"><b>Marcar como hecha</b></span></button>` : `<button class="li" type="button" data-a="move" data-v="${f}">${ic('move')}<span class="main"><b>Mover a otro día</b></span>${ic('chev', 18, 'chev')}</button>`}
+        ${pasado ? '' : `<button class="li" type="button" data-a="move" data-v="${f}">${ic('move')}<span class="main"><b>Mover a otro día</b></span>${ic('chev', 18, 'chev')}</button>`}
         <button class="li" type="button" data-a="otro" data-v="${f}">${ic('edit')}<span class="main"><b>Cambiar por otra cosa</b></span>${ic('chev', 18, 'chev')}</button>
         ${pasado ? '' : `<button class="li" type="button" data-a="ent-elegir" data-v="${f}">${ic('dumbbell')}<span class="main"><b>${s.dep === 'fuerza' ? 'Cambiar el entreno de fuerza' : 'Poner un entreno de fuerza'}</b></span>${ic('chev', 18, 'chev')}</button>`}
       </div>`;

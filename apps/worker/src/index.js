@@ -33,6 +33,8 @@ export const TOOLS = new Set([
   'fuerza_entrenos', 'fuerza_entreno_guardar', 'fuerza_ejercicios_garmin',
   // Entrenos de bici y correr para el reloj.
   'cardio_entrenos', 'cardio_enviar_garmin', 'peso_historico',
+  // Solo lectura: tus rutas guardadas en Garmin (Plan) y las comidas que registra tu Claude (Comer).
+  'garmin_courses', 'comidas',
 ]);
 
 const json = (data, status = 200, headers = {}) =>
@@ -59,9 +61,16 @@ async function leerIcs(cal) {
   } catch { return null; }
 }
 
+/* El registro de la web como cliente del conector va firmado con SIGNING_KEY: si la clave cambia,
+   el guardado ya no vale. La clave de la caché lleva una huella de la clave para que se renueve solo. */
+async function huellaClave(env) {
+  const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${env.SIGNING_KEY || ''}|cliente`));
+  return [...new Uint8Array(d)].slice(0, 6).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 async function cliente(env, origin) {
   const redirect = `${origin}/api/callback`;
-  const key = `mc:cliente:${redirect}`;
+  const key = `mc:cliente:${await huellaClave(env)}:${redirect}`;
   const cached = await env.SESIONES.get(key, 'json');
   if (cached) return cached;
   const r = await garmin(env, '/oauth/register', {

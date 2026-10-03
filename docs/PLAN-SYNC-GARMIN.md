@@ -8,7 +8,7 @@ Objetivo: que un entreno exista una sola vez, lo crees donde lo crees (Garmin Co
 
 ## Hecho (2 oct 2026)
 
-- **Pareja estable** (`enviarConPareja` en `garmin-mcp/worker.js`): reenviar un entreno **actualiza el mismo** en Garmin (`PUT /workout-service/workout/{id}`), sin borrarlo y crear otro. Si Garmin lo rechaza o ya no lo tiene, se crea uno nuevo, se borra el viejo y se apunta el id nuevo.
+- **Pareja estable** (`enviarConPareja` en `apps/conector/worker.js`): reenviar un entreno **actualiza el mismo** en Garmin (`PUT /workout-service/workout/{id}`), sin borrarlo y crear otro. Si Garmin lo rechaza o ya no lo tiene, se crea uno nuevo, se borra el viejo y se apunta el id nuevo.
 - **Un programado por día**: `garmin.programados` guarda las fechas ya programadas de ese entreno; reenviar para la misma fecha no lo apila.
 - **Nombre en Garmin sin prefijo** "myCoach · ": la pareja ya evita duplicados. Ojo: los que se mandaron antes del 2 oct se llaman "myCoach · …"; el importador debe tratarlos como nuestros.
 - Pareja guardada: `garmin: { workout_id, fecha, enviado, programados[] }`.
@@ -45,7 +45,7 @@ Objetivo: que un entreno exista una sola vez, lo crees donde lo crees (Garmin Co
    - En "Tus entrenos": origen ("de Garmin" o "de myCoach") y estado ("En el reloj", "Cambiado en Garmin", "Ya no está en tu reloj").
    - Hoja para elegir cuando cambió en los dos sitios.
    - Borrar en myCoach pregunta si también se quita de Garmin.
-4. **Pruebas** (`garmin-mcp/test.mjs`, con Garmin simulado)
+4. **Pruebas** (`apps/conector/test.mjs`, con Garmin simulado)
    - Importar dos veces no duplica.
    - Importar después de enviar no duplica, también con los antiguos "myCoach · …".
    - Conflicto en los dos sitios.

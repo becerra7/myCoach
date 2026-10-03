@@ -5,17 +5,17 @@ Diagramas C4 (contexto, contenedores, componentes y código): [`docs/ARQUITECTUR
 ## Piezas
 
 ```
-Navegador (web / PWA / luego app)          Cloudflare
-┌───────────────────────────┐   /api/*    ┌──────────────────────┐  OAuth 2.1 + MCP  ┌─────────────────────┐
-│ apps/web  (un solo HTML)  │ ──────────► │ apps/worker          │ ────────────────► │ garmin-mcp (Worker) │ ─► Garmin Connect
-│  módulos 00..60           │             │  login PKCE, sesión, │                   │  garmin_* + app_*   │
-│  platform/web.js          │ ◄────────── │  proxy de herramientas│                   │  KV por usuario     │
-└───────────────────────────┘  estáticos  └──────────────────────┘                   └─────────▲───────────┘
-                                                                                             │ mismo conector
-                                                                              Tu Claude (claude.ai / app) ─ chat
+Navegador (web / PWA)                        Cloudflare: un solo Worker "mycoach" (apps/worker/src/unico.js)
+┌───────────────────────────┐   /api/*    ┌──────────────────────────────────────────────────────────┐
+│ apps/web  (un solo HTML)  │ ──────────► │ web: estáticos + API (apps/worker/src/index.js)          │
+│  módulos 00..67           │ ◄────────── │        │ en proceso                                       │
+│  platform/web.js          │             │        ▼                                                  │ ─► Garmin Connect
+└───────────────────────────┘             │ conector MCP (apps/conector/worker.js): /mcp, /oauth/*,  │
+                                          │   coach_*, garmin_*, app_*; KV por usuario y D1 de logs   │
+Tu Claude (claude.ai / app) ── /mcp ────► └──────────────────────────────────────────────────────────┘
 ```
 
-- **Una sola fuente de datos**: el Worker de Garmin. Guarda los tokens de Garmin, expone las lecturas (`garmin_*`) y el estado de la app (`app_leer` / `app_guardar`: plan, comidas, objetivo, datos procesados). La web y tu Claude leen y escriben lo mismo.
+- **Una sola fuente de datos**: el conector, dentro del mismo Worker que la web. Guarda los tokens de Garmin, expone las lecturas (`garmin_*`) y el estado de la app (`app_leer` / `app_guardar`: plan, comidas, objetivo, datos procesados). La web y tu Claude leen y escriben lo mismo.
 - **La web es un cliente OAuth más** del conector (igual que Claude). No ve contraseñas de Garmin; la sesión es una cookie HttpOnly que apunta a los tokens en KV.
 - **Misma app en dos sitios**: el código está escrito contra la interfaz de capacidades del artifact de Claude (`window.claude.use('mcp' | 'db' | 'sample')`). En Claude la da el runtime; en la web la da `platform/web.js`. El build decide cuál incluir (`--target web | claude`).
 

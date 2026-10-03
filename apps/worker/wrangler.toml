@@ -1,44 +1,56 @@
+# myCoach: un solo Worker con la web, su API y el conector MCP de Garmin.
+# Tu Claude se conecta a https://mycoach.albertbecervas.workers.dev/mcp
 name = "mycoach"
-main = "src/index.js"
+main = "src/unico.js"
 compatibility_date = "2026-09-01"
 
-# La web (un solo HTML) se sirve como estáticos; /api/* pasa por el Worker.
+# La web (un solo HTML) se sirve como estáticos. El Worker va primero en todo:
+# decide si la petición es del conector, de la API o un estático.
 [assets]
 directory = "../web/dist"
 binding = "ASSETS"
-run_worker_first = ["/api/*", "/mcp-app"]
+run_worker_first = true
 
-[vars]
-# URL del Worker del conector de Garmin (repo garmin-mcp). Sin barra final.
-GARMIN_URL = "https://garmin.albertbecervas.workers.dev"
+# Descarga diaria de Garmin para el panel de progreso. De madrugada, cuando
+# el sueño y la VFC de la noche ya están puestos.
+[triggers]
+crons = ["30 5 * * *"]
 
-# Worker a Worker sin pasar por internet (por URL pública, Cloudflare devuelve 404).
-[[services]]
-binding = "GARMIN_SVC"
-service = "garmin"
+# Un solo KV con dos nombres: GARMIN (el conector: usuarios, tokens de Garmin, datos de la app)
+# y SESIONES (las sesiones de la web, con el prefijo "mc:").
+[[kv_namespaces]]
+binding = "GARMIN"
+id = "7711af0372714afd942bf460cff02518"
 
-# Sesiones de la web (id aleatorio en cookie → tokens OAuth del conector).
-# De momento comparte el KV del conector de Garmin, con todas las claves bajo
-# el prefijo "mc:" para no pisar nada. Si se separa: `wrangler kv namespace
-# create SESIONES` y cambiar aquí el id.
 [[kv_namespaces]]
 binding = "SESIONES"
 id = "7711af0372714afd942bf460cff02518"
 
-# Web de pruebas (mycoach-pruebas): el código de una rama contra el conector
-# de pruebas (garmin-pruebas), sin tocar la web ni el conector de producción.
-# La despliega el CI a mano ("Run workflow") desde cualquier rama que no sea
-# main. Hay que desplegar antes garmin-pruebas: el service binding lo exige.
+[[d1_databases]]
+binding = "LOGS"
+database_name = "garmin-diag"
+database_id = "32c6dc43-3fb2-469e-85e8-6f503ea8a925"
+
+# SIGNING_KEY (firma los tokens OAuth y cifra la clave de Intervals.icu) no se declara aquí:
+# se sube en cada despliegue con --secrets-file desde los secretos del repo.
+
+# Pruebas (mycoach-pruebas): el código de una rama en otra URL, con los mismos datos.
+# Lo despliega el CI a mano ("Run workflow") desde una rama que no sea main. Sin cron.
 [env.pruebas]
 name = "mycoach-pruebas"
 
-[env.pruebas.vars]
-GARMIN_URL = "https://garmin-pruebas.albertbecervas.workers.dev"
+[env.pruebas.triggers]
+crons = []
 
-[[env.pruebas.services]]
-binding = "GARMIN_SVC"
-service = "garmin-pruebas"
+[[env.pruebas.kv_namespaces]]
+binding = "GARMIN"
+id = "7711af0372714afd942bf460cff02518"
 
 [[env.pruebas.kv_namespaces]]
 binding = "SESIONES"
 id = "7711af0372714afd942bf460cff02518"
+
+[[env.pruebas.d1_databases]]
+binding = "LOGS"
+database_name = "garmin-diag"
+database_id = "32c6dc43-3fb2-469e-85e8-6f503ea8a925"

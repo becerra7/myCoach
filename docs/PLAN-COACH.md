@@ -145,7 +145,7 @@ Objetivo: que la uses cada día sin tener que pensar en ella.
    - plan semanal y temporada (objetivo con fecha, bloques y descargas) respetando los huecos del calendario;
    - replanificación: sesión perdida, readiness bajo o actividad no planificada.
 2. **Perfil del atleta** (`atleta/perfil`) y **registro de decisiones** (qué cambió y por qué).
-3. **Herramientas `coach_*`** en el conector (repo `garmin-mcp`) e **instrucciones del entrenador** en el conector.
+3. **Herramientas `coach_*`** en el conector (`apps/conector`) e **instrucciones del entrenador** en el conector.
 4. **Cron diario del Worker** (Cron Triggers): sincroniza Garmin, calcula y deja preparado el resumen del día. **Web Push** con el aviso de la mañana y el de "semana lista".
 5. **Bot de Telegram solo para ti**, en modo "tu Claude"; o, para probar ya la voz, con una clave de API tuya y un tope de gasto de pocos euros al mes.
 6. **Mandar entrenos estructurados a Garmin** (como `garmin_save_course`, con la API no oficial).
