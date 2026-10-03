@@ -180,7 +180,7 @@ Hevy para registrar fuerza, ficha para compartir, tests guiados, hidratación, n
 2. **Progreso de bici** con tus gráficas y marcadores.
 3. **Plan con rutas y fuerza.**
 4. **Limpieza** de lo que sale.
-5. **Conector:** lo que necesita cada paso se hace en paralelo en `garmin-mcp`.
+5. **Conector:** lo que necesita cada paso se hace en el mismo cambio, en `apps/conector`.
 
 ## Pendiente
 

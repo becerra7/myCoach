@@ -126,7 +126,7 @@ No hay capturas. Colores y tipografía solo se citan cuando una fuente los descr
 
 **Evitar.** Repetir sus métricas (Body Battery, Training Status) con otro nombre. Si Garmin ya lo enseña, myCoach lo resume en una línea o no lo pone.
 
-**Integración.** API oficial solo para empresas y con nuevas altas en pausa (comunidad, [Terra](https://tryterra.co/blog/garmin-connect-developer-program-pause); [Garmin Developers](https://developer.garmin.com/gc-developer-program/overview)). myCoach usa acceso no oficial (`garmin-mcp`). Riesgo a vigilar antes de abrir al público (supuesto).
+**Integración.** API oficial solo para empresas y con nuevas altas en pausa (comunidad, [Terra](https://tryterra.co/blog/garmin-connect-developer-program-pause); [Garmin Developers](https://developer.garmin.com/gc-developer-program/overview)). myCoach usa acceso no oficial (`apps/conector`). Riesgo a vigilar antes de abrir al público (supuesto).
 
 ## Strava
 
