@@ -1,5 +1,7 @@
 # Arquitectura de myCoach
 
+Diagramas C4 (contexto, contenedores, componentes y código): [`docs/ARQUITECTURA-C4.md`](docs/ARQUITECTURA-C4.md).
+
 ## Piezas
 
 ```
