@@ -1,0 +1,84 @@
+name = "garmin"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+
+# Los identificadores son los de los recursos que ya existen en la cuenta, asi
+# que el despliegue reconfigura los bindings solo y no hay que tocarlos a mano.
+
+# Descarga diaria de Garmin para el panel de progreso. De madrugada, cuando
+# el sueno y el HRV de la noche ya estan puestos.
+[triggers]
+crons = ["30 5 * * *"]
+
+[[kv_namespaces]]
+binding = "GARMIN"
+id = "7711af0372714afd942bf460cff02518"
+
+[[d1_databases]]
+binding = "LOGS"
+database_name = "garmin-diag"
+database_id = "32c6dc43-3fb2-469e-85e8-6f503ea8a925"
+
+# La app myCoach dentro de Claude (MCP Apps): su HTML lo sirve el Worker de la
+# web y aqui se trae por service binding (por la URL publica, entre Workers de
+# la misma cuenta, Cloudflare devuelve 404).
+[[services]]
+binding = "MYCOACH"
+service = "mycoach"
+
+# Segundo Worker, identico salvo el nombre. Claude distingue los conectores
+# por URL, asi que dos URLs son dos conectores y permiten tener dos cuentas
+# de Garmin conectadas a la vez en la misma cuenta de Claude.
+#
+# Comparte KV y D1 con el principal a proposito: los usuarios se guardan
+# indexados por hash del email, asi que no se pisan.
+[env.segundo]
+name = "garmin-2"
+
+[env.segundo.triggers]
+crons = ["45 5 * * *"]
+
+[[env.segundo.kv_namespaces]]
+binding = "GARMIN"
+id = "7711af0372714afd942bf460cff02518"
+
+[[env.segundo.d1_databases]]
+binding = "LOGS"
+database_name = "garmin-diag"
+database_id = "32c6dc43-3fb2-469e-85e8-6f503ea8a925"
+
+[[env.segundo.services]]
+binding = "MYCOACH"
+service = "mycoach"
+
+# Worker de pruebas: el codigo de una rama, en otra URL, sin tocar los
+# conectores de produccion. Se anade en Claude como un conector mas
+# (https://garmin-pruebas.<subdominio>.workers.dev/mcp) para probar antes de
+# llevar nada a main. Lo despliega el workflow a mano desde cualquier rama.
+#
+# Comparte KV y D1: se entra con la misma cuenta de Garmin y se ven los
+# mismos datos de la app. Sin cron, para no pedirle a Garmin nada de mas.
+[env.pruebas]
+name = "garmin-pruebas"
+
+[env.pruebas.triggers]
+crons = []
+
+[[env.pruebas.kv_namespaces]]
+binding = "GARMIN"
+id = "7711af0372714afd942bf460cff02518"
+
+[[env.pruebas.d1_databases]]
+binding = "LOGS"
+database_name = "garmin-diag"
+database_id = "32c6dc43-3fb2-469e-85e8-6f503ea8a925"
+
+[[env.pruebas.services]]
+binding = "MYCOACH"
+service = "mycoach"
+
+# SIGNING_KEY no se declara como requerido a proposito. Se sube en el propio
+# despliegue con --secrets-file, y exigirlo aqui podria hacer que wrangler
+# abortase por no encontrarlo *antes* de subirlo: el arreglo impediria
+# aplicarse a si mismo. Quien vigila que el Worker quede sano es la
+# comprobacion posterior del workflow, que ademas cubre cualquier otra causa.

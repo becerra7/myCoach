@@ -1,0 +1,95 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  # A mano: desde main vuelve a desplegar produccion; desde cualquier otra
+  # rama despliega SOLO el Worker de pruebas (garmin-pruebas), para probar un
+  # cambio en Claude sin tocar los conectores que usa la gente.
+  workflow_dispatch:
+
+# El despliegue solo necesita leer el repo; el acceso a Cloudflare va por
+# el token, no por el GITHUB_TOKEN.
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # Sin tests en verde no se despliega. Es la unica red que hay: el
+      # servidor solo se ejerce de verdad contra Garmin en produccion, asi
+      # que lo que se puede comprobar antes, se comprueba antes.
+      - name: Tests
+        run: node test.mjs
+
+      # El secreto viaja con el codigo. Un `wrangler deploy` a secas dejo el
+      # Worker sin SIGNING_KEY y tiro el servicio: los secretos del dashboard
+      # no sobrevivieron al despliegue.
+      - name: Preparar secretos
+        run: |
+          test -n "$SIGNING_KEY" || { echo "Falta el secreto SIGNING_KEY en el repositorio"; exit 1; }
+          printf '{"SIGNING_KEY":"%s"}' "$SIGNING_KEY" > .secrets.json
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+
+      - name: Deploy
+        if: github.ref == 'refs/heads/main'
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy --secrets-file .secrets.json
+
+      # Segunda instancia, para tener dos cuentas de Garmin conectadas a la
+      # vez en el mismo Claude. Mismo codigo, otra URL, otro conector.
+      - name: Deploy del segundo Worker
+        if: github.ref == 'refs/heads/main'
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy --env segundo --secrets-file .secrets.json
+
+      - name: Deploy del Worker de pruebas
+        if: github.ref != 'refs/heads/main'
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy --env pruebas --secrets-file .secrets.json
+
+      - name: Borrar el fichero de secretos
+        if: always()
+        run: rm -f .secrets.json
+
+      # El despliegue anterior dijo "success" mientras dejaba el servicio
+      # caido. Un despliegue no esta bien hasta que el servidor contesta.
+      - name: Comprobacion post-despliegue
+        run: |
+          comprobar() {
+            for intento in 1 2 3; do
+              if curl -fsS "$1/.well-known/oauth-authorization-server" | grep -q '"issuer"'; then
+                echo "OK: $1"
+                return 0
+              fi
+              echo "Intento $intento sin exito en $1; reintentando..."
+              sleep 5
+            done
+            echo "FALLO: $1 no responde con su metadata OAuth tras desplegar."
+            curl -sS "$1/.well-known/oauth-authorization-server" || true
+            return 1
+          }
+          if [ "$GITHUB_REF" = "refs/heads/main" ]; then
+            comprobar "https://garmin.albertbecervas.workers.dev"
+            comprobar "https://garmin-2.albertbecervas.workers.dev"
+          else
+            comprobar "https://garmin-pruebas.albertbecervas.workers.dev"
+          fi
