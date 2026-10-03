@@ -6,20 +6,21 @@ Diseño de producto y UX pensado desde cero, no retoques de lo que hay. Se basa 
 
 Abres la app y lo primero es **la decisión de hoy** (qué entreno y qué comer) y su porqué. Lo demás está a un toque.
 
-## Navegación: 4 secciones + Claude
+## Navegación: 5 secciones + Claude
 
 | Sección | Pregunta que responde | Antes |
 |---|---|---|
 | **Hoy** | ¿Qué hago hoy, qué como y por qué? | Hoy |
 | **Plan** | ¿Qué toca esta semana y por dónde salgo? | Plan |
-| **Comer** | ¿Cuánto hidrato y proteína me falta o me sobra? ¿Cómo voy? | Tarjeta pequeña en Hoy + pantalla escondida |
-| **Progreso** | ¿Estoy mejorando? | Forma + Pueblos |
+| **Comer** | ¿Cómo como día a día y cómo afecta a mi peso? | Tarjeta pequeña en Hoy + pantalla escondida; peso en Forma |
+| **Progreso** | ¿Estoy mejorando? | Forma |
+| **Pueblos** | ¿Cuánto he hecho y por dónde he pasado? | Pueblos |
 
 Botón fijo **Claude** (abre tu Claude con el encargo, ver abajo). Ajustes desde el avatar.
 
 **Por qué nutrición tiene sección propia.** Se usa varias veces al día (cada comida), tiene su propia pregunta ("¿cuánto me falta?") y su propio histórico. Metida en Hoy, o se queda corta o ahoga el entreno. En Hoy queda solo un resumen de una línea que lleva a Comer.
 
-**Por qué Pueblos va dentro de Progreso.** Es motivación ("lo que has explorado"), no una tarea diaria. Una pestaña entera para algo que se mira de vez en cuando cuesta más de lo que aporta.
+**Pueblos, pestaña propia y resumen de todo lo hecho.** Además del mapa, es el sitio del histórico: totales por año, por mes o desde el inicio. Cinco pestañas más el botón de Claude caben a 390 px; hay que comprobarlo en el prototipo.
 
 ---
 
@@ -53,6 +54,9 @@ De arriba abajo:
 - **Comidas del día:** desayuno, comida, merienda, snack, cena y durante el entreno. Cada una con su nivel de hidrato recomendado (Alto, Medio, Bajo, en palabra) y lo registrado.
 - **Durante el entreno:** gramos por hora para la sesión de hoy si dura más de 90 min. Lo que tomaste de verdad (guardado con `salida_guardar`) alimenta el indicador de combustible de Progreso.
 - **Histórico:** semana y mes, hidrato y proteína por día frente a su franja, con los días duros marcados. Se lee "en los días duros te quedas corto de hidrato", no un juicio.
+- **Todos los días, con o sin deporte.** Un día de descanso también tiene su objetivo (más bajo en hidrato, igual en proteína). Comer se abre directamente desde su pestaña, no hace falta pasar por una sesión.
+- **Día a día y peso.** Vista por días: hidrato y proteína frente a su franja, el entreno de ese día como contexto y, en la misma gráfica, la línea del peso (media de 7 días) con los pesajes como puntos. Así se ve cómo influye lo que comes en el peso a lo largo de las semanas.
+- **Peso:** su gráfica (pesajes y media de 7 días, 3 meses, 1 año, todo) vive aquí. Registrar peso, con la báscula o con Claude.
 - **Registrar:** se hace con Claude (foto o texto, como ya haces). La app enseña lo registrado y deja corregir o borrar.
 - **Sin calorías ni culpa.** Gramos de hidrato y proteína sí, porque son lo que cambia tu rendimiento; calorías no.
 
@@ -72,9 +76,9 @@ Las correlaciones solo salen cuando hay datos suficientes (mínimo de salidas co
 
 ## Progreso
 
-Segmentos: **Forma · Bici · Correr · Skimo · Pueblos** (solo los deportes que haces).
+Segmentos: **Forma · Bici · Correr · Skimo** (solo los deportes que haces).
 
-- **Forma:** zonas de forma con nombre y frase (Óptimo, Fresco, Riesgo…, como Intervals.icu, explicadas), peso con su tendencia, objetivo.
+- **Forma:** zonas de forma con nombre y frase (Óptimo, Fresco, Riesgo…, como Intervals.icu, explicadas) y objetivo. El peso vive en Comer.
 - **Bici.** Seis indicadores, sacados de tu análisis con Claude del 3 de octubre. Cada uno lleva gráfica por salida o por semana, su línea de referencia y una frase:
 
   | Área | Indicador | Gráfica | Referencia |
@@ -86,15 +90,27 @@ Segmentos: **Forma · Bici · Correr · Skimo · Pueblos** (solo los deportes qu
   | Combustible | Gramos de hidrato por hora en ruta | Barras por salida frente a la línea del plan (60 g/h) | 30-60 g/h; hasta 90 g/h en más de 2,5 h |
   | Volumen | Horas de bici por semana | Barras por semana (la actual, marcada como incompleta) | Tu objetivo de horas |
 
-  El peso (media de 7 días) va en Forma, no aquí.
+  El peso (media de 7 días) va en Comer, no aquí.
+
+  **Gráficas que relacionan dos cosas** (más útiles que una cifra suelta):
+  - **Velocidad media por salida**, con el desnivel y la temperatura como contexto (una salida lenta con 1.500 m no es peor).
+  - **Velocidad frente a esfuerzo:** cada salida es un punto (velocidad en llano frente a FC media), más oscuro cuanto más reciente. Si mejoras, los puntos se van hacia "más rápido con menos pulso".
+  - **Duración frente a stamina:** cada salida larga es un punto (horas frente a stamina mínima), con el tamaño según los g/h que tomaste. Enseña cuánto aguantas antes de vaciarte y si comer más lo retrasa.
+  - **Desacople dentro de una salida:** pulso y velocidad a lo largo de una salida larga; si el pulso sube a igual velocidad, se marca el punto. Se puede comparar con la misma ruta de otro día.
+  - **Zonas por semana:** horas suaves, medias y duras apiladas, para ver la disciplina sin mirar salida por salida.
 
   **Comparar con la misma ruta.** Si repites recorrido, la actividad enseña "19 sep → 3 oct": FC media (151 → 142), metros por latido (2,60 → 2,89), stamina mínima (26 → 51 %) y velocidad (23,6 → 24,7 km/h), con el contexto que cambia la lectura (6 °C más, otra bici). Es la forma más honesta de ver progreso.
 
   **Más adelante:** curva de potencia y FTP o W/kg cuando haya potenciómetro (vía Intervals.icu), VAM en subidas largas y récords recientes.
 - **Correr y Skimo:** lo mismo adaptado (ritmo, ritmo en subida, VAM, eficiencia, desacople).
-- **Pueblos:** el mapa y la lista que ya tienes.
 
 Todo con datos de Garmin e Intervals.icu leídos por el conector (`coach_progreso`, `intervals_*`), no recalculados en la web.
+
+## Pueblos
+
+- **Resumen de lo hecho** por año, por mes o desde el inicio: horas, kilómetros, desnivel y salidas, por deporte. Un calendario de calor del año (cada día, un cuadro según las horas) para ver la constancia de un vistazo.
+- **Mapa de pueblos** por comunidad, España o mundo, con la ficha de cada pueblo.
+- **Lista de actividades** filtrable, que lleva a cada actividad.
 
 ## Claude
 
@@ -116,7 +132,6 @@ Todo con datos de Garmin e Intervals.icu leídos por el conector (`coach_progres
 | Aviso "tu plan no encaja" y readiness de respaldo | Duplican el semáforo |
 | Pasos decorativos del onboarding ("qué ver primero", checks de "Preparando") | No hacen nada |
 | Panel de prototipo, código muerto | Limpieza |
-| Pestaña Pueblos | Pasa a Progreso |
 | Dos estilos de plataforma (iOS y Android) | Uno solo en la v1 |
 
 ## Qué entra
@@ -129,6 +144,9 @@ Todo con datos de Garmin e Intervals.icu leídos por el conector (`coach_progres
 | Sección Comer: gramos que faltan o sobran, por comida, durante el entreno, histórico | Comer |
 | Leer las comidas que registra Claude (`comidas`) | Comer |
 | Rutas en la sesión y lista de rutas | Plan |
+| Resumen por año, mes o desde el inicio, y calendario de calor | Pueblos |
+| Comer día a día con el peso en la misma gráfica | Comer |
+| Gráficas de velocidad frente a esfuerzo y duración frente a stamina | Progreso |
 | "La última vez" en fuerza | Plan |
 | Marcadores y gráficas de bici, correr y skimo | Progreso |
 | Zonas de forma con nombre | Progreso |
