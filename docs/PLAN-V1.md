@@ -1,4 +1,6 @@
-# myCoach v1: cómo quedaría la app (propuesta del equipo)
+# myCoach v1: cómo queda la app
+
+> **Estado (3 oct 2026):** implementado en `apps/web` (pantallas en `62-67-v1-*.js`). Pendiente del conector: objetivos de comida en gramos, franja de carga del día (`carga_objetivo` en `coach_hoy`; mientras, sale del color del semáforo), `coach_kpis`, la stamina, el combustible y el desacople por salida (`salida_guardar`). La comida se mide en cuartos de plato, que es como la guarda `comida_registrar`.
 
 Diseño de producto y UX pensado desde cero, no retoques de lo que hay. Se basa en `PRODUCTO.md`, `INVESTIGACION.md` y el inventario de `FEATURES.md`. El aspecto visual lo define el prototipo (`frontend-design` + `ui-ux-pro-max`, revisado con `impeccable`). Aquí van la estructura, qué enseña cada pantalla y qué sale o entra.
 

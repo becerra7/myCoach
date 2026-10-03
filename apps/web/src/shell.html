@@ -1,9 +1,9 @@
 <title>myCoach</title>
-<meta name="description" content="Prototipo navegable para validar myCoach: tu semana, tu forma y tus pueblos a partir de tu Garmin.">
-<meta name="theme-color" content="#F2F2F7">
+<meta name="description" content="myCoach: tu entrenador con tu Garmin y tu Claude. Qué hacer hoy, qué comer y si mejoras.">
+<meta name="theme-color" content="#F2F4F1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&display=swap">
 <style>
 /*CSS*/
 </style>
@@ -13,7 +13,7 @@
       <div class="topbar" id="topbar">
         <span class="tb-l"><button class="back" id="topback" type="button" hidden><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>Atrás</button></span>
         <span class="t-small" id="tsmall" aria-hidden="true"></span>
-        <span class="tb-r"><button id="refresh" class="iconbtn" type="button" aria-label="Actualizar datos de Garmin"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12a8 8 0 0 1 13.7-5.6L20 9M20 4v5h-5M20 12a8 8 0 0 1-13.7 5.6L4 15M4 20v-5h5"/></svg></button><button id="avatar" class="iconbtn" type="button" aria-label="Ajustes"><span class="avatar"></span></button></span>
+        <span class="tb-r"><button id="claude-top" class="claude-top" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 3.5l1.9 5.2 5.1 1.8-5.1 1.9L12 17.5l-1.9-5.1L5 10.5l5.1-1.8z"/></svg>Claude</button><button id="refresh" class="iconbtn" type="button" aria-label="Actualizar datos de Garmin"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12a8 8 0 0 1 13.7-5.6L20 9M20 4v5h-5M20 12a8 8 0 0 1-13.7 5.6L4 15M4 20v-5h5"/></svg></button><button id="avatar" class="iconbtn" type="button" aria-label="Ajustes"><span class="avatar"></span></button></span>
       </div>
       <main id="view"></main>
     </div>

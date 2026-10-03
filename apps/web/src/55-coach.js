@@ -69,22 +69,6 @@ function coachCambios(c) {
 const EST_ICO = { good: 'check', 'label-2': 'dot', warn: 'info', bad: 'stop' };
 const valorCorto = v => v == null ? '—' : String(v).split(/ · |, /)[0];
 const NOMBRE_CORTO = { readiness: 'Readiness', sueno: 'Sueño', vfc: 'VFC', pulso: 'Pulso', frescura: 'Frescura' };
-function cardEstado() {
-  const c = S.modo === 'demo' ? coachDemo() : COACH; if (!c) return '';
-  const sm = c.semaforo; const [col, lectura, icono] = COACH_TXT[sm.color];
-  const motivo = sm.color === 'verde' ? (sm.positivos || []).slice(0, 2).join(' · ') : (sm.razones || []).slice(0, 2).join(' · ');
-  const piezas = (sm.datos || []).map(d => { const [tono, txt] = COACH_EST[d.estado] || COACH_EST.normal; const nombre = NOMBRE_CORTO[d.clave] || d.nombre;
-    return `<li><button type="button" class="met" data-a="met" data-v="${esc(d.clave)}" aria-label="${esc(nombre)}: ${esc(valorCorto(d.valor))}, ${txt}. Ver qué es">
-      <span class="met-n">${esc(nombre)}</span><b class="met-v">${esc(valorCorto(d.valor)).replace(/ (ms|ppm)$/, ' <small>$1</small>')}</b><span class="met-e" style="color:var(--${tono})">${ic(EST_ICO[tono] || 'dot', 13)}${txt}</span></button></li>`; }).join('');
-  return `<section class="card estado" aria-labelledby="est-t">
-    <div class="est-top"><h2 id="est-t" class="coach-estado ${sm.color}"><span class="coach-ico" aria-hidden="true">${ic(icono, 18)}</span>${col}: ${lectura}</h2></div>
-    ${motivo ? `<p class="small muted est-motivo">${esc(cap1(motivo))}.</p>` : ''}
-    ${sm.datos_que_faltan && sm.datos_que_faltan.length === 3 ? '<p class="small muted">Garmin aún no tiene tu noche: el semáforo se afinará cuando la tenga.</p>' : ''}
-    ${piezas ? `<details class="est-datos"><summary>Ver los ${(sm.datos || []).length} datos</summary><ul class="mets" aria-label="Por qué">${piezas}</ul></details>` : ''}
-    ${(r => `<button class="link coach-sentir" type="button" data-a="coach-sentir-hoja">${ic('edit', 18)} ${r ? `<span class="grow">${esc(r)}</span><span class="u">Cambiar</span>` : 'Cuéntame cómo te encuentras'}</button>`)(resumenSentir())}
-  </section>`;
-}
-
 /* Qué es cada dato, de dónde sale y cómo lo lee el entrenador (las mismas reglas que el conector) */
 const MET_INFO = {
   readiness: { t: 'Readiness de Garmin', que: 'La nota de Garmin (de 0 a 100) que junta tu sueño, tu VFC, la carga de los últimos días y el tiempo de recuperación que te queda.', lee: 'Por debajo de 55 el entrenador lo cuenta como algo peor; por debajo de 35, pide recuperar. A partir de 70 suma a favor.' },

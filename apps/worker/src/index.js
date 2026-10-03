@@ -33,6 +33,8 @@ export const TOOLS = new Set([
   'fuerza_entrenos', 'fuerza_entreno_guardar', 'fuerza_ejercicios_garmin',
   // Entrenos de bici y correr para el reloj.
   'cardio_entrenos', 'cardio_enviar_garmin', 'peso_historico',
+  // Solo lectura: tus rutas guardadas en Garmin (Plan) y las comidas que registra tu Claude (Comer).
+  'garmin_courses', 'comidas',
 ]);
 
 const json = (data, status = 200, headers = {}) =>

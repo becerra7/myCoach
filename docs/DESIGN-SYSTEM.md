@@ -2,7 +2,9 @@
 
 Fuente de verdad: `apps/web/src/app.css`. Este documento recoge lo que hay hoy, las reglas de uso y lo que habría que decidir para que la app sea homogénea. Los puntos de "A decidir" son propuestas, no están aplicados.
 
-## 1. Lo que hay hoy
+> **v1 (octubre 2026).** La app ya usa el lenguaje del rediseño: tinta sobre papel, el color solo para datos (deportes y estados), las acciones en tinta y la fuente Archivo (estrecha para cifras y titulares). Los tokens están en la capa "v1 · Rediseño" al final de `apps/web/src/app.css` (`--paper`, `--surface`, `--ink`, `--ink-2`, `--rule`, estados y `--s-<deporte>`), con un solo estilo para iOS y Android. Componentes nuevos: `blk` (bloque con regla), `info` (ⓘ que abre la explicación), `tag` (estado con palabra e icono), `met2`, `tot`, `dias`, `dia`, `sem7`/`d7v`, `seg2` y las gráficas `chart2` (una escala, tooltip). Lo de abajo describe la base anterior, que sigue debajo para las pantallas secundarias.
+
+## 1. Lo que había antes del rediseño
 
 ### Color
 - **Marca:** `--brand` / `--tint` azul `#1D4FA0` (en oscuro `#8DB3F7`).

@@ -67,14 +67,6 @@ function bloqueFuerza(f, enActividad) {
   return `<div class="stack" style="gap:8px">${d.hecha ? `<p class="small"><b>Hecha.</b> Así ha ido frente al plan:</p>` : ''}<div class="list">${filas}</div>${extra}${pie}</div>`;
 }
 
-/** Hoy: la tarjeta del entreno de fuerza, si toca. */
-function cardFuerzaHoy() {
-  const s = fuerzaDelDia(HOY); if (!s) return '';
-  const bloque = bloqueFuerza(HOY); if (!bloque) return '';
-  const e = FZ[HOY] && FZ[HOY].entreno;
-  return `<div class="b-full"><section class="card stack" style="gap:12px" aria-labelledby="fz-h"><div class="card-h">${ic('dumbbell', 18)}<h2 class="grow" id="fz-h" style="font:inherit;margin:0">Fuerza · ${esc(e ? e.nombre : s.d)}</h2></div>${bloque}</section></div>`;
-}
-
 function hojaHistorialFuerza(nombre) {
   let datos;
   const cuerpo = () => {

@@ -58,7 +58,7 @@ function showPrompt(p) { openSheet({ title: 'Encargo para Claude', size: 'auto',
 function go(tab) { vt(() => { S.tab = tab; S.stack = []; save(); render(true); }); }
 function push(screen) { vt(() => { S.stack.push(screen); save(); render(true); }); }
 function pop() { vt(() => { S.stack.pop(); save(); render(true); }); }
-const TABS = [['hoy', 'Hoy'], ['plan', 'Plan'], ['forma', 'Forma'], ['pueblos', 'Pueblos']];
+const TABS = [['hoy', 'Hoy'], ['plan', 'Plan'], ['comer', 'Comer'], ['progreso', 'Progreso'], ['pueblos', 'Pueblos']];
 // El botón de Ajustes lleva tus iniciales (Ajustes → Tu nombre); sin nombre, un icono de persona.
 function pintarAvatar() {
   const el = $('#avatar .avatar'); if (!el) return;
@@ -81,7 +81,7 @@ function render(resetScroll) {
   if (resetScroll) scroller.scrollTop = 0;
   onScroll(); renderOnboarding(); if (sheetState) fillSheet(); renderProtoStatus(); afterRender();
 }
-function afterRender() { $$('#view .map').forEach(applyMapFilter); const wk = $('#weeks'), sel = wk && wk.querySelector('[aria-pressed="true"]'); if (sel) wk.scrollLeft = sel.offsetLeft - wk.clientWidth / 2 + sel.offsetWidth / 2; }
+function afterRender() { $$('#view .heat').forEach(h => { h.scrollLeft = h.scrollWidth; }); $$('#view .map').forEach(applyMapFilter); const wk = $('#weeks'), sel = wk && wk.querySelector('[aria-pressed="true"]'); if (sel) wk.scrollLeft = sel.offsetLeft - wk.clientWidth / 2 + sel.offsetWidth / 2; }
 let lastY = 0;
 function onScroll() {
   const y = scroller.scrollTop; $('#topbar').classList.toggle('compact', y > 36);
@@ -135,145 +135,6 @@ function señalarEnGrafico(e) {
 document.addEventListener('pointermove', señalarEnGrafico);
 document.addEventListener('pointerdown', señalarEnGrafico);
 
-/* ===== HOY ===== */
-function cardSemana(big, conEntrenador) {
-  const r = resumen(SEM); const pct = r.plan ? Math.round(r.hechas / r.plan * 100) : 0;
-  const ESTADO_DIA = { done: 'hecha', miss: 'no hecha', today: 'hoy' };
-  const strip = days7(SEM).map(f => {
-    const s = sesion(f); const d = dte(f); let cls = '', dot = '';
-    if (s) { dot = s.t === 'descanso' ? '' : `<i style="background:${scol(s.dep)}"></i>`; if (s.a) cls = 'done'; else if (f < HOY && s.t !== 'descanso') cls = 'miss'; if (f === HOY && !s.a) cls = 'today'; }
-    // Hecha y no hecha llevan icono, no solo el color del borde.
-    const marca = cls === 'done' ? `<span class="ok">${ic('check', 11)}</span>` : cls === 'miss' ? `<span class="ok ko">${ic('close', 11)}</span>` : '';
-    return `<button type="button" class="d7" data-a="day" data-v="${f}" aria-label="${fLarga(f)}${s ? `: ${esc(s.d)}${ESTADO_DIA[cls] ? `, ${ESTADO_DIA[cls]}` : ''}` : ', libre'}"><small aria-hidden="true">${DL[d.getDay()]}</small><span class="b ${cls}">${dot}${marca}</span><small aria-hidden="true">${d.getDate()}</small></button>`;
-  }).join('');
-  // Con el entrenador en Hoy, "qué toca hoy" ya está allí: aquí no se repite.
-  const hoy = conEntrenador ? null : sesion(HOY); const fit = fitHoy();
-  return `<div class="card ${big ? 'hero' : ''}">
-    <button type="button" class="card-h" style="border:0;background:none;padding:0;cursor:pointer;color:inherit;font:inherit;text-align:left" data-a="tab" data-v="plan">${ic('plan', 18)}<span class="grow">Esta semana · ${rangoSem(SEM)}</span>${ic('chev', 18, 'chev')}</button>
-    <div class="row"><div class="cring" style="--p:${pct}" role="img" aria-label="${r.plan ? `${r.hechas} de ${r.plan} sesiones hechas` : `${r.n} actividades`}"><span><b>${r.plan ? `${r.hechas}/${r.plan}` : r.n}</b><small>${r.plan ? 'hechas' : 'hechas'}</small></span></div>
-      <div class="grow stack" style="gap:4px"><b style="font-size:17px">${r.plan ? `${pct} % del plan cumplido` : 'Sin plan esta semana'}</b><span class="small muted">${nf(r.min / 60)} h hechas${r.plan ? ` · ${r.pendientes} pendiente${r.pendientes === 1 ? '' : 's'}` : ' · toca para planificar'}</span>${r.fuerza < objetivos().fuerza ? `<span class="small" style="color:var(--bad)">Te falta fuerza: ${r.fuerza} de ${objetivos().fuerza}</span>` : ''}</div></div>
-    <div class="strip7">${strip}</div>
-    ${hoy ? `<button type="button" class="li" style="padding:10px 0 0;min-height:0" data-a="day" data-v="${HOY}"><span class="main"><span>${hoy.a ? 'Hecho hoy' : 'Hoy toca'}</span><b>${esc(hoy.a ? `${hoy.a.lugar} · ${nf(hoy.a.km || 0)} km` : hoy.d)}</b>${!hoy.a && fit.nivel === 'suave' ? '<span style="color:var(--warn)">Encaja si lo haces suave: readiness moderada.</span>' : ''}</span>${chip(tipoSes(hoy))}${ic('chev', 18, 'chev')}</button>` : ''}
-  </div>`;
-}
-function cardReadiness() {
-  const R = (M.perfil || {}).ready || {}; const r = S.readiness ?? R.score; const fit = fitHoy(); const s = sesion(HOY);
-  if (r == null) return `<div class="card"><div class="card-h">${ic('battery', 18)}<span class="grow">Cómo estás hoy</span></div><p class="small muted">Garmin aún no ha calculado tu readiness de hoy. Necesita que hayas dormido con el reloj puesto.</p></div>`;
-  const nivel = r < 50 ? 'baja' : r < 75 ? 'moderada' : 'alta'; const real = r === R.score;
-  let out = `<div class="card"><div class="card-h">${ic('battery', 18)}<span class="grow">Cómo estás hoy</span>${real ? (M.fuente === 'vivo' ? '<span class="live">En vivo</span>' : simTag('Demo')) : simTag('Simulado')}</div>
-    <div class="row"><div class="ring" style="--p:${r};--c:${r < 50 ? 'var(--bad)' : r < 75 ? 'var(--warn)' : 'var(--good)'}"><span>${r}</span></div><div class="grow stack" style="gap:2px"><b style="font-size:17px">Readiness ${nivel}</b><span class="small muted">${real ? [R.sleep != null ? `Sueño ${R.sleep}` : '', R.hrv != null ? `VFC ${R.hrv}` : '', R.rec ? `${nf(R.rec, 0)} h de recuperación` : 'recuperado'].filter(Boolean).join(' · ') : 'Valor simulado para probar el flujo'}</span></div></div></div>`;
-  // Con el entrenador del conector en vivo, la propuesta es la suya: no dos consejos a la vez.
-  if (!fit.ok && S.adapt === null && !COACH && S.modo !== 'demo') out += `<div class="adapt"><div class="card-h">${ic('info', 18)}<span class="grow">Tu plan de hoy no encaja</span><span class="xs" style="text-transform:none">sin IA: reglas</span></div>
-      <p>Tenías <b>${esc(s.d)}</b>. Con readiness ${r}, elige:</p>
-      <button type="button" class="opt rec" data-a="adapt" data-v="suave">${ic('check', 22)}<span class="main"><b>1 h muy suave hoy y lo fuerte mañana</b><span>Recuperación hoy; la sesión pasa a mañana.</span></span></button>
-      <button type="button" class="opt" data-a="adapt" data-v="descanso">${ic('battery', 22)}<span class="main"><b>Descansar hoy</b><span>Y la sesión, mañana.</span></span></button>
-      <button type="button" class="opt" data-a="adapt" data-v="mantener">${ic('flag', 22)}<span class="main"><b>Mantener el plan</b><span>Vigila el pulso.</span></span></button>
-      <button type="button" class="opt" data-a="otro">${ic('edit', 22)}<span class="main"><b>Otro</b><span>Dime qué vas a hacer y reajusto la semana.</span></span></button></div>`;
-  return out;
-}
-
-function sportStats(k) {
-  const all = acts().filter(x => x.dep === k); const d30 = addDays(HOY, -30); const mes = all.filter(x => x.f > d30);
-  const sum = (a, f) => a.reduce((s, x) => s + (f(x) || 0), 0);
-  const temporada = k === 'skimo' || k === 'esqui' ? all.filter(x => x.f > addDays(HOY, -300)) : all;
-  switch (k) {
-    case 'bici': return [[nf(sum(mes, x => x.km), 0), 'km', `últimos 30 días · ${mes.length} salidas`], [nf(sum(mes, x => x.desn), 0), 'm+', 'últimos 30 días']];
-    case 'skimo': { const vs = temporada.filter(x => x.sub && !x.sub.remonte).map(x => x.sub.vam); return [[nf(sum(temporada, x => x.desn), 0), 'm+', `temporada · ${temporada.length} salidas`], [vs.length ? nf(Math.max(...vs), 0) : '—', 'm/h', 'mejor ritmo de subida']]; }
-    case 'correr': return [[all.length, 'carreras', `${nf(sum(all, x => x.km), 0)} km en total`], [mes.length, 'último mes', `${nf(sum(mes, x => x.km), 0)} km`]];
-    case 'raqueta': return [[all.length, 'partidos', `${nf(sum(all, x => x.min) / 60, 0)} h en total`], [mes.length, 'último mes', '']];
-    case 'fuerza': { const sem = M.weeks.filter(([, v]) => v.fuerza).length; return [[all.length, 'sesiones', `en ${M.weeks.length} semanas`], [sem, 'semanas', `con fuerza de ${M.weeks.length}`]]; }
-    default: return [[nf(sum(all, x => x.min) / 60, 0), 'h', `${all.length} salidas`], [nf(sum(all, x => x.km), 0), 'km', 'en total']];
-  }
-}
-function tilesDeportes() {
-  const sel = S.sports.filter(k => acts().some(a => a.dep === k));
-  if (!sel.length) return '<p class="small muted">Elige en Ajustes los deportes que quieres que analice.</p>';
-  return `<div class="tiles">${sel.map(k => { const [[v, u, s]] = sportStats(k); return `<button type="button" class="tile" data-a="sportsel" data-v="${k}"><span class="h">${sportDot(k)}${SPORTS[k].n}</span><span class="v">${v} <small>${u}</small></span><span class="s">${s}</span></button>`; }).join('')}</div>`;
-}
-
-function cardForma(mini) {
-  const [tipo] = tipoAtleta(); const f = forma();
-  return `<button type="button" class="card tap" data-a="tab" data-v="forma"><div class="card-h">${ic('forma', 18)}<span class="grow">Tu forma</span>${ic('chev', 18, 'chev')}</div>
-    <div class="row" style="align-items:flex-end"><div class="bignum"><span class="v" style="font-size:${mini ? 56 : 72}px">${f == null ? '—' : nf(f)}</span><span class="of">/10</span></div></div><span class="kind" style="font-size:18px">${esc(tipo)}</span></button>`;
-}
-
-function cardComida() {
-  const hoy = S.meals.filter(m => m.f === HOY); const cg = cargaDia(HOY); const c = hoy.length ? hoy.reduce((a, m) => a + m.c, 0) / hoy.length : null;
-  return `<button type="button" class="card tap" data-a="push" data-v="nutri"><div class="card-h">${ic('food', 18)}<span class="grow">Comida</span>${labTag()}${ic('chev', 18, 'chev')}</div>
-    <p class="small"><b>${cg.n}</b> (${esc(cg.txt)}): ${cg.c === 2 ? 'la mitad' : cg.c === 1.5 ? 'algo más de un tercio' : 'un cuarto'} de cada plato, carbohidrato. ${hoy.length ? `Llevas ${hoy.length} comida${hoy.length === 1 ? '' : 's'} con ${nf(c)} de 4 cuartos de media.` : 'Aún no has registrado nada hoy.'}</p></button>`;
-}
-
-function cardPueblos() {
-  const ts = Object.values(M.towns || {}); const ult = acts().find(a => a.nuevos && a.nuevos.length);
-  return `<button type="button" class="card tap" data-a="tab" data-v="pueblos"><div class="card-h">${ic('pueblos', 18)}<span class="grow">Tus pueblos</span>${ic('chev', 18, 'chev')}</div>
-    <div class="row"><span class="num" style="font-size:44px;font-weight:700;line-height:1">${ts.length}</span><div class="grow small muted">municipios cruzados.${ult ? `<br>Últimos nuevos (${fDia(ult.f)}): ${esc(ult.nuevos.slice(0, 3).join(', '))}.` : ''}</div></div></button>`;
-}
-
-function syncLine() {
-  const t = S.lastSync ? new Date(S.lastSync) : null;
-  return `<span class="sync" id="synctxt">${M.fuente === 'vivo' ? '<span class="live">En vivo</span> ' : '<span class="sim">Demo</span> '}${t ? `Actualizado a las ${t.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}` : 'Sin sincronizar'}</span>`;
-}
 /* ===== Hoy y tu semana =====
    Arriba, la sesión de hoy y si encaja con tu estado (la tarjeta de arriba): si el entrenador
    propone cambiarla, el antes → después y "Aplicar el cambio". Abajo, la semana en 7 días.
-   Tocando la sesión o un día se abre su hoja, con los ejercicios o los pasos y "Enviar al reloj". */
-function encajeHoy(s) {
-  const c = S.modo === 'demo' ? coachDemo() : COACH;
-  if (s && s.a) return `<button type="button" class="hp-encaje ok" data-a="push" data-v="actividad" data-id="${s.a.id}">${ic('check', 16)}<span class="grow">Hecho: ${esc(s.a.lugar)}${s.a.km && SPORTS[s.a.dep]?.cardio ? ` · ${nf(s.a.km)} km` : ''} · ${dur(s.a.min)}</span>${ic('chev', 16, 'chev')}</button>`;
-  if (c && c.ya_entrenado_hoy && c.ya_entrenado_hoy.length) return `<p class="hp-encaje ok">${ic('check', 16)}<span>Ya has entrenado hoy. Ahora toca recuperar.</span></p>`;
-  if (!s || s.t === 'descanso') return '';
-  const aplicable = c && c.propuesta && c.propuesta.sesion;
-  if (aplicable) return `<div class="hp-encaje ajustar"><p>${ic('info', 16)}<span><b>Con tu estado, mejor ajustarla.</b> ${esc(c.propuesta.texto || '')}</span></p>${coachCambios(c)}
-    <div class="btns"><button class="btn fill" type="button" data-a="coach-aplicar">Aplicar el cambio</button><button class="btn text" type="button" data-a="coach-claude">${ic('claude', 18)} Hablarlo con Claude</button></div></div>`;
-  if (c) return `<p class="hp-encaje ok">${ic('check', 16)}<span>Encaja con tu estado de hoy.</span></p>`;
-  const fit = fitHoy();
-  return fit.nivel === 'suave' ? `<p class="hp-encaje ajustar">${ic('info', 16)}<span>Encaja si lo haces suave: readiness moderada.</span></p>` : '';
-}
-function cardHoyPlan() {
-  const s = sesion(HOY); const r = resumen(SEM);
-  const quePone = s ? (s.t === 'descanso' ? 'Descanso' : s.d) : 'Nada planeado';
-  const detalle = s && s.t !== 'descanso' ? [SPORTS[s.dep]?.n, s.min ? dur(s.min) : ''].filter(Boolean).join(' · ') : (s ? 'Recupera' : 'Día libre');
-  const semana = r.plan ? `${r.hechas} de ${r.plan} hechas · ${nf(r.min / 60)} h` : `${nf(r.min / 60)} h hechas · sin plan`;
-  const ESTADO_DIA = { done: 'hecha', miss: 'no hecha', today: 'hoy' };
-  const strip = days7(SEM).map(f => {
-    const x = sesion(f); const d = dte(f); let cls = '', dot = '';
-    if (x) { dot = x.t === 'descanso' ? '' : `<i style="background:${scol(x.dep)}"></i>`; if (x.a) cls = 'done'; else if (f < HOY && x.t !== 'descanso') cls = 'miss'; if (f === HOY && !x.a) cls = 'today'; }
-    const marca = cls === 'done' ? `<span class="ok">${ic('check', 11)}</span>` : cls === 'miss' ? `<span class="ok ko">${ic('close', 11)}</span>` : '';
-    return `<button type="button" class="d7 ${f === HOY ? 'hoy' : ''}" data-a="day" data-v="${f}" aria-label="${fLarga(f)}${x ? `: ${esc(x.d)}${ESTADO_DIA[cls] ? `, ${ESTADO_DIA[cls]}` : ''}` : ', libre'}"><small aria-hidden="true">${DL[d.getDay()]}</small><span class="b ${cls}">${dot}${marca}</span><small aria-hidden="true">${d.getDate()}</small></button>`;
-  }).join('');
-  return `<section class="card hoyplan" aria-labelledby="hp-t">
-    <h2 id="hp-t" class="vh">Hoy y esta semana</h2>
-    <button type="button" class="hp-sesion" data-a="day" data-v="${HOY}" aria-label="Hoy: ${esc(quePone)}, ${esc(detalle)}. Ver el detalle">
-      <i class="hp-dot" style="background:${s && s.t !== 'descanso' ? scol(s.dep) : 'var(--label-3)'}" aria-hidden="true"></i>
-      <span class="grow stack" style="gap:2px"><b>${esc(quePone)}</b><span class="small muted">${esc(detalle)}${s && s.dep === 'fuerza' && s.entreno ? ' · ver ejercicios' : s && s.entreno_cardio ? ' · ver los pasos' : ''}</span></span>${ic('chev', 18, 'chev')}</button>
-    ${encajeHoy(s)}
-    <div class="hp-sem">
-      <button type="button" class="hp-sem-h" data-a="tab" data-v="plan"><h3>Esta semana</h3><span class="small muted grow">${semana}</span>${ic('chev', 16, 'chev')}</button>
-      <div class="strip7">${strip}</div>
-    </div>
-    <button type="button" class="link hp-ents" data-a="push" data-v="entrenos">${ic('dumbbell', 18)} Tus entrenos</button>
-  </section>`;
-}
-
-function tabHoy() {
-  const banner = S.simRide && !S.seenSim && M.fuente === 'demo' ? `<div class="adapt b-full"><div class="row">${ic('pueblos', 26)}<div class="grow"><b style="font-size:17px">Nueva actividad: +3 pueblos</b><p class="small muted">Palau-solità i Plegamans, Polinyà y Santa Perpètua de Mogoda.</p></div></div><div class="btns"><button class="btn fill" type="button" data-a="seen-sim">Ver en el mapa</button></div></div>` : '';
-  // Hoy responde "¿cómo estoy y qué hago hoy?": tu estado arriba (compacto, cada dato se abre),
-  // debajo la sesión de hoy con si encaja y la semana. "Tu forma" solo si se activa en Ajustes.
-  const estado = cardEstado();
-  const aviso = cardAvisoPlan();
-  return { title: 'Hoy', html: head('Hoy', `${cap1(fLarga(HOY))}${M.fuente === 'vivo' ? '' : `<br>${syncLine()}`}`) + `<div class="content"><div class="bento hoy-v">${banner}
-    <div class="b-full">${estado || cardReadiness()}</div>
-    <div class="b-full">${cardHoyPlan()}</div>
-    ${aviso}
-    ${S.hoyForma ? `<div class="b-full">${cardForma(true)}</div>` : ''}
-    <div class="b-full"><div class="section-h"><h2>Tus deportes</h2><button class="link" type="button" data-a="push" data-v="ajustes">Elegir</button></div>${tilesDeportes()}</div>
-    <div class="b-full">${cardComida()}</div>
-  </div></div>` };
-}
-function cardObjetivo(mini) {
-  const g = S.goal, m = MODOS[g.modo] || MODOS.forma, o = objetivos();
-  return `<button type="button" class="card tap ${mini ? '' : 'hero'}" data-a="push" data-v="objetivo"><div class="card-h">${ic('target', 18)}<span class="grow">Tu objetivo</span>${ic('chev', 18, 'chev')}</div>
-    <span class="kind" style="font-size:${mini ? 18 : 24}px">${esc(g.titulo || m.n)}</span>
-    <span class="small muted">${o.h[0]}-${o.h[1]} h/semana · ${o.int[0]}-${o.int[1]} intensos · ${o.fuerza} de fuerza${g.fecha ? ` · ${fDia(g.fecha)}` : ''}</span>
-    ${mini ? '' : '<p class="say">Cada semana te comparo con esto. Cámbialo cuando quieras: se adapta, no te ata.</p>'}</button>`;
-}
