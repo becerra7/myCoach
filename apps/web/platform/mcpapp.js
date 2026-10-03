@@ -33,7 +33,8 @@
     document.documentElement.style.height = document.body.style.height = h + 'px';
     avisar('ui/notifications/size-changed', { width: document.documentElement.clientWidth, height: h });
   };
-  const PANTALLAS = { hoy: 'hoy', plan: 'plan', forma: 'forma', pueblos: 'pueblos' };
+  // "forma" es el nombre antiguo de Progreso: se acepta para no romper encargos viejos.
+  const PANTALLAS = { hoy: 'hoy', plan: 'plan', comer: 'comer', progreso: 'progreso', forma: 'progreso', pueblos: 'pueblos' };
   const irA = args => {
     const p = args && args.pantalla; if (!p || typeof go !== 'function') return;
     if (PANTALLAS[p]) go(PANTALLAS[p]); else if (p === 'ajustes' && typeof push === 'function') push({ s: 'ajustes' });
