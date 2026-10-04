@@ -182,4 +182,4 @@ readiness. Enseñar esos huecos todos los días no aporta nada, así que:
 - **Ritmo del umbral:** al parecer Garmin da la velocidad del umbral en decenas de m/s y `garmin_forma` la convierte con esa suposición. Si el ritmo sale raro, es ahí.
 - **`{perfil}`** (para el material) se saca de `socialProfile.profileId`. Si Garmin no lo da, habrá que leerlo de otro sitio.
 - **`garmin_dia`** y la detección de `fuentes`: comprobar con una cuenta real con reloj y con otra que solo tenga un Edge.
-- **Skills de la cuenta de Claude** (`mycoach-uso` y las demás): nombran herramientas que ya no existen (`garmin_sleep`, `garmin_hrv`, `garmin_training_readiness`, `fuerza_entrenos`…). Hay que actualizarlas a la vez que se despliega.
+- **Skills de Claude:** ya viven en `apps/skills` y están al día. Hay que subirlas a Claude (`npm run skills`) cuando se despliegue el conector.

@@ -7,7 +7,7 @@ description: Analiza una actividad hecha (bici, carrera, skimo, fuerza…) como 
 Sigue `reglas-coach` y `mycoach-uso` (≤5 llamadas).
 
 ## Datos
-1. `garmin_activities limit=3` → `garmin_activity_detail` (stamina, pulso, velocidad, perfil de 24 tramos).
+1. `garmin_activities limit=3` (trae la carga de Garmin de cada una, `carga_garmin`) → `garmin_activity_detail` (stamina, pulso, velocidad, perfil de 24 tramos).
 2. Solo si aporta: `intervals_actividad` (desacople, zonas, eficiencia).
 3. Progreso: `coach_progreso` del deporte (compara 4 semanas con las 4 anteriores).
 4. Plan del día: `coach_semana` si no está en contexto.

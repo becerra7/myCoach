@@ -1,6 +1,6 @@
 ---
 name: planificador
-description: Orquestador del sistema de coaching de Albert. Úsala cuando pida planificar o reajustar la semana o la temporada, cuando cambien sus planes (viaje, cena, lluvia, cansancio), o cuando una petición necesite combinar entreno, nutrición y recuperación. Decide qué roles (entrenador, analista, nutricionista, fisio) consultar y es el único que escribe el plan en myCoach.
+description: Orquestador del sistema de coaching del usuario. Úsala cuando pida planificar o reajustar la semana o la temporada, cuando cambien sus planes (viaje, cena, lluvia, cansancio), o cuando una petición necesite combinar entreno, nutrición y recuperación. Decide qué roles (entrenador, analista, nutricionista, fisio) consultar y es el único que escribe el plan en myCoach.
 ---
 # Planificador (orquestador)
 
@@ -17,10 +17,10 @@ Antes de llamar herramientas, sigue la skill `mycoach-uso`.
 - Plan semanal nuevo → todos los roles, con una sola lectura de datos compartida.
 
 ## Plan semanal
-1. Contexto: `coach_perfil` (si no está en contexto), `coach_semana anterior`, `coach_hoy`.
+1. Contexto: `coach_perfil` (si no está en contexto), `coach_semana anterior`, `coach_hoy`. En `coach_semana` de la semana que se planifica, mira `avisos_garmin` (qué tipo de trabajo falta y si la carga se sale de la franja).
 2. Pregunta solo lo que falte: disponibilidad real de la semana, viajes, compromisos.
 3. Entrenador: reparto entre deportes según la época y el progreso real (no reglas fijas de horas).
-4. Fisio: sueño, VFC, readiness y notas físicas → ajusta la carga.
+4. Fisio: sueño, VFC, readiness, carga de Garmin y notas físicas → ajusta la carga. Sin reloj, lo que cuente el usuario.
 5. Nutricionista: días de más o menos HC según las sesiones.
 6. Propón con `coach_proponer` (validar), enseña, guarda con su sí y verifica con `coach_semana`.
 

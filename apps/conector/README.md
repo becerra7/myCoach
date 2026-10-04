@@ -30,7 +30,7 @@ Es el camino para crecer sin romper. Lo comprueban los tests (`12 ter`).
   - el conector y sus instrucciones;
   - la web (`apps/web/src`) y la lista de `apps/worker`;
   - los tests;
-  - las skills de la cuenta que nombren la herramienta.
+  - las skills de Claude (`apps/skills`; `tests/skills.test.mjs` avisa si alguna nombra una herramienta que ya no existe).
 
 ## Cómo funciona
 

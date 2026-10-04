@@ -57,6 +57,7 @@ Las reglas de este archivo y los tokens de `app.css` mandan siempre sobre cualqu
 - El método (semáforo, reglas del plan) vive en el conector (`apps/conector`, herramientas `coach_*`). La web lo enseña, no lo recalcula. Si la web necesita un dato nuevo, se añade al conector en el mismo cambio.
 - Solo se planifican bici, correr y skimo (y fuerza como complemento). El resto de deportes cuenta como carga.
 - `docs/PLAN-COACH.md` recoge las decisiones de producto; `docs/PRUEBAS.md`, cómo probar.
+- Las skills de Claude del entrenador viven en `apps/skills` (fuente de verdad). Si cambia una herramienta del conector, se cambian en el mismo cambio y se suben con `npm run skills`.
 
 ## Comprobaciones
 - `npm run check` antes de cada commit.
