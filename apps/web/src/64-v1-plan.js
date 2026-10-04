@@ -26,9 +26,12 @@ function filaDia(f) {
   const det = hecho ? `${esc(hecho.lugar)}${hecho.km && SPORTS[hecho.dep]?.cardio ? `, ${nf(hecho.km)} km` : ''}, ${dur(hecho.min)}${hecho.fc ? ` a ${hecho.fc} ppm` : ''}`
     : s && s.ruta ? esc(s.ruta) : s && s.min && s.t !== 'descanso' ? `${SPORTS[s.dep]?.n || ''}, ${dur(s.min)}` : '';
   const st = e.k === 'hecho' ? '✓ Hecho' : e.k === 'no' ? 'No hecho' : e.k === 'hoy' ? 'Hoy' : e.k === 'pend' ? 'Pendiente' : '';
-  return `<li class="${f === HOY ? 'es-hoy' : ''}"><button type="button" style="--c:${e.dep ? scol(e.dep) : 'var(--fill)'}" data-a="day" data-v="${f}" aria-label="${cap1(fLarga(f))}: ${esc(titulo)}${st ? `, ${st.replace('✓ ', '')}` : ''}">
+  const ag = agendaDia(f), ocupado = ag.length && (AGENDA_LIBRE[f]?.todo_ocupado || AGENDA_LIBRE[f]?.libre_min < 30);
+  // Un día sin hueco no es "no hecho": sin culpa.
+  const st2 = e.k === 'no' && ocupado ? 'Ocupado' : st;
+  return `<li class="${f === HOY ? 'es-hoy' : ''}"><button type="button" style="--c:${e.dep ? scol(e.dep) : 'var(--fill)'}" data-a="day" data-v="${f}" aria-label="${cap1(fLarga(f))}: ${esc(titulo)}${ag.length ? `. ${esc(ag.map(textoEvento).join('; '))}` : ''}${st2 ? `, ${st2.replace('✓ ', '')}` : ''}">
     <span class="fd" aria-hidden="true"><small>${DC[d.getDay()]}</small><b>${d.getDate()}</b></span>
-    <span class="t"><b>${esc(titulo)}</b>${det ? `<span class="small muted">${det}</span>` : ''}</span><span class="st">${st}</span></button></li>`;
+    <span class="t"><b>${esc(titulo)}</b>${det ? `<span class="small muted">${det}</span>` : ''}${lineaAgenda(f)}</span><span class="st">${st2}</span></button></li>`;
 }
 
 function tabPlanV1() {
@@ -43,7 +46,7 @@ function tabPlanV1() {
   if (w === PROX && !pl) semana = `${nav}<p class="muted">Aún no está preparada. Lo más rápido: pídesela a tu Claude, que la propone con tu estado, tus horas y tu calendario, y te la enseña antes de guardarla.</p>
     <div class="btns"><button class="btn fill" type="button" data-a="v-encargo" data-v="0">Prepararla con Claude</button><button class="link" type="button" data-a="v-plan-mano">Hacerla aquí</button></div>
     ${V.planMano ? `<div style="margin-top:16px">${planificador(PROX)}</div>` : ''}`;
-  else semana = `${nav}<p class="small muted" style="margin:-4px 0 12px">${linea}</p><ul class="dias">${days7(w).map(filaDia).join('')}</ul>
+  else semana = `${nav}<p class="small muted" style="margin:-4px 0 12px">${linea}</p>${avisoChoques(w)}<ul class="dias">${days7(w).map(filaDia).join('')}</ul>
     ${w >= SEM ? `<div class="btns"><button class="btn tonal" type="button" data-a="v-encargo" data-v="0">Cambiarla con Claude</button>${w === PROX ? '<button class="link" type="button" data-a="replan">Rehacerla</button>' : ''}</div>` : ''}`;
   const rutas = RUT.datos === 'cargando' || RUT.datos === undefined ? '<p class="muted">Leyendo tus rutas de Garmin…</p>'
     : RUT.datos === null ? '<p class="muted">No he podido leer tus rutas. Vuelve a probar en un rato.</p>'

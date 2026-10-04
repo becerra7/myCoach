@@ -1,6 +1,6 @@
 ---
 name: mycoach-uso
-description: Cómo y cuándo usar las herramientas de myCoach/Garmin (coach_*, garmin_*, intervals_*, comida_*, peso_*, fuerza_*) con el mínimo de llamadas y tokens. Úsala SIEMPRE antes de llamar a cualquier herramienta de myCoach o Garmin, en cualquier conversación de entreno, comida, peso, sueño o recuperación.
+description: Cómo y cuándo usar las herramientas de myCoach/Garmin (coach_*, agenda_*, garmin_*, intervals_*, comida_*, peso_*, fuerza_*) con el mínimo de llamadas y tokens. Úsala SIEMPRE antes de llamar a cualquier herramienta de myCoach o Garmin, en cualquier conversación de entreno, comida, peso, sueño o recuperación.
 ---
 # Uso eficiente de myCoach
 
@@ -15,7 +15,9 @@ description: Cómo y cuándo usar las herramientas de myCoach/Garmin (coach_*, g
 ## Qué llamar según la petición
 | Petición | Llamadas (máx.) |
 |---|---|
-| ¿Qué hago hoy? / ¿puedo apretar? | `coach_hoy` (1) |
+| ¿Qué hago hoy? / ¿puedo apretar? | `coach_hoy` (1; trae su agenda de hoy y si la sesión cabe) |
+| Tengo una cena, un viaje, una reunión… | `agenda_anotar` sin guardar → con su sí, `guardar=true` y, si choca, `coach_proponer` con `propuesta_plan` (2-3) |
+| ¿Cuándo puedo entrenar? | `agenda` (1); si ya llamaste a `coach_semana`, su agenda viene en cada día |
 | Revisar o cambiar la semana | `coach_semana` → `coach_proponer` (validar) → con su sí, `guardar=true` → `coach_semana` para verificar (4) |
 | Primer mensaje de entreno de la conversación | `coach_perfil` (1, solo si no está en contexto). Si trae `por_conocer`, sigue `primeros-pasos` |
 | Analizar una actividad | `garmin_activities limit=3` → `garmin_activity_detail` (2); `intervals_actividad` solo si hace falta desacople o zonas |

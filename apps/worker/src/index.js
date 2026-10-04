@@ -11,8 +11,9 @@
 //   POST /api/mcp       → { tool, input } → llama a la herramienta del conector
 //   POST /api/logout
 //   /api/cuenta[/contrasena|/garmin] → tu cuenta de myCoach en el conector (contraseña, vincular Garmin)
-
-import { ocupados } from './ics.js';
+//
+// El calendario ya no vive aquí: lo guarda el conector (agenda_calendario) para que tu Claude
+// también lo vea. Si una sesión trae un enlace de antes, se pasa al conector al abrir la app.
 
 const COOKIE = 'mc_s';
 const SESSION_TTL = 60 * 60 * 24 * 60;
@@ -34,6 +35,8 @@ export const TOOLS = new Set([
   'entrenos', 'fuerza_entreno_guardar', 'fuerza_ejercicios_garmin', 'entreno_enviar_garmin', 'peso_historico',
   // Solo lectura: tus rutas guardadas en Garmin (Plan) y las comidas que registra tu Claude (Comer).
   'garmin_courses', 'comidas',
+  // Tu agenda: lo que te ocupa (compromisos y calendario), anotar algo y conectar el calendario.
+  'agenda', 'agenda_anotar', 'agenda_calendario',
 ]);
 
 const json = (data, status = 200, headers = {}) =>
@@ -49,16 +52,6 @@ const setCookie = (v, maxAge) => `${COOKIE}=${v}; Path=/; HttpOnly; Secure; Same
 // por service binding (GARMIN_SVC). El navegador sí usa la URL pública.
 const garmin = (env, path, init) =>
   env.GARMIN_SVC ? env.GARMIN_SVC.fetch(new Request(`${env.GARMIN_URL}${path}`, init)) : fetch(`${env.GARMIN_URL}${path}`, init);
-
-/** Descarga un .ics (máx. 5 MB). null si no es un calendario. */
-async function leerIcs(cal) {
-  try {
-    const r = await fetch(cal, { headers: { Accept: 'text/calendar, */*' }, redirect: 'follow', signal: AbortSignal.timeout(10000) });
-    if (!r.ok) return null;
-    const t = await r.text();
-    return t.length < 5e6 && t.includes('BEGIN:VCALENDAR') ? t : null;
-  } catch { return null; }
-}
 
 /* El registro de la web como cliente del conector va firmado con SIGNING_KEY: si la clave cambia,
    el guardado ya no vale. La clave de la caché lleva una huella de la clave para que se renueve solo. */
@@ -136,39 +129,13 @@ export async function handleApi(request, env) {
   // Sesión deslizante: cada vez que abres la app se renuevan los 60 días (cookie y KV).
   if (pathname === '/api/me') {
     if (!sesion) return json({ conectado: false });
+    // El enlace del calendario que se guardaba en la sesión pasa al conector, una vez y sin pedir nada.
+    if (sesion.cal) {
+      const r = await llamar(env, origin, sid, sesion, 'agenda_calendario', { url: sesion.cal }).catch(() => null);
+      if (r && r.ok) { delete sesion.cal; await env.SESIONES.delete(`mc:ics:${sid}`); }
+    }
     await env.SESIONES.put(`mc:s:${sid}`, JSON.stringify(sesion), { expirationTtl: SESSION_TTL });
-    return json({ conectado: true, calendario: !!sesion.cal }, 200, { 'Set-Cookie': setCookie(sid, SESSION_TTL) });
-  }
-
-  // Calendario: el enlace privado iCal del usuario. Solo se guarda en su sesión y
-  // solo se devuelven los bloques ocupados de los próximos días.
-  if (pathname === '/api/calendario') {
-    if (!sesion) return json({ code: 'needs_reauth', message: 'Conecta tu Garmin' }, 401);
-    const guardar = async () => env.SESIONES.put(`mc:s:${sid}`, JSON.stringify(sesion), { expirationTtl: SESSION_TTL });
-    if (request.method === 'DELETE') { delete sesion.cal; await guardar(); await env.SESIONES.delete(`mc:ics:${sid}`); return json({ ok: true }); }
-    const tz = env.TZ || 'Europe/Madrid';
-    const hoy = new Date().toLocaleDateString('sv-SE', { timeZone: tz });
-    if (request.method === 'POST') {
-      if (!(request.headers.get('Content-Type') || '').startsWith('application/json')) return json({ code: 'bad_request' }, 415);
-      const { url: u } = await request.json().catch(() => ({}));
-      const cal = String(u || '').trim().replace(/^webcal:\/\//i, 'https://');
-      if (!/^https:\/\/[^\s]+$/i.test(cal)) return json({ code: 'bad_request', message: 'Pega el enlace que empieza por https:// o webcal://' }, 400);
-      const texto = await leerIcs(cal);
-      if (texto === null) return json({ code: 'bad_request', message: 'Ese enlace no devuelve un calendario (.ics). Copia la "dirección secreta en formato iCal".' }, 400);
-      sesion.cal = cal; await guardar();
-      await env.SESIONES.put(`mc:ics:${sid}`, texto, { expirationTtl: 600 });
-      return json({ ok: true, eventos: ocupados(texto, hoy, 14, tz).length });
-    }
-    if (!sesion.cal) return json({ configurado: false, eventos: [] });
-    const desde = /^\d{4}-\d{2}-\d{2}$/.test(url.searchParams.get('desde') || '') ? url.searchParams.get('desde') : hoy;
-    const dias = Math.min(21, Math.max(1, +url.searchParams.get('dias') || 14));
-    let texto = await env.SESIONES.get(`mc:ics:${sid}`);
-    if (!texto) {
-      texto = await leerIcs(sesion.cal);
-      if (texto === null) return json({ code: 'server_unavailable', message: 'No he podido leer tu calendario' }, 502);
-      await env.SESIONES.put(`mc:ics:${sid}`, texto, { expirationTtl: 600 });
-    }
-    return json({ configurado: true, eventos: ocupados(texto, desde, dias, tz) });
+    return json({ conectado: true }, 200, { 'Set-Cookie': setCookie(sid, SESSION_TTL) });
   }
 
   if (pathname === '/api/login') {

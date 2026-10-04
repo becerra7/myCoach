@@ -25,11 +25,6 @@
     name: 'web',
     login: () => { location.href = '/api/login'; },
     logout: () => api('/api/logout', {}).finally(() => location.reload()),
-    calendario: {
-      leer: (desde, dias) => api(`/api/calendario?desde=${desde}&dias=${dias}`),
-      guardar: url => api('/api/calendario', { url }),
-      quitar: () => fetch('/api/calendario', { method: 'DELETE', credentials: 'same-origin' }),
-    },
   };
   window.claude = {
     use: async name => {

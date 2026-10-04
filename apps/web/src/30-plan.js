@@ -29,7 +29,7 @@ function planificador(w = PROX) {
 function sheetDia(f) {
   openSheet({ title: cap1(fLarga(f)), size: 'auto', id: 'dia', body: () => {
     const s = sesion(f); const as = acts().filter(a => a.f === f);
-    if (!s) return as.length ? as.map(a => `<button type="button" class="li" data-a="push-close" data-v="actividad" data-id="${a.id}"><span class="main"><b>${esc(a.lugar)}</b><span>${SPORTS[a.dep].n} · ${dur(a.min)}</span></span>${ic('chev', 18, 'chev')}</button>`).join('') : '<p class="muted">Sin actividad ni plan.</p>';
+    if (!s) return (as.length ? as.map(a => `<button type="button" class="li" data-a="push-close" data-v="actividad" data-id="${a.id}"><span class="main"><b>${esc(a.lugar)}</b><span>${SPORTS[a.dep].n} · ${dur(a.min)}</span></span>${ic('chev', 18, 'chev')}</button>`).join('') : '<p class="muted">Sin actividad ni plan.</p>') + bloqueAgendaDia(f);
     const k = tipoSes(s);
     if (s.a && fuerzaDelDia(f)) return `<p style="font-size:18px"><b>${esc(s.d)}</b></p>${bloqueFuerza(f)}<button class="btn text" type="button" data-a="push-close" data-v="actividad" data-id="${s.a.id}">Ver la actividad</button>`;
     if (s.a) return `<div class="row">${chip(k)}${s.a.sim ? simTag() : ''}</div><p><b>${esc(s.a.lugar)}</b> · ${s.a.km ? `${nf(s.a.km)} km · ` : ''}${dur(s.a.min)}${s.a.fc ? ` · ${s.a.fc} ppm` : ''}</p>${s.a.z ? distBar(s.a.z) : ''}
@@ -44,8 +44,18 @@ function sheetDia(f) {
         ${pasado ? '' : `<button class="li" type="button" data-a="move" data-v="${f}">${ic('move')}<span class="main"><b>Mover a otro día</b></span>${ic('chev', 18, 'chev')}</button>`}
         <button class="li" type="button" data-a="otro" data-v="${f}">${ic('edit')}<span class="main"><b>Cambiar por otra cosa</b></span>${ic('chev', 18, 'chev')}</button>
         ${pasado ? '' : `<button class="li" type="button" data-a="ent-elegir" data-v="${f}">${ic('dumbbell')}<span class="main"><b>${s.dep === 'fuerza' ? 'Cambiar el entreno de fuerza' : 'Poner un entreno de fuerza'}</b></span>${ic('chev', 18, 'chev')}</button>`}
-      </div>`;
+      </div>${bloqueAgendaDia(f)}`;
   } });
+}
+/* En la hoja del día: lo que tienes ese día (tocar para cambiarlo) y anotar algo nuevo */
+function bloqueAgendaDia(f) {
+  if (f < HOY || !calDisponible()) return '';
+  const ev = agendaDia(f);
+  const fila = e => e.origen === 'tuyo'
+    ? `<button class="li" type="button" data-a="comp-abrir" data-v="${f}" data-id="${esc(e.id)}">${ic('lock')}<span class="main"><b>${esc(e.titulo)}</b><span>${e.todo_dia ? 'Todo el día' : `De ${e.de} a ${e.a}`}</span></span>${ic('chev', 18, 'chev')}</button>`
+    : `<div class="li">${ic('lock')}<span class="main"><b>${esc(e.titulo)}</b><span>${e.todo_dia ? 'Todo el día' : `De ${e.de} a ${e.a === '24:00' ? '00:00' : e.a}`} · de tu calendario</span></span></div>`;
+  return `<h3 class="met-h" style="margin-top:16px">Tu agenda</h3><div class="list">${ev.map(fila).join('')}
+    <button class="li" type="button" data-a="comp-nuevo" data-v="${f}">${ic('plus')}<span class="main"><b>No puedo este día</b><span>Una cena, un viaje, unas horas ocupadas</span></span>${ic('chev', 18, 'chev')}</button></div>`;
 }
 function capsCheck(week, fecha, tipo) {
   const p = weekOf(fecha) === SEM ? S.plan : S.next || {};
