@@ -205,6 +205,7 @@ Objetivo: que funcione sin ti delante y aprender qué enamora.
    - el semáforo decide con la carga y con lo que el usuario cuente;
    - la app y Claude le preguntan cómo se encuentra.
 10. **Claude no está ciego:** lo que myCoach no tenga se pide a Garmin con `garmin_api` (solo lectura, con catálogo). Ver `docs/GARMIN-API.md`.
+11. **Las skills se quedan como la capa de criterio** (4 de octubre). Cómo analizar, cómo diseñar una sesión, la nutrición, el tono y el onboarding son criterio y no se pueden convertir en reglas del conector. El conector se queda con lo que es regla o dato: validar, preguntar lo que falta en el perfil y guardar preferencias. Retirar una skill necesita una decisión aparte, con pruebas de conversaciones reales.
 
 ## 10. Próximos pasos concretos (2 semanas)
 1. Sacar `packages/domain` con carga TRIMP, semáforo y tests.

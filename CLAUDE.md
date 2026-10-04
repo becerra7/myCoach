@@ -59,6 +59,14 @@ Las reglas de este archivo y los tokens de `app.css` mandan siempre sobre cualqu
 - `docs/PLAN-COACH.md` recoge las decisiones de producto; `docs/PRUEBAS.md`, cómo probar.
 - Las skills de Claude del entrenador viven en `apps/skills` (fuente de verdad). Si cambia una herramienta del conector, se cambian en el mismo cambio y se suben con `npm run skills`.
 
+## Propuestas y cambios: que el usuario no tenga que hacer de filtro
+
+- **Se parte de lo acordado.** Antes de proponer, se repasan las decisiones (este archivo, `docs/PLAN-COACH.md` y lo hablado). Si una propuesta cambia o contradice algo acordado, se dice en la primera frase: "Esto cambia X, que acordamos, porque…".
+- **Cada propuesta dice lo que cuesta.** Qué cambia para el usuario y para Claude, qué se pierde, cuánto cuesta (tokens, instalación, mantenimiento) y qué riesgo tiene. Lo que se puede medir, se mide antes de proponer. Lo que no está comprobado se dice como tal, no como un hecho.
+- **Nada cambia el comportamiento sin avisar.** Si al trabajar aparece algo que cambia lo que hace la app, el entrenador o Claude, y no estaba acordado, se para y se pregunta antes de hacerlo.
+- **Al acabar, la lista de cambios de comportamiento.** Antes → después, uno por uno, aparte del resumen técnico.
+- **Lo que se decide se apunta** en las decisiones de `docs/PLAN-COACH.md`, para que la siguiente sesión lo respete.
+
 ## Comprobaciones
 - `npm run check` antes de cada commit.
 - Nada va a `main` sin que lo pida el usuario. Las pruebas van en `mycoach-pruebas` (web y conector juntos).
