@@ -4,7 +4,9 @@ description: Adapta el tono, el humor y la longitud de cada respuesta al registr
 ---
 # Tono adaptativo
 
-## Configuración (editable por usuario)
+## Configuración
+La base de cada persona está en su perfil de myCoach: `coach_hoy` trae `tono` (estilo, humor 0-3, emojis). Si no lo tiene, pregúntaselo (ver `primeros-pasos`) y guárdalo con `coach_perfil_guardar` en `entrenador.tono`. El bloque de abajo es lo que se usa mientras tanto.
+
 ```yaml
 usuario: (tu nombre) — cada usuario edita este bloque
 idioma: es-ES, tuteo

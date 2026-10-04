@@ -21,6 +21,7 @@ Es el camino para crecer sin romper. Lo comprueban los tests (`12 ter`).
   - `entrenos` y `entreno_enviar_garmin` llevan `tipo`;
   - `garmin_courses` con `course_id` da el detalle de un recorrido.
 - **Lo que solo usa la app lleva `soloApp: true`.** Se anuncia con `_meta.ui.visibility: ["app"]` (MCP Apps): Claude no la ve, la app dentro de Claude sí la llama, y la web la usa por `/api/mcp`, que tiene su propia lista en `apps/worker/src/index.js`.
+- **Las instrucciones del servidor, por debajo de 4.096 caracteres** (Claude corta ahí). Lo de cada herramienta va en su descripción, no en las instrucciones. Lo comprueba el test `12 quater`.
 - **Lo que escribe lleva `write: true`.** Si escribe en Garmin, pide `confirm` (o da vista previa sin él).
 - **Para Garmin, `garmin_api` es el respaldo.** Si un dato no tiene herramienta, Claude lo pide a pelo con el catálogo `ENDPOINTS_GARMIN`.
   - Un dato nuevo de Garmin se añade primero al catálogo.
@@ -100,7 +101,7 @@ negocia. Así da igual con quién hables: la lógica es la misma.
 | `coach_hoy` | Semáforo del día (verde / ámbar / rojo) con sus razones: readiness, VFC y pulso en reposo frente a tu mediana de 28 días, horas de sueño, frescura (TSB), la carga de 7 días de Garmin frente a su franja óptima, el estado de entreno de Garmin (sobrecargado o en sobreesfuerzo cuentan), el estrés de ayer y lo que hayas anotado. Trae `garmin` (carga, Load Focus, estado, aclimatación) y `fuentes`: qué mide el dispositivo. Sin datos de descanso (solo un Edge) no enseña huecos y pide cómo te encuentras (`pide_sensacion`). Si hace falta, propone cambiar, recortar o mover la sesión del plan. Trae un mensaje ya redactado. |
 | `coach_semana` | Plan frente a lo hecho día a día, carga de la semana frente a la media de 4 y avisos (rampa, descarga, fuerza, intensidad). En esta semana y la siguiente, `avisos_garmin`: qué tipo de trabajo falta según el Load Focus y si la carga se sale de la franja. |
 | `coach_proponer` | Valida cambios de plan (máximo de intensos, nada de intensos seguidos, semáforo, horas, fuerza, lesiones). Sin `guardar` solo valida; con errores no guarda y ofrece una versión corregida. Deja el porqué en `coach/decisiones`. |
-| `coach_perfil` / `coach_perfil_guardar` | Objetivo con fecha, disponibilidad, lesiones, preferencias y material. |
+| `coach_perfil` / `coach_perfil_guardar` | Objetivo con fecha, disponibilidad, lesiones, experiencia, preferencias, material, tono del entrenador (`entrenador.tono`) y lo que no le gusta (`no_le_gusta`). `coach_perfil` devuelve `por_conocer`: lo que falta saber, por orden; `coach_hoy` trae solo la siguiente pregunta y el tono. |
 | `coach_anotar` | Sensaciones (1-5), dolores y notas. Un dolor en las últimas 36 h pone el día en rojo. |
 | `coach_progreso` | Evolución de bici, correr o skimo semana a semana: velocidad, ritmo, VAM, pulso, potencia, cadencia y eficiencia (metros por latido); últimas 4 semanas frente a las 4 anteriores y mejores registros. |
 

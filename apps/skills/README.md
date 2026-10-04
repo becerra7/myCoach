@@ -10,6 +10,7 @@ toca el conector, y luego se suben a Claude.
 | Skill | Para qué |
 |---|---|
 | `reglas-coach` | Reglas base: datos, evidencia, seguridad y formato. Va antes que las demás. |
+| `primeros-pasos` | Para quien empieza o tiene el perfil a medias: le conoce de una pregunta en una, le explica la app sin tecnicismos y tira de él con un siguiente paso. |
 | `mycoach-uso` | Qué herramienta llamar según la petición, con el mínimo de llamadas. |
 | `planificador` | Orquesta los roles y es el único que escribe el plan. |
 | `entrenador` | Sesiones y reparto entre deportes, con especialistas por deporte. |

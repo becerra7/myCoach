@@ -1609,7 +1609,7 @@ const rpc = async (env, token, message) => {
 
 	const init = await rpc(env, ana, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } });
 	check("las instrucciones del conector traen el metodo del entrenador",
-		init.body.result.instructions.includes("ENTRENADOR MYCOACH") && init.body.result.instructions.includes("coach_proponer"));
+		init.body.result.instructions.includes("Eres myCoach") && init.body.result.instructions.includes("coach_proponer"));
 	const lista = await rpc(env, ana, { jsonrpc: "2.0", id: 2, method: "tools/list" });
 	const an = anot0(lista);
 	check("coach_hoy y coach_semana se anuncian como lectura", an.coach_hoy.readOnlyHint && an.coach_semana.readOnlyHint && an.coach_perfil.readOnlyHint);
@@ -1778,9 +1778,9 @@ const rpc = async (env, token, message) => {
 
 	// El nombre del entrenador lo pone el usuario
 	const instr = async () => (await rpc(env, ana, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } })).body.result.instructions;
-	check("por defecto el entrenador se llama myCoach", (await instr()).includes("Se llama myCoach") && (await llamar(ana, "coach_perfil")).nombre_entrenador === "myCoach");
+	check("por defecto el entrenador se llama myCoach", (await instr()).includes("Eres myCoach") && (await llamar(ana, "coach_perfil")).nombre_entrenador === "myCoach");
 	await llamar(ana, "coach_perfil_guardar", { cambios: { entrenador: { nombre: "Rafa" } } });
-	check("con otro nombre, las instrucciones lo usan", (await instr()).includes("Se llama Rafa"));
+	check("con otro nombre, las instrucciones lo usan", (await instr()).includes("Eres Rafa"));
 	check("y coach_hoy lo devuelve", (await llamar(ana, "coach_hoy")).entrenador === "Rafa");
 	check("un nombre vacio o larguisimo no se guarda", Boolean((await llamar(ana, "coach_perfil_guardar", { cambios: { entrenador: { nombre: "" } } })).error));
 	const padel = await llamar(ana, "coach_proponer", { cambios: { [mas(proxLunes, 5)]: { dep: "raqueta", t: "otros", d: "Padel", min: 60 } }, porque: "x" });
@@ -1892,6 +1892,71 @@ const rpc = async (env, token, message) => {
 	check("sin reloj: con lo anotado ya no lo pide", (await llamar(edu, "coach_hoy")).pide_sensacion === false);
 	const serie = await llamar(edu, "garmin_dia", { dias: 7 });
 	check("garmin_dia con dias: la serie guardada y qué mide el dispositivo", Array.isArray(serie.dias) && serie.dias.length >= 5 && serie.fuentes?.sin_descanso === true, JSON.stringify(serie).slice(0, 200));
+	globalThis.fetch = abajo;
+}
+
+// ── 12 quater. Conocer a la persona: tono, lo que falta saber y lo que no le gusta ──
+{
+	mockGarmin({ "pau@x.com": { password: "p", data: { displayName: "pau", hrv: null } } });
+	const abajo = globalThis.fetch;
+	globalThis.fetch = async (url, init) => {
+		const u = new URL(url);
+		if (u.hostname !== "connectapi.garmin.com" || u.pathname.includes("socialProfile")) return abajo(url, init);
+		if (u.pathname.includes("/activitylist-service/")) return new Response("[]");
+		return new Response("{}", { status: 404 });
+	};
+	const env = makeEnv();
+	const pau = (await connect(env, "pau@x.com", "p")).tokens.access_token;
+	const llamar = async (name, args = {}) => {
+		const r = await rpc(env, pau, { jsonrpc: "2.0", id: 40, method: "tools/call", params: { name, arguments: args } });
+		const res = r.body.result;
+		return res.isError ? { error: res.content[0].text } : JSON.parse(res.content[0].text);
+	};
+
+	// Las instrucciones caben enteras: Claude las corta a 4096 caracteres.
+	await llamar("coach_perfil_guardar", { cambios: { entrenador: { nombre: "N".repeat(24) } } });
+	const ins = (await rpc(env, pau, { jsonrpc: "2.0", id: 41, method: "initialize", params: { protocolVersion: "2025-06-18" } })).body.result.instructions;
+	check("instrucciones por debajo del corte de 4096 (con un nombre de 24 letras)", ins.length < 3900, String(ins.length));
+	const herr = (await rpc(env, pau, { jsonrpc: "2.0", id: 42, method: "tools/list" })).body.result.tools;
+	const todo = ins + herr.map((t) => t.name + " " + t.description + JSON.stringify(t.inputSchema)).join(" ");
+	// Ninguna regla se pierde al acortar: cada una vive en las instrucciones o en la herramienta a la que afecta.
+	const reglas = ["nunca diagnostiques", "coach_proponer sin guardar", "por_conocer", "antes_de_proponer", "no_le_gusta", "sin_descanso", "garmin_api",
+		"mycoach_abrir", "garmin_status", "nunca pidas capturas", "ya es su si", "vista previa", "mas reps o mas peso", "actualizar_entreno",
+		"estime los cuartos", "no dibuje", "garmin_plan_route", "pida su confirmacion", "fuerza_desde_garmin", "entrenos_desde_garmin", "tendencia"];
+	const perdidas = reglas.filter((r) => !todo.toLowerCase().includes(r.toLowerCase()));
+	check("ninguna regla se pierde al acortar las instrucciones", perdidas.length === 0, perdidas.join(" | "));
+	check("las instrucciones no hablan de tecnicismos al usuario", /nunca digas MCP, conector/.test(ins));
+
+	// Perfil vacío: lo primero que quiere saber es cómo hablarle.
+	const p0 = await llamar("coach_perfil");
+	check("perfil sin datos: por_conocer empieza por el tono", p0.por_conocer?.[0]?.clave === "tono" && p0.por_conocer.length === 6, JSON.stringify(p0.por_conocer?.map((x) => x.clave)));
+	const h0 = await llamar("coach_hoy");
+	check("coach_hoy trae una sola pregunta, la siguiente", h0.por_conocer?.clave === "tono" && h0.tono === null, JSON.stringify(h0.por_conocer));
+
+	// Tono y nombre se guardan sin pisarse.
+	await llamar("coach_perfil_guardar", { cambios: { entrenador: { tono: { estilo: "directo", humor: 1, emojis: false } } } });
+	await llamar("coach_perfil_guardar", { cambios: { entrenador: { nombre: "Rafa" } } });
+	const p1 = (await llamar("coach_perfil")).perfil;
+	check("guardar el nombre no borra el tono (ni al revés)", p1.entrenador.nombre === "Rafa" && p1.entrenador.tono?.estilo === "directo" && p1.entrenador.tono.humor === 1, JSON.stringify(p1.entrenador));
+	check("un humor fuera de 0-3 no se guarda", Boolean((await llamar("coach_perfil_guardar", { cambios: { entrenador: { tono: { humor: 7 } } } })).error));
+	const h1 = await llamar("coach_hoy");
+	check("con el tono guardado, coach_hoy lo trae y pasa a la siguiente pregunta", h1.tono?.estilo === "directo" && h1.por_conocer?.clave === "objetivo");
+	await llamar("coach_perfil_guardar", { cambios: { lesiones: [] } });
+	check("lesiones: [] cuenta como 'ninguna', ya no se pregunta", !(await llamar("coach_perfil")).por_conocer.some((x) => x.clave === "lesiones"));
+
+	// Paula pide fuerza: antes de proponer, lo que falta saber.
+	const f0 = await llamar("entrenos", { tipo: "fuerza" });
+	const claves = (f0.antes_de_proponer?.preguntas || []).map((x) => x.clave);
+	check("fuerza sin datos: antes de proponer pregunta nivel, material y tiempo", claves.join() === "experiencia.fuerza,material,disponibilidad", claves.join());
+	check("la lista de cardio no lleva preguntas de fuerza", !(await llamar("entrenos", { tipo: "cardio" })).antes_de_proponer);
+	await llamar("coach_perfil_guardar", { cambios: { experiencia: { fuerza: "nunca" }, material: { lugar: "casa", mancuernas: "2 de 5 kg" }, disponibilidad: { dias: 3, minutos: 40 },
+		no_le_gusta: [{ ejercicio: "Sentadilla", motivo: "se aburre", alternativa: "Subida al banco" }] } });
+	const f1 = await llamar("entrenos", { tipo: "fuerza" });
+	check("con lo que hace falta sabido, ya no pregunta", !f1.antes_de_proponer);
+	check("y devuelve lo que no le gusta, con su alternativa", f1.no_le_gusta?.[0]?.alternativa === "Subida al banco");
+	const g = await llamar("fuerza_entreno_guardar", { nombre: "Piernas en casa", ejercicios: [{ nombre: "Sentadilla goblet", series: 3, reps: 10 }, { nombre: "Puente de glúteo", series: 3, reps: 12 }] });
+	check("guardar un entreno con lo que no le gusta avisa (y lo guarda igual)", g.guardado?.id === "piernas-en-casa" && g.no_le_gusta?.[0]?.ejercicio === "Sentadilla", JSON.stringify(g.no_le_gusta));
+	check("no_le_gusta tiene que ser una lista con ejercicio", Boolean((await llamar("coach_perfil_guardar", { cambios: { no_le_gusta: [{ motivo: "x" }] } })).error));
 	globalThis.fetch = abajo;
 }
 

@@ -207,6 +207,14 @@ Objetivo: que funcione sin ti delante y aprender qué enamora.
 10. **Claude no está ciego:** lo que myCoach no tenga se pide a Garmin con `garmin_api` (solo lectura, con catálogo). Ver `docs/GARMIN-API.md`.
 11. **Las skills se quedan como la capa de criterio** (4 de octubre). Cómo analizar, cómo diseñar una sesión, la nutrición, el tono y el onboarding son criterio y no se pueden convertir en reglas del conector. El conector se queda con lo que es regla o dato: validar, preguntar lo que falta en el perfil y guardar preferencias. Retirar una skill necesita una decisión aparte, con pruebas de conversaciones reales.
 
+12. **Conocer a la persona antes de recomendar** (4 de octubre).
+   - El perfil guarda el tono (`entrenador.tono`: estilo, humor de 0 a 3 y emojis), la experiencia por deporte y lo que no le gusta (`no_le_gusta`: ejercicio, motivo y alternativa).
+   - `coach_perfil` devuelve lo que falta por saber, por orden (`por_conocer`): tono, objetivo, tiempo, molestias, experiencia y material. `coach_hoy` devuelve solo la siguiente pregunta, para hacerla una por conversación.
+   - `entrenos` no deja proponer fuerza nueva sin saber el nivel, el material, las molestias y el tiempo (`antes_de_proponer`).
+   - Si algo no le gusta, no se quita sin más: se pregunta por qué, se explica para qué sirve y se ofrecen dos alternativas. Si es porque duele, es un dolor.
+   - La skill `primeros-pasos` lleva el criterio de cómo hacerlo; el conector, qué falta y dónde se guarda.
+13. **Las instrucciones del conector, por debajo de 4.096 caracteres** (Claude corta a partir de ahí). Lo importante va primero (voz, tirar de la persona, preguntar antes de recomendar, método) y lo de cada herramienta, en su descripción. Un test vigila que no vuelvan a crecer y que no se pierda ninguna regla.
+
 ## 10. Próximos pasos concretos (2 semanas)
 1. Sacar `packages/domain` con carga TRIMP, semáforo y tests.
 2. Documento `atleta/perfil` más registro de decisiones.

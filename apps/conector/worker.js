@@ -2171,20 +2171,10 @@ async function handleRpc(message, env, userId) {
 	const { id, method, params } = message;
 
 	const capacidades = { tools: { listChanged: false }, resources: { listChanged: false } };
+	// Claude corta las instrucciones a 4096 caracteres: lo importante va primero y lo de cada
+	// herramienta vive en su descripcion. Un test vigila que no vuelvan a crecer.
 	const instrucciones = async () =>
-				"Datos de Garmin Connect del usuario que ha autorizado este conector. Las fechas van en " +
-				"YYYY-MM-DD y por defecto es hoy. Para el descanso y el dia (sueno, VFC, readiness, Body Battery, estres, respiracion, SpO2) use garmin_dia; " +
-				"para las actividades, garmin_activities y garmin_activity_detail; para forma y tendencia (estado de entreno, carga, Load Focus, VO2max, predicciones, umbral), garmin_forma. Si ninguna herramienta trae el dato que busca (records, material, zonas, planes de Garmin...), no diga que no lo tiene: mire el catalogo con garmin_api sin path y pidalo con garmin_api. Si una herramienta " +
-				"falla con error de autenticacion, llame a garmin_status para diagnosticar.\n\n" +
-				"Para planificar rutas de bici: proponga usted los puntos de paso a partir de su conocimiento " +
-				"geografico y llame a garmin_plan_route, que los une por carreteras reales y devuelve las " +
-				"metricas. No invente el trazado ni suponga la distancia: la que cuenta es la que mide la " +
-				"herramienta. Si no cuadra con lo pedido, mueva los puntos y repita. Para saber de donde sale " +
-				"el usuario habitualmente, mire garmin_activities. Guardar la ruta en Garmin (garmin_save_course) " +
-				"Los recorridos ya guardados se leen con garmin_courses (con course_id, su trazado): mirelos antes " +
-				"de proponer una ruta nueva, para no repetir una que el usuario ya tiene. " +
-				"escribe en su cuenta: pida permiso antes." +
-				instruccionesCoach(await nombreEntrenador(env, userId).catch(() => NOMBRE_COACH));
+		instruccionesCoach(await nombreEntrenador(env, userId).catch(() => NOMBRE_COACH));
 
 	if (method === "initialize") {
 		const asked = params?.protocolVersion;
@@ -3432,6 +3422,34 @@ const DUROS = new Set(["int", "tempo"]);
 const DEPORTES_ENTRENABLES = new Set(["bici", "correr", "skimo"]);
 const NOMBRE_COACH = "myCoach";
 
+/**
+ * Lo que el entrenador aun no sabe de la persona, por orden de importancia.
+ * Un campo cuenta como sabido en cuanto esta guardado, aunque sea vacio
+ * (lesiones: [] es "ninguna"). Quien habla hace UNA pregunta cuando encaje,
+ * no un formulario; lo que responda se guarda con coach_perfil_guardar.
+ */
+const PREGUNTAS_PERFIL = [
+	["tono", (p) => p.entrenador?.tono, "¿Cómo quieres que te hable: cercano y con algo de humor, directo y al grano, o motivador? ¿Con emojis o sin?", "entrenador.tono { estilo, humor 0-3, emojis }"],
+	["objetivo", (p) => p.objetivo, "¿Qué quieres conseguir, con tus palabras? ¿Hay alguna fecha?", "objetivo"],
+	["disponibilidad", (p) => p.disponibilidad, "¿Cuántos días a la semana y cuánto rato tienes de verdad para entrenar?", "disponibilidad"],
+	["lesiones", (p) => p.lesiones, "¿Tienes alguna molestia o lesión, o algo que te haya dado guerra antes?", "lesiones (lista; [] si ninguna)"],
+	["experiencia", (p) => p.experiencia, "¿Qué has hecho hasta ahora y qué haces ahora (correr, bici, fuerza…)?", "experiencia { deporte: lo que cuente }"],
+	["material", (p) => p.material, "¿Con qué cuentas para entrenar: reloj o Edge, gimnasio, mancuernas, en casa…?", "material"],
+];
+function porConocer(perfil = {}) {
+	return PREGUNTAS_PERFIL.filter(([, sabido]) => sabido(perfil) == null)
+		.map(([clave, , pregunta, guardar]) => ({ clave, pregunta, guardar_en: guardar }));
+}
+/** Antes de proponer fuerza nueva hay que saber nivel, donde y con que, molestias y tiempo. */
+function preguntasFuerza(perfil = {}) {
+	const faltan = [];
+	if (perfil.experiencia?.fuerza == null) faltan.push({ clave: "experiencia.fuerza", pregunta: "¿Has hecho fuerza alguna vez? ¿Cuánto y qué tal?" });
+	if (perfil.material == null) faltan.push({ clave: "material", pregunta: "¿Dónde la harías (casa o gimnasio) y con qué material?" });
+	if (perfil.lesiones == null) faltan.push({ clave: "lesiones", pregunta: "¿Te molesta algo (rodillas, espalda, hombros…)?" });
+	if (perfil.disponibilidad == null) faltan.push({ clave: "disponibilidad", pregunta: "¿Cuánto rato tienes por sesión y cuántos días?" });
+	return faltan;
+}
+
 async function nombreEntrenador(env, userId) {
 	const perfil = await leerDoc(env, userId, "atleta/perfil");
 	const n = String(perfil?.entrenador?.nombre || "").trim().slice(0, 24);
@@ -3899,6 +3917,9 @@ async function calcularHoy(env, userId, { fecha } = {}) {
 		fuentes,
 		pide_sensacion: !!fuentes?.sin_descanso && !anotadoDelDia(diario || [], hoy).sensacion,
 		entrenador: String(perfil?.entrenador?.nombre || "").trim() || NOMBRE_COACH,
+		// Como quiere que le hablen, y la siguiente cosa que conviene saber de el (una, si encaja).
+		tono: perfil?.entrenador?.tono ?? null,
+		por_conocer: porConocer(perfil || {})[0] ?? null,
 		anotado_hoy: anotadoDelDia(diario || [], hoy),
 		mensaje: mensajeDelDia(sem, sesion, ajuste) +
 			(fuentes?.sin_descanso && !anotadoDelDia(diario || [], hoy).sensacion ? " Tu Garmin no mide el descanso: cuéntame cómo llegas y lo tengo en cuenta." : ""),
@@ -4071,7 +4092,8 @@ const COACH_TOOLS = {
 			"Semaforo del dia (verde, ambar o rojo) con sus razones, la sesion prevista en el plan de myCoach y, si hace falta, " +
 			"la propuesta de ajuste del motor (cambiar, recortar o mover la sesion). Incluye forma, fatiga y frescura, y un " +
 			"mensaje corto ya redactado. Es la primera herramienta para '¿que hago hoy?', '¿puedo apretar?' o '¿como estoy?'. " +
-			"La decision la toma el motor: explíquela con sus razones, no la cambie por su cuenta.",
+			"La decision la toma el motor: explíquela con sus razones, no la cambie por su cuenta. Trae tambien tono (como quiere que le hablen), " +
+			"por_conocer (la siguiente pregunta que conviene hacerle, si encaja) y fuentes (sin_descanso: su dispositivo no mide sueno ni VFC).",
 		schema: { type: "object", properties: { fecha: { type: "string", description: "YYYY-MM-DD. Por defecto hoy (hora de Madrid)." } } },
 		run: async (env, userId, { fecha } = {}) => {
 			const hoy = await calcularHoy(env, userId, { fecha });
@@ -4086,7 +4108,8 @@ const COACH_TOOLS = {
 			"Semana dia a dia: lo previsto en el plan de myCoach frente a lo hecho en Garmin (hecho, saltado, pendiente, extra), " +
 			"totales, carga de la semana frente a la media de 4 semanas, forma actual y avisos del metodo (rampa de carga, " +
 			"descarga, fuerza, intensidad). Uselo para revisar la semana o antes de planificar la siguiente. Para ENSENAR la " +
-			"semana al usuario, abra la app con mycoach_abrir (pantalla plan) en vez de dibujarla.",
+			"semana al usuario, abra la app con mycoach_abrir (pantalla plan) en vez de dibujarla. En esta semana y la siguiente, avisos_garmin " +
+			"dice que tipo de trabajo falta segun Garmin (Load Focus) y si la carga se sale de su franja.",
 		schema: {
 			type: "object",
 			properties: {
@@ -4250,6 +4273,8 @@ const COACH_TOOLS = {
 				perfil,
 				vacio: Object.keys(perfil).length === 0,
 				nombre_entrenador: String(perfil.entrenador?.nombre || "").trim() || NOMBRE_COACH,
+				// Lo que aun no sabe, por orden: una pregunta cada vez, cuando encaje.
+				por_conocer: porConocer(perfil),
 				objetivo_app: objetivoDe(estadoApp),
 				deportes: estadoApp?.sports ?? [],
 				deportes_que_planifico: [...DEPORTES_ENTRENABLES, "fuerza (complemento)"],
@@ -4262,22 +4287,30 @@ const COACH_TOOLS = {
 		write: true,
 		description:
 			"Mezcla campos en el perfil del deportista: objetivo { evento, fecha, tipo }, disponibilidad { dias, horas_semana, " +
-			"franjas }, lesiones (lista completa de { zona, desde, estado: activa|mejorando|curada }), preferencias, material y " +
-			"notas. Guarde lo que el usuario cuente y deba recordarse, diciendole que lo guarda.",
+			"franjas }, lesiones (lista completa de { zona, desde, estado: activa|mejorando|curada }; [] si ninguna), experiencia " +
+			"(por deporte, con sus palabras), preferencias, material, notas, entrenador { nombre, tono: { estilo, humor 0-3, emojis } } " +
+			"y no_le_gusta (lista completa de { ejercicio, motivo, alternativa }). Guarde lo que el usuario cuente y deba recordarse, diciendole que lo guarda.",
 		schema: {
 			type: "object",
 			properties: {
-				cambios: { type: "object", description: "Campos a mezclar: objetivo, disponibilidad, lesiones, preferencias, material, notas." },
+				cambios: { type: "object", description: "Campos a mezclar: objetivo, disponibilidad, lesiones, experiencia, preferencias, material, notas, entrenador, no_le_gusta." },
 			},
 			required: ["cambios"],
 		},
 		run: async (env, userId, { cambios } = {}) => {
 			if (!cambios || typeof cambios !== "object" || Array.isArray(cambios)) throw new HttpError(400, "cambios debe ser un objeto");
-			const permitidos = ["objetivo", "disponibilidad", "lesiones", "preferencias", "material", "notas", "entrenador"];
-			if (limpio_entrenador_invalido(cambios)) throw new HttpError(400, "entrenador debe ser { nombre } (hasta 24 letras)");
+			const permitidos = ["objetivo", "disponibilidad", "lesiones", "experiencia", "preferencias", "material", "notas", "entrenador", "no_le_gusta"];
+			if (limpio_entrenador_invalido(cambios)) throw new HttpError(400, "entrenador debe ser { nombre (hasta 24 letras), tono: { estilo, humor 0-3, emojis } }");
+			if (cambios.no_le_gusta !== undefined && (!Array.isArray(cambios.no_le_gusta) || cambios.no_le_gusta.length > 40 || cambios.no_le_gusta.some((x) => !String(x?.ejercicio || "").trim())))
+				throw new HttpError(400, "no_le_gusta debe ser la lista completa de { ejercicio, motivo, alternativa }");
 			const limpio = Object.fromEntries(Object.entries(cambios).filter(([k]) => permitidos.includes(k)));
 			if (!Object.keys(limpio).length) throw new HttpError(400, `Campos validos: ${permitidos.join(", ")}`);
 			const actual = (await leerDoc(env, userId, "atleta/perfil")) || {};
+			// El entrenador se mezcla por dentro: guardar el nombre desde la app no borra el tono, ni al reves.
+			if (limpio.entrenador) limpio.entrenador = {
+				...actual.entrenador, ...limpio.entrenador,
+				...(limpio.entrenador.tono || actual.entrenador?.tono ? { tono: { ...actual.entrenador?.tono, ...limpio.entrenador.tono } } : {}),
+			};
 			const nuevo = { ...actual, ...limpio };
 			if (JSON.stringify(nuevo).length > 50_000) throw new HttpError(413, "Perfil demasiado grande");
 			return { guardado: true, perfil: await guardarDoc(env, userId, "atleta/perfil", nuevo) };
@@ -4468,52 +4501,42 @@ Object.assign(TOOLS, COACH_TOOLS);
 
 /** Instrucciones del entrenador: como habla y como decide, sea quien sea el que lo llame. */
 const instruccionesCoach = (nombre = NOMBRE_COACH) =>
-	`\n\nENTRENADOR MYCOACH. Se llama ${nombre}: es el nombre que el usuario le ha puesto (por defecto myCoach). Si el ` +
-	"usuario habla de entrenar, de su plan, de como esta o de que hacer hoy, actue como su entrenador, " +
-	`${nombre}, con las herramientas coach_*: coach_hoy para el dia, coach_semana para la semana, coach_perfil ` +
-	"para su contexto (lealo al empezar; coach_perfil_guardar para lo que deba recordarse) y coach_proponer para cualquier cambio de plan. El metodo lo aplica el motor: no " +
-	"invente sesiones ni se salte sus reglas; si el usuario insiste en algo que el motor rechaza, digale que puede hacerlo " +
-	"pero que se lo desaconseja y por que. Cambios de plan: primero coach_proponer sin guardar, luego enseñe el resultado y " +
-	"guarde solo con su si. Cuando cuente como se encuentra o un dolor, anotelo con coach_anotar. Voz: espanol de Espana, " +
-	"tuteando, frases cortas, como un companero que sabe; siempre el porque en una frase; una recomendacion, no un abanico; " +
-	"diga que un dato es estimado cuando lo sea; sin calorias ni culpa con la comida; ante dolor o sintomas raros, baje la " +
-	"carga y recomiende un profesional, nunca diagnostique." +
-	" Planifique solo bici, correr y skimo (y fuerza como complemento); el resto de deportes cuenta como carga pero no se " +
-	"planifica. Si el usuario quiere cambiar el nombre del entrenador, guardelo con coach_perfil_guardar en entrenador.nombre." +
-	" Para '¿estoy mejorando?' use coach_progreso (velocidad, ritmo, VAM, potencia, cadencia, pulso y eficiencia por deporte)." +
-	" DATOS DE GARMIN: coach_hoy ya trae lo que decide el dia (sueno, VFC, readiness, pulso, frescura, carga de 7 dias de Garmin con su franja, " +
-	"estado de entreno y estres de ayer). Si fuentes.sin_descanso es true, su dispositivo no mide el descanso (p. ej. solo un Edge): no le pida datos " +
-	"de sueno ni de VFC, pregunte como se encuentra y anotelo con coach_anotar. garmin_dia trae un dia entero (o la serie de varios dias); garmin_forma, " +
-	"la forma y su evolucion (estado de entreno, carga y Load Focus, VO2max, Endurance, Hill, predicciones, umbral, FTP); coach_semana, los avisos de " +
-	"Garmin para planificar (avisos_garmin: que tipo de trabajo falta). Si ninguna herramienta trae un dato, no diga que no lo tiene: busquelo en el " +
-	"catalogo de garmin_api (sin path) y pidalo con garmin_api." +
-	" DATOS Y GRAFICAS: nunca pida capturas de pantalla. garmin_activity_detail trae todas las metricas y las series de la " +
-	"actividad (stamina incluida si el reloj la graba) con un perfil de 24 tramos; si intervals_estado dice que Intervals.icu " +
-	"esta conectado, intervals_actividades, intervals_actividad (intervalos y series), intervals_bienestar e intervals_curvas " +
-	"(mejores marcas) dan aun mas detalle: eficiencia, desacople, W', zonas de potencia y ritmo, dinamicas de carrera y clima." +
-	" PANTALLAS: si el usuario quiere ver su app, su plan, su semana, su forma o sus pueblos, o acaba de cambiar el plan, " +
-	"abra la app dentro de la conversacion con mycoach_abrir (pantalla hoy, plan, comer, progreso, pueblos o ajustes). Es la app de " +
-	"verdad, con sus datos: no dibuje una tarjeta, un grafico ni un artefacto propio imitandola." +
-	" FUERZA: cada sesion con ejercicio, series x reps, peso, material y descanso. Antes de proponer, mire entrenos " +
-	"(entrenos guardados, lo que hizo la ultima vez y los nombres de ejercicio que ya usa: reutilicelos). Para repetir un entreno, " +
-	"proponga el ajuste con la ultima vez (si hizo todas las reps, mas reps o mas peso). Si le gusta, guardelo con " +
-	"fuerza_entreno_guardar con un nombre (p. ej. 'Pierna A') y el ejercicio de Garmin de cada uno (fuerza_ejercicios_garmin); en el " +
-	"plan, el dia de fuerza lleva entreno: '<id>' (con coach_proponer: { dep: 'fuerza', t: 'otros', d, min, entreno: '<id>' }). Puede mandarlo al reloj con entreno_enviar_garmin tipo=fuerza (escribe en Garmin: pida permiso). " +
-	"Al acabar: si lo hizo con el reloj, fuerza_desde_garmin; si no, fuerza_registrar con solo lo que cambio. Si subio peso o reps, " +
-	"pregunte si lo deja asi para la proxima (actualizar_entreno). El historico, con fuerza_historial." +
-	" SERIES Y ENTRENOS DE BICI O CORRER PARA EL RELOJ: con entreno_enviar_garmin tipo=cardio, por pasos (calentamiento, bloques que se repiten, " +
-	"recuperacion, vuelta a la calma) con objetivo de pulso, potencia, ritmo, velocidad o cadencia. Primero sin confirm para ver la " +
-	"vista previa y enseñarsela; solo con su si, confirm=true (escribe en Garmin). Rangos con sus zonas y umbrales; si no los sabe, zona de pulso del reloj." +
-	" COMIDA: en cuartos de plato (carbohidrato, proteina, verdura), sin calorias. Si le pasa una foto o le cuenta que ha comido, " +
-	"estime los cuartos, digaselo en una frase y guardelo con comida_registrar (desayuno, comida, merienda y cena son una por dia: " +
-	"registrarla otra vez la corrige). Para ver lo registrado, comidas." +
-	" ENTRENOS CREADOS EN GARMIN CONNECT: entrenos_desde_garmin los trae a myCoach (vista previa y, con su si, confirm=true)." +
-	" PESO: si le dice lo que pesa, subalo con peso_registrar (confirm=true: decirlo ya es su si). Un historico (lista, Excel, captura " +
-	"de la bascula): vista previa primero y, con su si, por tandas. Para comentarlo, peso_historico: hable de tendencia (media de 7 dias), " +
-	"no del dato de un dia, y sin juicios.";
-const limpio_entrenador_invalido = (c) =>
-	c.entrenador !== undefined &&
-	(typeof c.entrenador !== "object" || !String(c.entrenador?.nombre || "").trim() || String(c.entrenador.nombre).trim().length > 24);
+	`Eres ${nombre}, el entrenador de myCoach de esta persona (el nombre lo elige ella: coach_perfil_guardar entrenador.nombre). ` +
+	"Si habla de entrenar, de su plan, de como esta, de comida, peso, sueno o salud deportiva, actua como su entrenador con estas herramientas. " +
+	"VOZ: espanol de Espana, tuteando, frases cortas, como un companero que sabe. Siempre el porque en una frase; una recomendacion, no un abanico; " +
+	"di cuando un dato es estimado. Usa el tono que pidio (coach_hoy trae tono). Sin palabras tecnicas: nunca digas MCP, conector, herramienta ni JSON; " +
+	"di tu myCoach y la app. Sin calorias ni culpa con la comida." +
+	" TIRA DE LA PERSONA: no te limites a contestar. Acaba con un paso concreto (que hacer hoy, que contarte, que mirar), retoma lo que quedo pendiente " +
+	"(una molestia, una sesion, un objetivo) y celebra lo que mejora. Si coach_hoy o coach_perfil traen por_conocer, haz esa pregunta cuando encaje, " +
+	"una por conversacion, y guarda la respuesta con coach_perfil_guardar." +
+	" ANTES DE RECOMENDAR: si te falta saber su nivel, su material, sus molestias o su tiempo, pregunta primero (entrenos trae antes_de_proponer para la fuerza); " +
+	"nada generico. SI NO LE GUSTA UN EJERCICIO: no lo quites sin mas. Pregunta por que (duele, aburre, no sabe hacerlo, no tiene material), explica en una " +
+	"frase para que sirve y ofrece dos alternativas con el mismo objetivo; guarda la que elija en no_le_gusta. Si es porque duele, es un dolor: coach_anotar." +
+	" METODO: lo aplica el motor; no inventes sesiones ni te saltes sus reglas. coach_hoy para el dia (semaforo y por que), coach_semana para la semana, " +
+	"coach_perfil para su contexto (leelo al empezar), coach_progreso para ver si mejora. Cambiar el plan: coach_proponer sin guardar, ensenalo y guarda " +
+	"solo con su si; si insiste en algo que el motor rechaza, dile que puede hacerlo pero que no se lo recomiendas y por que. Planifica solo bici, correr y " +
+	"skimo, y fuerza como complemento; el resto cuenta como carga. Como se encuentra o un dolor: coach_anotar. Ante dolor o sintomas raros, baja la carga y " +
+	"recomienda un profesional; nunca diagnostiques." +
+	" DATOS: garmin_dia (el dia: sueno, VFC, readiness, estres), garmin_forma (carga, Load Focus, VO2max, umbral, predicciones), garmin_activity_detail " +
+	"(una actividad con sus graficas: nunca pidas capturas). Si coach_hoy trae fuentes.sin_descanso, su dispositivo no mide el descanso: no le pidas sueno " +
+	"ni VFC, preguntale como llega. Si ningun dato encaja, mira el catalogo de garmin_api y pidelo; no digas que no lo tienes. Para rutas de bici, propon tu los " +
+	"puntos de paso (de donde sale: garmin_activities) y mide con garmin_plan_route; la distancia es la que mide. Si algo falla por la conexion con Garmin, garmin_status." +
+	" PANTALLAS: para ensenar su plan, su semana o su progreso, abre la app con mycoach_abrir; no dibujes tu una imitacion." +
+	" ESCRIBIR EN GARMIN (rutas, entrenos al reloj, peso): pide permiso antes; cada herramienta explica como.";
+const limpio_entrenador_invalido = (c) => {
+	if (c.entrenador === undefined) return false;
+	const e = c.entrenador;
+	if (!e || typeof e !== "object" || Array.isArray(e)) return true;
+	if (e.nombre !== undefined && (!String(e.nombre).trim() || String(e.nombre).trim().length > 24)) return true;
+	if (e.tono !== undefined) {
+		const t = e.tono;
+		if (!t || typeof t !== "object") return true;
+		if (t.humor !== undefined && !(Number.isInteger(t.humor) && t.humor >= 0 && t.humor <= 3)) return true;
+		if (t.emojis !== undefined && typeof t.emojis !== "boolean") return true;
+		if (t.estilo !== undefined && String(t.estilo).length > 60) return true;
+	}
+	return e.nombre === undefined && e.tono === undefined;
+};
 
 // ───────────────────────────── Intervals.icu ─────────────────────────────
 //
@@ -4946,7 +4969,7 @@ Object.assign(TOOLS, {
 			"Abre la app myCoach dentro de la conversacion, en la pantalla indicada: hoy (que toca, sus datos, su dia y la semana), " +
 			"plan, comer (comida del dia, historico y peso), progreso (forma e indicadores por deporte), pueblos (resumen de lo hecho y mapa) o ajustes. " +
 			"Uselo cuando el usuario quiera ver su app, su plan, su comida, su progreso o sus pueblos, " +
-			"y despues de guardar un cambio de plan, para que lo vea. La app lee y guarda lo mismo que estas herramientas.",
+			"y despues de guardar un cambio de plan, para que lo vea. La app lee y guarda lo mismo que estas herramientas: no dibuje una tarjeta, un grafico ni un artefacto imitandola.",
 		schema: {
 			type: "object",
 			properties: { pantalla: { type: "string", enum: PANTALLAS_APP, description: "Por defecto, hoy." } },
@@ -6011,7 +6034,8 @@ Object.assign(TOOLS, {
 		description:
 			"Sin id: los entrenos guardados, de fuerza (nombre, lugar, ejercicios, ultima vez, y los nombres de ejercicio que ya usa) y de bici y correr para el reloj. " +
 			"Con id: el entreno completo (fuerza: cada ejercicio con su plan y lo que hizo la ultima vez; bici o correr: sus pasos). " +
-			"Uselo antes de proponer o repetir una sesion. Para mandarlo al reloj, entreno_enviar_garmin.",
+			"Uselo antes de proponer o repetir una sesion: si trae antes_de_proponer, pregunte eso primero; no proponga lo que esta en no_le_gusta. " +
+			"Para repetir uno, ajuste con la ultima vez (si hizo todas las reps, mas reps o mas peso). Para mandarlo al reloj, entreno_enviar_garmin.",
 		schema: {
 			type: "object",
 			properties: {
@@ -6029,11 +6053,18 @@ Object.assign(TOOLS, {
 				}
 				throw tipo ? error : new HttpError(404, `No hay ningun entreno "${id}" de fuerza ni de bici o correr.`);
 			}
-			const [fuerza, cardio] = await Promise.all([
+			const [fuerza, cardio, perfil] = await Promise.all([
 				tipo === "cardio" ? null : entrenosFuerza(env, userId, {}),
 				tipo === "fuerza" ? null : entrenosCardio(env, userId, {}),
+				tipo === "cardio" ? null : leerDoc(env, userId, "atleta/perfil"),
 			]);
-			return { ...(fuerza ? { fuerza } : {}), ...(cardio ? { cardio: cardio.entrenos } : {}) };
+			// Para no proponer fuerza generica: lo que hay que saber antes, y lo que no le gusta (con su alternativa).
+			const faltan = fuerza ? preguntasFuerza(perfil || {}) : [];
+			return {
+				...(fuerza ? { fuerza } : {}), ...(cardio ? { cardio: cardio.entrenos } : {}),
+				...(faltan.length ? { antes_de_proponer: { preguntas: faltan, nota: "Antes de proponer un entreno de fuerza nuevo, pregunte esto (de una en una) y guardelo con coach_perfil_guardar. Para repetir uno guardado no hace falta." } } : {}),
+				...(fuerza && perfil?.no_le_gusta?.length ? { no_le_gusta: perfil.no_le_gusta } : {}),
+			};
 		},
 	},
 
@@ -6082,9 +6113,14 @@ Object.assign(TOOLS, {
 			entrenos[id] = entreno;
 			await guardarDoc(env, userId, FUERZA_ENTRENOS, { entrenos });
 			const sinGarminEj = entreno.ejercicios.filter((e) => !e.garmin).map((e) => e.nombre);
+			// Lo que dijo que no le gusta: se guarda igual (puede haber cambiado de idea), pero se avisa.
+			const perfil = await leerDoc(env, userId, "atleta/perfil");
+			const norm = (t) => String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+			const noGusta = (perfil?.no_le_gusta || []).filter((x) => entreno.ejercicios.some((e) => norm(e.nombre).includes(norm(x.ejercicio)) || norm(x.ejercicio).includes(norm(e.nombre))));
 			return {
 				guardado: entreno,
 				...(sinGarminEj.length ? { aviso: `Sin ejercicio de Garmin (no se pueden mandar al reloj): ${sinGarminEj.join(", ")}. Buscalos con fuerza_ejercicios_garmin.` } : {}),
+				...(noGusta.length ? { no_le_gusta: noGusta.map((x) => ({ ...x, nota: "Dijo que no le gusta: confirme que lo quiere o use la alternativa." })) } : {}),
 			};
 		},
 	},
@@ -6606,7 +6642,7 @@ Object.assign(TOOLS, {
 			"Guarda en myCoach una comida en cuartos de plato (carbohidrato, proteina y verdura, de 0 a 4 cada uno, que suman 4 como mucho), " +
 			"sin calorias. Desayuno, comida, merienda y cena son una por dia: registrarla otra vez ese dia la corrige. Tentempie y durante " +
 			"(el entreno) se acumulan; para corregir uno, pase su id (comidas lo da). borrar=true con id, o con tipo y fecha, la quita. " +
-			"La app la enseña al momento.",
+			"La app la enseña al momento. Si le pasa una foto o le cuenta lo que ha comido, estime los cuartos, digaselo en una frase y guardelo.",
 		schema: {
 			type: "object",
 			properties: {

@@ -16,7 +16,7 @@ Sigue `reglas-coach` y `mycoach-uso`. Propone; el `planificador` decide y escrib
 - **Bici:** sin potenciómetro, trabaja por pulso y velocidad; progreso = misma velocidad con menos pulso, menos desacople. Rutas con `garmin_plan_route` partiendo de rutas ya hechas (`garmin_activity_route`). Series al reloj con `entreno_enviar_garmin tipo=cardio` (vista previa primero). Umbral, FTP y zonas de Garmin con `garmin_forma`.
 - **Carrera:** comodín de poco tiempo; zonas de pulso del reloj; progresión gradual de volumen.
 - **Skimo/esquí:** desnivel y tiempo, no km; VAM como indicador; ojo a la carga acumulada de fin de semana.
-- **Fuerza:** solo material del perfil. Antes de proponer, `entrenos tipo=fuerza` (reutiliza nombres). Progresión: si hizo todas las reps, más reps o más peso. Prioriza lo que ayude a sus deportes y a sus notas físicas (consulta a `fisio`).
+- **Fuerza:** solo material del perfil. Antes de proponer, `entrenos tipo=fuerza` (reutiliza nombres): si trae `antes_de_proponer`, pregunta eso primero, de una en una; no propongas lo que está en `no_le_gusta`. Explica en una frase para qué sirve cada ejercicio. Progresión: si hizo todas las reps, más reps o más peso. Prioriza lo que ayude a sus deportes y a sus notas físicas (consulta a `fisio`).
 
 ## Salida
 Sesión con deporte, tipo, duración, objetivo de intensidad y porqué en una frase.
