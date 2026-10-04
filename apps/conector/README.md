@@ -107,6 +107,26 @@ resume cada gráfica de la actividad (mínimo, media, máximo, inicio y final)
 y `perfil` da las principales en 24 tramos. Así Claude contesta sobre la
 gráfica de stamina o de potencia sin pedir capturas.
 
+## Forma y tendencia según Garmin (`garmin_forma`)
+
+Lo que Garmin calcula de la forma, con su evolución (por defecto 12 semanas,
+`semanas` hasta 52), en una sola llamada:
+
+| Dato | Endpoint de Garmin |
+|---|---|
+| Estado de entreno (traducido), carga aguda y crónica con su franja óptima y ratio, carga de la semana, balance del mes, aclimatación al calor y la altitud | `metrics-service/metrics/trainingstatus/aggregated/{día}` (del reloj principal) |
+| VO2máx de correr y de bici, un punto por semana | `metrics-service/metrics/maxmet/daily/{desde}/{hasta}` |
+| Endurance Score por semanas | `metrics-service/metrics/endurancescore/stats` |
+| Hill Score por semanas | `metrics-service/metrics/hillscore/stats` |
+| Predicciones de 5K, 10K, media y maratón | `metrics-service/metrics/racepredictions/latest/{usuario}` |
+| Umbral de lactato (ppm y ritmo) | `biometric-service/biometric/latestLactateThreshold` |
+| FTP y W/kg | `biometric-service/biometric/latestFunctionalThresholdPower/CYCLING` |
+| Edad física | `fitnessage-service/fitnessage/{día}` |
+
+Cada dato se pide por separado: si Garmin no tiene uno (sin potenciómetro no
+hay FTP), el resto sale igual y `sin_datos` dice cuál falta. La web aún no
+la usa, así que no está en la lista de herramientas de `apps/worker`.
+
 ## Intervals.icu
 
 Segunda fuente, oficial: Intervals.icu es socio de Garmin y recibe cada

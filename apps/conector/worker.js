@@ -1036,6 +1036,117 @@ function perfilGarmin({ vo2, endurance, hill, estado, ajustes, fecha }) {
 	};
 }
 
+// ── Forma según Garmin (garmin_forma) ──
+// Garmin devuelve sus estados como códigos en inglés ("PRODUCTIVE_3",
+// "ABOVE_TARGETS"…). Se traducen aquí para que Claude no tenga que adivinar.
+const ESTADO_ENTRENO = {
+	PEAKING: "En pico de forma", PRODUCTIVE: "Productivo", MAINTAINING: "Mantenimiento", RECOVERY: "Recuperación",
+	UNPRODUCTIVE: "Improductivo", STRAINED: "Sobrecargado", OVERREACHING: "Sobreesfuerzo", DETRAINING: "Pérdida de forma",
+	NO_STATUS: "Sin estado",
+};
+const ESTADO_RATIO = { LOW: "Baja", OPTIMAL: "Óptima", HIGH: "Alta", VERY_HIGH: "Muy alta" };
+const BALANCE_CARGA = {
+	BALANCED: "Equilibrada", ABOVE_TARGETS: "Por encima de los objetivos", BELOW_TARGETS: "Por debajo de los objetivos",
+	AEROBIC_LOW_SHORTAGE: "Falta aeróbico suave", AEROBIC_HIGH_SHORTAGE: "Falta aeróbico intenso", ANAEROBIC_SHORTAGE: "Falta anaeróbico",
+	AEROBIC_LOW_FOCUS: "Centrada en aeróbico suave", AEROBIC_HIGH_FOCUS: "Centrada en aeróbico intenso", ANAEROBIC_FOCUS: "Centrada en anaeróbico",
+	NO_DATA: "Sin datos",
+};
+/** "PRODUCTIVE_3" → "Productivo". Lo que no se conoce sale tal cual. */
+const traducir = (tabla, codigo) => {
+	if (!codigo) return null;
+	const base = String(codigo).replace(/_\d+$/, "");
+	return tabla[base] ?? tabla[codigo] ?? codigo;
+};
+/** Segundos → "h:mm:ss" o "mm:ss". */
+const reloj = (s) => {
+	if (typeof s !== "number" || !(s > 0)) return null;
+	const t = Math.round(s);
+	const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), x = t % 60;
+	const dd = (n) => String(n).padStart(2, "0");
+	return h ? `${h}:${dd(m)}:${dd(x)}` : `${m}:${dd(x)}`;
+};
+/** Del mapa por reloj, el del reloj principal; si no se sabe, el primero. */
+const delRelojPrincipal = (m) => {
+	if (!m || typeof m !== "object") return null;
+	const v = Object.values(m);
+	return v.find((x) => x?.primaryTrainingDevice) ?? v[0] ?? null;
+};
+/**
+ * Una serie diaria reducida a un punto por semana: el último valor de cada
+ * campo en esa semana (el VO2máx de bici no se actualiza el mismo día que el de correr).
+ */
+const porSemana = (puntos) => {
+	const sem = new Map();
+	for (const p of puntos) {
+		const d = new Date(`${p.fecha}T00:00:00Z`);
+		d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+		const k = d.toISOString().slice(0, 10);
+		const nuevos = Object.fromEntries(Object.entries(p).filter(([, v]) => v != null));
+		sem.set(k, { ...sem.get(k), ...nuevos });
+	}
+	return [...sem.values()];
+};
+/** Primero y último de una serie: "52,1 → 53,4". */
+const tendencia = (serie, campo) => {
+	const v = serie.filter((p) => typeof p[campo] === "number");
+	if (v.length < 2) return null;
+	return { desde: v[0][campo], hasta: v.at(-1)[campo], cambio: round(v.at(-1)[campo] - v[0][campo], 1) };
+};
+
+/** Estado de entreno, carga aguda y crónica con la franja óptima y aclimatación. */
+function estadoGarmin(estado) {
+	const st = delRelojPrincipal(estado?.mostRecentTrainingStatus?.latestTrainingStatusData);
+	const carga = st?.acuteTrainingLoadDTO || {};
+	const balance = delRelojPrincipal(estado?.mostRecentTrainingLoadBalance?.metricsTrainingLoadBalanceDTOMap);
+	const acl = estado?.mostRecentVO2Max?.heatAltitudeAcclimation || estado?.heatAltitudeAcclimationDTO || null;
+	return {
+		estado: st ? {
+			fecha: st.calendarDate ?? null,
+			estado: traducir(ESTADO_ENTRENO, st.trainingStatusFeedbackPhrase) ?? null,
+			codigo_garmin: st.trainingStatusFeedbackPhrase ?? null,
+			tendencia_forma: st.fitnessTrend ?? null,
+		} : null,
+		carga: st ? {
+			aguda_7d: carga.dailyTrainingLoadAcute ?? null,
+			cronica_28d: carga.dailyTrainingLoadChronic ?? null,
+			franja_optima_cronica: carga.minTrainingLoadChronic != null ? [carga.minTrainingLoadChronic, carga.maxTrainingLoadChronic] : null,
+			ratio: carga.dailyAcuteChronicWorkloadRatio ?? null,
+			ratio_estado: traducir(ESTADO_RATIO, carga.acwrStatus),
+			semana: st.weeklyTrainingLoad ?? null,
+			franja_semana: st.loadTunnelMin != null ? [st.loadTunnelMin, st.loadTunnelMax] : null,
+		} : null,
+		balance_mes: balance ? {
+			veredicto: traducir(BALANCE_CARGA, balance.trainingBalanceFeedbackPhrase),
+			aerobica_baja: { carga: Math.round(balance.monthlyLoadAerobicLow ?? 0), objetivo: [balance.monthlyLoadAerobicLowTargetMin, balance.monthlyLoadAerobicLowTargetMax] },
+			aerobica_alta: { carga: Math.round(balance.monthlyLoadAerobicHigh ?? 0), objetivo: [balance.monthlyLoadAerobicHighTargetMin, balance.monthlyLoadAerobicHighTargetMax] },
+			anaerobica: { carga: Math.round(balance.monthlyLoadAnaerobic ?? 0), objetivo: [balance.monthlyLoadAnaerobicTargetMin, balance.monthlyLoadAnaerobicTargetMax] },
+		} : null,
+		// Solo si hay algo que contar: a 0 % no informa.
+		aclimatacion: acl && (acl.heatAcclimationPercentage > 0 || acl.altitudeAcclimation > 0) ? {
+			calor_pct: acl.heatAcclimationPercentage ?? null,
+			altitud_m: acl.altitudeAcclimation ?? null,
+			altitud_actual_m: acl.currentAltitude ?? null,
+		} : null,
+	};
+}
+
+/**
+ * Umbral de lactato de Garmin. La velocidad llega en decenas de m/s (0,34 son
+ * 3,4 m/s): se pasa a ritmo por km solo si el número cuadra con eso.
+ */
+function umbralGarmin(lt) {
+	const lista = Array.isArray(lt) ? lt : lt ? [lt] : [];
+	const fc = lista.find((e) => typeof e?.heartRate === "number");
+	const vel = lista.find((e) => typeof e?.speed === "number" && e.speed > 0);
+	const ms = vel ? (vel.speed < 1.5 ? vel.speed * 10 : vel.speed) : null;
+	if (!fc && !ms) return null;
+	return {
+		ppm: fc?.heartRate ?? null,
+		ritmo_min_km: ms && ms > 1.5 && ms < 7 ? reloj(1000 / ms) : null,
+		fecha: (fc || vel)?.calendarDate?.slice?.(0, 10) ?? null,
+	};
+}
+
 /** Polilínea codificada de Google (precisión 1e-5) a partir de puntos {lat, lon}. */
 function codificarPolilinea(puntos) {
 	let out = "";
@@ -1702,6 +1813,95 @@ const TOOLS = {
 			};
 		},
 	},
+	garmin_forma: {
+		title: "Forma y tendencia segun Garmin",
+		description:
+			"Lo que Garmin calcula de tu forma, con su evolucion: estado de entreno (productivo, mantenimiento, perdida de forma...), carga aguda y cronica con la franja optima y su ratio, carga de la semana, balance de carga del mes, " +
+			"VO2max de correr y de bici semana a semana, Endurance Score y Hill Score en el tiempo, predicciones de carrera (5K, 10K, media y maraton), umbral de lactato, FTP, edad fisica y aclimatacion al calor y a la altitud. " +
+			"Responde a '?estoy en forma?', '?me estoy pasando de carga?' o '?como ha ido mi VO2max?'. Para el dia a dia (readiness, sueno, VFC) use garmin_training_readiness y coach_hoy.",
+		schema: {
+			type: "object",
+			properties: {
+				semanas: { type: "integer", minimum: 1, maximum: 52, description: "Semanas de historico hacia atras. Por defecto, 12." },
+				date: { type: "string", description: "Ultimo dia del periodo en formato YYYY-MM-DD. Por defecto, hoy." },
+			},
+		},
+		run: async (env, userId, { semanas, date } = {}) => {
+			const fin = date || today();
+			const n = Math.min(52, Math.max(1, Math.round(Number(semanas) || 12)));
+			const ini = sumaDias(fin, -7 * n + 1);
+			// Cada dato por su lado: si Garmin no tiene uno (sin potenciometro no
+			// hay FTP), el resto sale igual y se dice cual falta.
+			const faltan = [];
+			const pedir = (nombre, path, params) =>
+				apiGet(env, userId, path, params).catch(() => { faltan.push(nombre); return null; });
+			const nombre = await displayName(env, userId).catch(() => null);
+			const [estado, vo2, endurance, hill, carreras, lactato, ftp, edad, ajustes] = await Promise.all([
+				pedir("estado de entreno", `/metrics-service/metrics/trainingstatus/aggregated/${fin}`),
+				pedir("VO2max", `/metrics-service/metrics/maxmet/daily/${ini}/${fin}`),
+				pedir("Endurance Score", "/metrics-service/metrics/endurancescore/stats", { startDate: ini, endDate: fin, aggregation: "weekly" }),
+				pedir("Hill Score", "/metrics-service/metrics/hillscore/stats", { startDate: ini, endDate: fin, aggregation: "daily" }),
+				nombre ? pedir("predicciones de carrera", `/metrics-service/metrics/racepredictions/latest/${nombre}`) : (faltan.push("predicciones de carrera"), null),
+				pedir("umbral de lactato", "/biometric-service/biometric/latestLactateThreshold"),
+				pedir("FTP", "/biometric-service/biometric/latestFunctionalThresholdPower/CYCLING"),
+				pedir("edad fisica", `/fitnessage-service/fitnessage/${fin}`),
+				apiGet(env, userId, "/userprofile-service/userprofile/user-settings").catch(() => null),
+			]);
+
+			const vo2Serie = porSemana((Array.isArray(vo2) ? vo2 : [])
+				.map((x) => ({
+					fecha: x?.generic?.calendarDate || x?.cycling?.calendarDate || null,
+					correr: x?.generic?.vo2MaxPreciseValue ?? x?.generic?.vo2MaxValue ?? null,
+					bici: x?.cycling?.vo2MaxPreciseValue ?? x?.cycling?.vo2MaxValue ?? null,
+				}))
+				.filter((p) => p.fecha && (p.correr != null || p.bici != null))
+				.sort((a, b) => a.fecha.localeCompare(b.fecha)));
+			const esSerie = Object.entries(endurance?.groupMap || {})
+				.map(([semana, g]) => ({ semana, puntos: g?.groupAverage != null ? Math.round(g.groupAverage) : null, max: g?.groupMax ?? null }))
+				.filter((p) => p.puntos != null)
+				.sort((a, b) => a.semana.localeCompare(b.semana));
+			const hillSerie = porSemana((hill?.hillScoreDTOList || [])
+				.map((h) => ({ fecha: h.calendarDate, puntos: h.overallScore ?? null, fuerza: h.strengthScore ?? null, resistencia: h.enduranceScore ?? null }))
+				.filter((p) => p.fecha && p.puntos != null)
+				.sort((a, b) => a.fecha.localeCompare(b.fecha)));
+			const pred = Array.isArray(carreras) ? carreras[0] : carreras;
+			const vatios = ftp?.functionalThresholdPower ?? null;
+			const peso = ajustes?.userData?.weight ?? null; // en gramos
+
+			return {
+				desde: ini,
+				hasta: fin,
+				...estadoGarmin(estado),
+				vo2max: vo2Serie.length ? {
+					correr: vo2Serie.filter((p) => p.correr != null).at(-1)?.correr ?? null,
+					bici: vo2Serie.filter((p) => p.bici != null).at(-1)?.bici ?? null,
+					tendencia_correr: tendencia(vo2Serie, "correr"),
+					tendencia_bici: tendencia(vo2Serie, "bici"),
+					semanas: vo2Serie,
+				} : null,
+				endurance_score: esSerie.length ? { actual: esSerie.at(-1).puntos, tendencia: tendencia(esSerie, "puntos"), semanas: esSerie } : null,
+				hill_score: hillSerie.length ? { actual: hillSerie.at(-1).puntos, tendencia: tendencia(hillSerie, "puntos"), semanas: hillSerie } : null,
+				predicciones_carrera: pred && (pred.time5K || pred.timeMarathon) ? {
+					fecha: pred.calendarDate ?? null,
+					"5k": reloj(pred.time5K), "10k": reloj(pred.time10K),
+					media: reloj(pred.timeHalfMarathon), maraton: reloj(pred.timeMarathon),
+				} : null,
+				umbral_lactato: umbralGarmin(lactato),
+				ftp: vatios ? {
+					vatios,
+					w_kg: peso ? round(vatios / (peso / 1000), 2) : null,
+					fecha: ftp.calendarDate?.slice?.(0, 10) ?? null,
+				} : null,
+				edad_fisica: edad?.fitnessAge != null ? {
+					edad_fisica: round(edad.fitnessAge, 1),
+					edad_real: edad.chronologicalAge ?? null,
+					alcanzable: edad.achievableFitnessAge != null ? round(edad.achievableFitnessAge, 1) : null,
+				} : null,
+				sin_datos: faltan.length ? faltan : undefined,
+				nota: "Son las estimaciones de Garmin, no medidas de laboratorio. El estado y la carga salen del reloj principal.",
+			};
+		},
+	},
 };
 
 // ──────────────────────────── MCP (JSON-RPC) ────────────────────────────
@@ -1742,7 +1942,7 @@ async function handleRpc(message, env, userId) {
 	const instrucciones = async () =>
 				"Datos de Garmin Connect del usuario que ha autorizado este conector. Las fechas van en " +
 				"YYYY-MM-DD y por defecto es hoy. Para preguntas sobre descanso use garmin_sleep y garmin_hrv; " +
-				"para carga y rendimiento, garmin_activities y garmin_training_readiness. Si una herramienta " +
+				"para carga y rendimiento, garmin_activities y garmin_training_readiness; para forma y tendencia (estado de entreno, carga, VO2max, predicciones), garmin_forma. Si una herramienta " +
 				"falla con error de autenticacion, llame a garmin_status para diagnosticar.\n\n" +
 				"Para planificar rutas de bici: proponga usted los puntos de paso a partir de su conocimiento " +
 				"geografico y llame a garmin_plan_route, que los une por carreteras reales y devuelve las " +

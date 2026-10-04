@@ -556,7 +556,7 @@ const rpc = async (env, token, message) => {
 	check("un navegador en la raiz sigue viendo la pagina", (await (await get(env, "/")).text()).includes("<h1>"));
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("tools/list devuelve 45 herramientas", list.body.result.tools.length === 45);
+	check("tools/list devuelve 46 herramientas", list.body.result.tools.length === 46);
 	check("app_guardar se anuncia como escritura", anot0(list).app_guardar.readOnlyHint === false);
 	{
 		const call = (name, args) => rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name, arguments: args } });
@@ -1060,6 +1060,82 @@ const rpc = async (env, token, message) => {
 	check("calcula la edad y lee el umbral de lactato", pg.persona.edad === 36 && pg.persona.umbral_lactato_ppm === 171 && pg.persona.peso_kg === 72);
 }
 
+// ── 8b quater bis. Forma y tendencia (garmin_forma) ──
+{
+	mockGarmin({ "ana@x.com": { password: "a", data: { displayName: "ana", hrv: 50 } } });
+	const env = makeEnv();
+	const { tokens } = await connect(env, "ana@x.com", "a");
+	const base = globalThis.fetch;
+	const pedidas = [];
+	// Formas reales de las respuestas de Garmin (recortadas).
+	globalThis.fetch = async (url, init) => {
+		const u = new URL(url);
+		if (u.hostname !== "connectapi.garmin.com") return base(url, init);
+		pedidas.push(u.pathname + u.search);
+		const r = (x) => new Response(JSON.stringify(x));
+		if (u.pathname.includes("socialProfile")) return r({ displayName: "ana" });
+		if (u.pathname.includes("trainingstatus")) return r({
+			mostRecentVO2Max: { generic: { calendarDate: "2026-09-20", vo2MaxPreciseValue: 52.6 },
+				heatAltitudeAcclimation: { heatAcclimationPercentage: 40, altitudeAcclimation: 0, currentAltitude: 300 } },
+			mostRecentTrainingStatus: { latestTrainingStatusData: {
+				"111": { calendarDate: "2026-09-24", trainingStatusFeedbackPhrase: "UNPRODUCTIVE_2", primaryTrainingDevice: false },
+				"222": { calendarDate: "2026-09-25", trainingStatusFeedbackPhrase: "PRODUCTIVE_3", primaryTrainingDevice: true, fitnessTrend: 1,
+					weeklyTrainingLoad: 640, loadTunnelMin: 420, loadTunnelMax: 780,
+					acuteTrainingLoadDTO: { dailyTrainingLoadAcute: 690, dailyTrainingLoadChronic: 560, minTrainingLoadChronic: 450,
+						maxTrainingLoadChronic: 840, dailyAcuteChronicWorkloadRatio: 1.2, acwrStatus: "OPTIMAL" } } } },
+			mostRecentTrainingLoadBalance: { metricsTrainingLoadBalanceDTOMap: { "222": { monthlyLoadAerobicLow: 553.8, monthlyLoadAerobicHigh: 989.4,
+				monthlyLoadAnaerobic: 100, monthlyLoadAerobicLowTargetMin: 253, monthlyLoadAerobicLowTargetMax: 580, monthlyLoadAerobicHighTargetMin: 347,
+				monthlyLoadAerobicHighTargetMax: 674, monthlyLoadAnaerobicTargetMin: 109, monthlyLoadAnaerobicTargetMax: 327, trainingBalanceFeedbackPhrase: "ANAEROBIC_SHORTAGE" } } } });
+		if (u.pathname.includes("maxmet")) return r([
+			{ generic: { calendarDate: "2026-09-02", vo2MaxPreciseValue: 51.8 }, cycling: { calendarDate: "2026-09-02", vo2MaxPreciseValue: 55.0 } },
+			{ generic: { calendarDate: "2026-09-04", vo2MaxPreciseValue: 52.0 }, cycling: null },
+			{ generic: { calendarDate: "2026-09-20", vo2MaxPreciseValue: 52.6 }, cycling: null },
+		]);
+		if (u.pathname.endsWith("/endurancescore/stats")) return r({ groupMap: {
+			"2026-09-14": { groupAverage: 6250.4, groupMax: 6300 }, "2026-09-21": { groupAverage: 6319, groupMax: 6330 } } });
+		if (u.pathname.endsWith("/hillscore/stats")) return r({ hillScoreDTOList: [
+			{ calendarDate: "2026-09-15", overallScore: 60, strengthScore: 55, enduranceScore: 65 },
+			{ calendarDate: "2026-09-16", overallScore: 61, strengthScore: 55, enduranceScore: 66 },
+			{ calendarDate: "2026-09-23", overallScore: 63, strengthScore: 57, enduranceScore: 68 }] });
+		if (u.pathname.includes("racepredictions")) return r({ calendarDate: "2026-09-25", time5K: 1230, time10K: 2580, timeHalfMarathon: 5750, timeMarathon: 12300 });
+		if (u.pathname.includes("latestLactateThreshold")) return r([
+			{ calendarDate: "2026-08-01T10:00:00.0", heartRate: 171, speed: null }, { calendarDate: "2026-08-01T10:00:00.0", heartRate: null, speed: 0.34 }]);
+		if (u.pathname.includes("FunctionalThresholdPower")) return new Response("{}", { status: 404 });
+		if (u.pathname.includes("fitnessage")) return r({ chronologicalAge: 36, fitnessAge: 29.43, achievableFitnessAge: 27.1 });
+		if (u.pathname.includes("user-settings")) return r({ userData: { weight: 72000 } });
+		return new Response("{}", { status: 404 });
+	};
+	const res = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 14, method: "tools/call",
+		params: { name: "garmin_forma", arguments: { date: "2026-09-25", semanas: 4 } } });
+	const f = JSON.parse(res.body.result.content[0].text);
+	check("forma: periodo de 4 semanas hasta el día pedido", f.desde === "2026-08-29" && f.hasta === "2026-09-25", `(${f.desde} → ${f.hasta})`);
+	check("forma: VO2máx pedido como rango", pedidas.some((p) => p.includes("/maxmet/daily/2026-08-29/2026-09-25")));
+	check("forma: estado del reloj principal, traducido", f.estado?.estado === "Productivo" && f.estado.codigo_garmin === "PRODUCTIVE_3", JSON.stringify(f.estado));
+	check("forma: carga aguda y crónica con su franja y ratio", f.carga?.aguda_7d === 690 && f.carga.cronica_28d === 560 &&
+		f.carga.franja_optima_cronica[1] === 840 && f.carga.ratio_estado === "Óptima" && f.carga.franja_semana[0] === 420, JSON.stringify(f.carga));
+	check("forma: balance del mes traducido", f.balance_mes?.veredicto === "Falta anaeróbico" && f.balance_mes.anaerobica.carga === 100);
+	check("forma: aclimatación al calor", f.aclimatacion?.calor_pct === 40);
+	check("forma: VO2máx semana a semana (correr y bici)", f.vo2max?.correr === 52.6 && f.vo2max.bici === 55 &&
+		f.vo2max.semanas.length === 2 && f.vo2max.tendencia_correr?.cambio === 0.6, JSON.stringify(f.vo2max));
+	check("forma: Endurance Score por semanas", f.endurance_score?.actual === 6319 && f.endurance_score.tendencia.cambio === 69, JSON.stringify(f.endurance_score));
+	check("forma: Hill Score, un punto por semana", f.hill_score?.semanas.length === 2 && f.hill_score.actual === 63, JSON.stringify(f.hill_score));
+	check("forma: predicciones de carrera en h:mm:ss", f.predicciones_carrera?.["5k"] === "20:30" && f.predicciones_carrera.maraton === "3:25:00", JSON.stringify(f.predicciones_carrera));
+	check("forma: umbral de lactato con ritmo", f.umbral_lactato?.ppm === 171 && f.umbral_lactato.ritmo_min_km === "4:54", JSON.stringify(f.umbral_lactato));
+	check("forma: edad física", f.edad_fisica?.edad_fisica === 29.4 && f.edad_fisica.edad_real === 36);
+	check("forma: sin potenciómetro no hay FTP, y se dice", f.ftp === null && f.sin_datos?.includes("FTP"), JSON.stringify(f.sin_datos));
+
+	// Si Garmin no contesta nada, la herramienta no se cae: dice qué falta.
+	globalThis.fetch = async (url, init) => {
+		const u = new URL(url);
+		if (u.hostname !== "connectapi.garmin.com") return base(url, init);
+		return new Response("x", { status: 500 });
+	};
+	const vacio = JSON.parse((await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 15, method: "tools/call",
+		params: { name: "garmin_forma", arguments: {} } })).body.result.content[0].text);
+	check("forma: sin datos de Garmin no falla", vacio.vo2max === null && vacio.estado === null && vacio.sin_datos?.length >= 7, JSON.stringify(vacio).slice(0, 200));
+	globalThis.fetch = base;
+}
+
 // ── 8b quinquies. Polilínea del recorrido ──
 {
 	mockGarmin({ "ana@x.com": { password: "a", data: { displayName: "ana", hrv: 50 } } });
@@ -1092,7 +1168,7 @@ const rpc = async (env, token, message) => {
 	check("el token de acceso vale sin leer del KV", init.body.result?.serverInfo?.name === "garmin");
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("las herramientas se listan igualmente", list.body.result.tools.length === 45);
+	check("las herramientas se listan igualmente", list.body.result.tools.length === 46);
 
 	// Y el dato que si vive en KV avisa en vez de mentir
 	const call = await rpc(env, tokens.access_token, {
