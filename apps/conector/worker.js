@@ -359,7 +359,9 @@ async function apiGet(env, userId, path, params) {
 	}
 
 	if (!res.ok) throw new HttpError(res.status, `Garmin devolvio HTTP ${res.status} en ${path}.`);
-	return res.json();
+	// Garmin contesta 204 sin cuerpo cuando un dia no tiene datos: eso es "nada", no un error.
+	const texto = await res.text();
+	return texto ? JSON.parse(texto) : null;
 }
 
 /**
@@ -1115,7 +1117,8 @@ function estadoGarmin(estado) {
 			semana: st.weeklyTrainingLoad ?? null,
 			franja_semana: st.loadTunnelMin != null ? [st.loadTunnelMin, st.loadTunnelMax] : null,
 		} : null,
-		balance_mes: balance ? {
+		// Load Focus: la carga de 4 semanas repartida por intensidad, con su objetivo.
+		enfoque_carga: balance ? {
 			veredicto: traducir(BALANCE_CARGA, balance.trainingBalanceFeedbackPhrase),
 			aerobica_baja: { carga: Math.round(balance.monthlyLoadAerobicLow ?? 0), objetivo: [balance.monthlyLoadAerobicLowTargetMin, balance.monthlyLoadAerobicLowTargetMax] },
 			aerobica_alta: { carga: Math.round(balance.monthlyLoadAerobicHigh ?? 0), objetivo: [balance.monthlyLoadAerobicHighTargetMin, balance.monthlyLoadAerobicHighTargetMax] },
@@ -1145,6 +1148,142 @@ function umbralGarmin(lt) {
 		ritmo_min_km: ms && ms > 1.5 && ms < 7 ? reloj(1000 / ms) : null,
 		fecha: (fc || vel)?.calendarDate?.slice?.(0, 10) ?? null,
 	};
+}
+
+// ── Garmin a pelo (garmin_api) ──
+// Endpoints de lectura de connectapi que se conocen (sacados de
+// python-garminconnect y de lo que usa Garmin Connect). Son la guía de
+// garmin_api: Claude los consulta sin path y llama al que necesite, aunque
+// myCoach no tenga una herramienta para ese dato. {usuario} lo pone el
+// conector; {fecha}, {desde}, {hasta} (YYYY-MM-DD) y {id} los pone quien llama.
+const ENDPOINTS_GARMIN = [
+	// Forma y carga
+	["forma", "/metrics-service/metrics/trainingstatus/aggregated/{fecha}", null, "Estado de entreno, carga aguda/crónica con franja óptima y ratio, Load Focus del mes, VO2máx y aclimatación (por reloj)."],
+	["forma", "/metrics-service/metrics/trainingstatus/daily/{fecha}", null, "Estado de entreno de un día concreto (para ver su historia día a día)."],
+	["forma", "/metrics-service/metrics/trainingloadbalance/latest/{fecha}", null, "Load Focus: carga de 4 semanas en anaeróbico, aeróbico intenso y aeróbico suave, con sus objetivos."],
+	["forma", "/metrics-service/metrics/trainingreadiness/{fecha}", null, "Training Readiness del día y sus factores (sueño, VFC, carga aguda, recuperación, estrés)."],
+	["forma", "/metrics-service/metrics/maxmet/daily/{desde}/{hasta}", null, "VO2máx de correr y de bici por día, con aclimatación al calor y altitud."],
+	["forma", "/metrics-service/metrics/endurancescore", "calendarDate={fecha}", "Endurance Score del día, con su escala y lo que aporta cada deporte."],
+	["forma", "/metrics-service/metrics/endurancescore/stats", "startDate={desde}&endDate={hasta}&aggregation=weekly", "Endurance Score por semanas (o daily/monthly)."],
+	["forma", "/metrics-service/metrics/hillscore", "calendarDate={fecha}", "Hill Score del día (fuerza y resistencia en subida)."],
+	["forma", "/metrics-service/metrics/hillscore/stats", "startDate={desde}&endDate={hasta}&aggregation=daily", "Hill Score en un periodo."],
+	["forma", "/metrics-service/metrics/runningtolerance/stats", "startDate={desde}&endDate={hasta}&aggregation=weekly", "Running Tolerance: carga de impacto de correr que aguantas por semana."],
+	["forma", "/metrics-service/metrics/racepredictions/latest/{usuario}", null, "Predicciones de 5K, 10K, media y maratón (segundos)."],
+	["forma", "/metrics-service/metrics/racepredictions/daily/{usuario}", "fromCalendarDate={desde}&toCalendarDate={hasta}", "Predicciones de carrera día a día (máx. un año; también /monthly/)."],
+	["forma", "/fitnessage-service/fitnessage/{fecha}", null, "Edad física, edad real, edad alcanzable y qué la mueve (IMC, pulso en reposo, actividad)."],
+	["forma", "/fitnessstats-service/activity/all", "startDate={desde}&endDate={hasta}&metric=activityTrainingLoad&metric=trainingEffectLabel", "Exercise Load: la carga de cada actividad en un periodo, con su beneficio principal."],
+	// Umbrales y zonas
+	["umbrales", "/biometric-service/biometric/latestLactateThreshold", null, "Último umbral de lactato (pulso y velocidad)."],
+	["umbrales", "/biometric-service/biometric/latestFunctionalThresholdPower/CYCLING", null, "Último FTP de bici."],
+	["umbrales", "/biometric-service/biometric/powerToWeight/latest/{fecha}", "sport=Running", "Potencia de umbral y W/kg (correr o bici: sport=Cycling)."],
+	["umbrales", "/biometric-service/stats/functionalThresholdPower/range/{desde}/{hasta}", "sport=CYCLING&aggregation=daily&aggregationStrategy=LATEST", "FTP en el tiempo."],
+	["umbrales", "/biometric-service/stats/lactateThresholdHeartRate/range/{desde}/{hasta}", "sport=RUNNING&aggregation=daily&aggregationStrategy=LATEST", "Pulso de umbral en el tiempo."],
+	["umbrales", "/biometric-service/stats/lactateThresholdSpeed/range/{desde}/{hasta}", "sport=RUNNING&aggregation=daily&aggregationStrategy=LATEST", "Velocidad de umbral en el tiempo."],
+	["umbrales", "/biometric-service/heartRateZones", null, "Zonas de pulso configuradas por deporte."],
+	["umbrales", "/biometric-service/powerZones/sports/all", null, "Zonas de potencia por deporte."],
+	// Actividades
+	["actividades", "/activitylist-service/activities/search/activities", "start=0&limit=20&startDate={desde}&endDate={hasta}&activityType=cycling", "Lista de actividades con su resumen (incluye activityTrainingLoad, efecto de entrenamiento…)."],
+	["actividades", "/activitylist-service/activities/count", null, "Cuántas actividades hay."],
+	["actividades", "/activity-service/activity/{id}", null, "Resumen completo de una actividad."],
+	["actividades", "/activity-service/activity/{id}/details", "maxChartSize=2000", "Series de la actividad (pulso, potencia, ritmo, altitud… punto a punto). Muy grande: use campos."],
+	["actividades", "/activity-service/activity/{id}/splits", null, "Vueltas."],
+	["actividades", "/activity-service/activity/{id}/typedsplits", null, "Tramos por tipo (correr/andar/parado, subidas en skimo…)."],
+	["actividades", "/activity-service/activity/{id}/split_summaries", null, "Resumen por tipo de tramo."],
+	["actividades", "/activity-service/activity/{id}/hrTimeInZones", null, "Tiempo en cada zona de pulso."],
+	["actividades", "/activity-service/activity/{id}/powerTimeInZones", null, "Tiempo en cada zona de potencia."],
+	["actividades", "/activity-service/activity/{id}/weather", null, "Tiempo que hacía (temperatura, viento, humedad)."],
+	["actividades", "/activity-service/activity/{id}/exerciseSets", null, "Series de fuerza (ejercicio, reps, peso)."],
+	["actividades", "/activity-service/activity/activityTypes", null, "Todos los tipos de actividad de Garmin."],
+	["actividades", "/mobile-gateway/heartRate/forDate/{fecha}", null, "Actividades de un día con su pulso."],
+	["actividades", "/personalrecord-service/personalrecord/prs/{usuario}", null, "Récords personales (mejores tiempos, distancias…)."],
+	// Día, sueño y recuperación
+	["dia", "/usersummary-service/usersummary/daily/{usuario}", "calendarDate={fecha}", "Resumen del día: pasos, calorías, pulso en reposo, estrés, Body Battery, minutos de intensidad…"],
+	["dia", "/wellness-service/wellness/dailySleepData/{usuario}", "date={fecha}&nonSleepBufferMinutes=60", "Sueño de una noche: fases, puntuación y sus factores, VFC, respiración, SpO2."],
+	["dia", "/sleep-service/stats/sleep/daily/{desde}/{hasta}", null, "Sueño de cada noche en un periodo (máx. 28 días por llamada)."],
+	["dia", "/hrv-service/hrv/{fecha}", null, "VFC de la noche, con su franja normal y el estado."],
+	["dia", "/hrv-service/hrv/daily/{desde}/{hasta}", null, "VFC noche a noche en un periodo."],
+	["dia", "/wellness-service/wellness/dailyHeartRate/{usuario}", "date={fecha}", "Pulso de todo el día, cada pocos minutos."],
+	["dia", "/userstats-service/wellness/daily/{usuario}", "fromDate={desde}&untilDate={hasta}&metricId=60", "Pulso en reposo día a día."],
+	["dia", "/wellness-service/wellness/dailyStress/{fecha}", null, "Estrés de todo el día, con su serie y la del Body Battery."],
+	["dia", "/usersummary-service/stats/stress/weekly/{hasta}/{semanas}", null, "Estrés medio por semana."],
+	["dia", "/wellness-service/wellness/bodyBattery/reports/daily", "startDate={desde}&endDate={hasta}", "Body Battery: carga y descarga por día."],
+	["dia", "/wellness-service/wellness/bodyBattery/events/{fecha}", null, "Qué ha cargado o gastado Body Battery (sueño, actividades, estrés)."],
+	["dia", "/wellness-service/wellness/daily/respiration/{fecha}", null, "Respiración de todo el día y del sueño."],
+	["dia", "/wellness-service/wellness/daily/spo2/{fecha}", null, "Saturación de oxígeno (pulsioxímetro)."],
+	["dia", "/wellness-service/wellness/daily/im/{fecha}", null, "Minutos de intensidad del día."],
+	["dia", "/usersummary-service/stats/im/weekly/{desde}/{hasta}", null, "Minutos de intensidad por semana frente al objetivo."],
+	["dia", "/usersummary-service/stats/steps/daily/{desde}/{hasta}", null, "Pasos por día."],
+	["dia", "/usersummary-service/stats/steps/weekly/{hasta}/{semanas}", null, "Pasos por semana."],
+	["dia", "/wellness-service/wellness/dailySummaryChart/{usuario}", "date={fecha}", "Pasos y actividad cada 15 minutos."],
+	["dia", "/wellness-service/wellness/floorsChartData/daily/{fecha}", null, "Pisos subidos."],
+	["dia", "/wellness-service/wellness/dailyEvents", "calendarDate={fecha}", "Eventos del día (siestas, actividad detectada)."],
+	["dia", "/usersummary-service/usersummary/hydration/daily/{fecha}", null, "Hidratación registrada y sudor estimado."],
+	["dia", "/lifestylelogging-service/dailyLog/{fecha}", null, "Registro de hábitos (alcohol, cafeína…) si se usa."],
+	// Cuerpo y salud
+	["cuerpo", "/weight-service/weight/dateRange", "startDate={desde}&endDate={hasta}", "Peso y composición corporal (grasa, músculo, agua, hueso)."],
+	["cuerpo", "/weight-service/weight/dayview/{fecha}", null, "Pesajes de un día."],
+	["cuerpo", "/bloodpressure-service/bloodpressure/range/{desde}/{hasta}", null, "Tensión arterial."],
+	["cuerpo", "/periodichealth-service/menstrualcycle/calendar/{desde}/{hasta}", null, "Ciclo menstrual (si se registra)."],
+	["cuerpo", "/periodichealth-service/menstrualcycle/dayview/{fecha}", null, "Ciclo menstrual: un día."],
+	["cuerpo", "/periodichealth-service/menstrualcycle/pregnancysnapshot", null, "Seguimiento del embarazo (si se usa)."],
+	["cuerpo", "/nutrition-service/food/logs/{fecha}", null, "Comida registrada en Garmin Connect."],
+	["cuerpo", "/nutrition-service/meals/{fecha}", null, "Comidas del día en Garmin Connect."],
+	["cuerpo", "/nutrition-service/settings/{fecha}", null, "Objetivos de nutrición en Garmin Connect."],
+	// Plan, entrenos y calendario
+	["plan", "/workout-service/workouts", "start=0&limit=50", "Entrenos guardados en Garmin Connect."],
+	["plan", "/workout-service/workout/{id}", null, "Un entreno con todos sus pasos."],
+	["plan", "/calendar-service/year/{año}/month/{mes0}", null, "Calendario de Garmin del mes (mes de 0 a 11): entrenos programados, carreras, planes."],
+	["plan", "/trainingplan-service/trainingplan/plans", null, "Planes de entrenamiento de Garmin (Garmin Coach y adaptativos)."],
+	["plan", "/trainingplan-service/trainingplan/fbt-adaptive/{id}", null, "Plan adaptativo de Garmin, con sus sesiones."],
+	["plan", "/trainingplan-service/trainingplan/phased/{id}", null, "Plan por fases de Garmin."],
+	["plan", "/goal-service/goal/goals", "status=active&start=1&limit=30", "Objetivos de Garmin Connect."],
+	["plan", "/course-service/course", null, "Recorridos guardados (mejor: garmin_courses)."],
+	// Material y relojes
+	["material", "/gear-service/gear/filterGear", "userProfilePk={perfil}", "Material (zapatillas, bicis) con su uso."],
+	["material", "/gear-service/gear/stats/{id}", null, "Kilómetros y actividades de una pieza de material."],
+	["material", "/device-service/deviceregistration/devices", null, "Relojes y sensores vinculados."],
+	["material", "/web-gateway/device-info/primary-training-device", null, "Reloj principal de entrenamiento."],
+	["material", "/device-service/deviceservice/mylastused", null, "Último dispositivo sincronizado."],
+	["material", "/web-gateway/solar/{id}/{desde}/{hasta}", "singleDayView=false", "Carga solar del reloj."],
+	// Perfil y retos
+	["perfil", "/userprofile-service/userprofile/user-settings", null, "Ajustes del usuario: peso, altura, fecha de nacimiento, pulso de umbral, sueño, unidades."],
+	["perfil", "/userprofile-service/socialProfile", null, "Perfil público (displayName, nombre)."],
+	["perfil", "/badge-service/badge/earned", null, "Insignias conseguidas."],
+	["perfil", "/badgechallenge-service/badgeChallenge/non-completed", "start=1&limit=50", "Retos en curso."],
+	["perfil", "/gcs-golfcommunity/api/v2/scorecard/summary", "start=0", "Golf: tarjetas (si se usa)."],
+];
+
+// Lo que garmin_api nunca toca: login y tokens, y descargas que no son JSON.
+const GARMIN_API_PROHIBIDO = /^\/(di-oauth2-service|oauth-service|sso|upload-service|download-service)\b/i;
+const GARMIN_API_PATH = /^\/[a-z][a-z0-9-]*\/[A-Za-z0-9_\-./{}:,@]*$/;
+const GARMIN_API_MAX = 60000;
+
+/** Valor de una ruta con puntos dentro de un JSON: "a.b.0.c". */
+const porRuta = (obj, ruta) =>
+	String(ruta).split(".").filter(Boolean).reduce((o, k) => (o == null ? undefined : o[k]), obj);
+
+/**
+ * Una respuesta demasiado grande no se corta a ciegas (saldría un JSON roto):
+ * se dice qué hay y cuánto ocupa cada parte, para pedir solo lo que interesa.
+ */
+function recortarGarmin(data) {
+	const texto = JSON.stringify(data);
+	if (texto.length <= GARMIN_API_MAX) return { datos: data };
+	const tam = (v) => JSON.stringify(v ?? null).length;
+	if (Array.isArray(data)) {
+		const datos = [];
+		let usado = 0;
+		for (const x of data) { usado += tam(x); if (usado > GARMIN_API_MAX) break; datos.push(x); }
+		return { datos, recortado: `La lista tiene ${data.length} elementos y solo caben ${datos.length}. Pida un periodo más corto o use campos.` };
+	}
+	const datos = {};
+	const grandes = {};
+	for (const [k, v] of Object.entries(data || {})) {
+		const n = tam(v);
+		if (n <= 4000) datos[k] = v;
+		else grandes[k] = Array.isArray(v) ? `lista de ${v.length} (${n} caracteres)` : `${n} caracteres`;
+	}
+	return { datos, recortado: "Respuesta grande: van los campos pequeños. Para los demás use campos (p. ej. ['" + Object.keys(grandes)[0] + "']).", campos_grandes: grandes };
 }
 
 /** Polilínea codificada de Google (precisión 1e-5) a partir de puntos {lat, lon}. */
@@ -1346,6 +1485,7 @@ const TOOLS = {
 					min: Math.round((a.duration ?? 0) / 60),
 					fc: a.averageHR ?? null,
 					te: a.trainingEffectLabel ?? null,
+					cg: a.activityTrainingLoad != null ? Math.round(a.activityTrainingLoad) : null,
 					n: a.activityName,
 				}));
 			return list.map((a) => ({
@@ -1361,6 +1501,8 @@ const TOOLS = {
 				aerobic_training_effect: a.aerobicTrainingEffect ?? null,
 				anaerobic_training_effect: a.anaerobicTrainingEffect ?? null,
 				tipo_sesion_garmin: a.trainingEffectLabel ?? null,
+				// Exercise Load de Garmin: la carga de esta actividad (EPOC).
+				carga_garmin: a.activityTrainingLoad != null ? Math.round(a.activityTrainingLoad) : null,
 			}));
 		},
 	},
@@ -1813,10 +1955,82 @@ const TOOLS = {
 			};
 		},
 	},
+	garmin_api: {
+		title: "Garmin Connect a pelo (solo lectura)",
+		description:
+			"Lee CUALQUIER dato de Garmin Connect aunque myCoach no tenga herramienta para el: es el respaldo cuando las demas garmin_* no lo traen. " +
+			"Sin path devuelve el catalogo de endpoints conocidos, por grupos (forma, umbrales, actividades, dia, cuerpo, plan, material, perfil): miralo antes de llamar. " +
+			"Con path hace un GET a connectapi.garmin.com y devuelve el JSON tal cual. {usuario} y {perfil} los rellena el conector; las fechas (YYYY-MM-DD) y los ids, usted. " +
+			"Si la respuesta es grande, pida solo lo que necesite con campos (rutas con puntos, p. ej. 'mostRecentTrainingStatus.latestTrainingStatusData'). Solo lectura: nunca escribe en Garmin.",
+		schema: {
+			type: "object",
+			properties: {
+				path: { type: "string", description: "Ruta del endpoint, p. ej. /metrics-service/metrics/trainingloadbalance/latest/2026-10-04. Sin path, devuelve el catalogo." },
+				params: { type: "object", description: "Parametros de la consulta, p. ej. { startDate: '2026-09-01', endDate: '2026-10-04' }. Un valor lista se repite (metric=a&metric=b)." },
+				campos: { type: "array", items: { type: "string" }, description: "Devolver solo estas partes de la respuesta (rutas con puntos)." },
+				grupo: { type: "string", description: "Sin path: solo este grupo del catalogo." },
+			},
+		},
+		run: async (env, userId, { path, params, campos, grupo } = {}) => {
+			if (!path) {
+				const filas = ENDPOINTS_GARMIN.filter(([g]) => !grupo || g === grupo);
+				const grupos = {};
+				for (const [g, p, q, d] of filas) (grupos[g] ||= []).push({ path: p, params: q || undefined, que_da: d });
+				return {
+					grupos,
+					nota: "Rellene {fecha}, {desde}, {hasta} e {id}; {usuario} y {perfil} los pone el conector. " +
+						"El catalogo no es cerrado: si Garmin tiene otra ruta de lectura, tambien se puede pedir.",
+				};
+			}
+			let ruta = String(path).trim().replace(/^https?:\/\/connectapi\.garmin\.com/i, "");
+			if (ruta.includes("?")) {
+				// Si vienen los parametros pegados a la ruta, se separan.
+				const [r, q] = ruta.split("?");
+				ruta = r;
+				params = { ...Object.fromEntries(new URLSearchParams(q)), ...(params || {}) };
+			}
+			if (!GARMIN_API_PATH.test(ruta) || ruta.includes(".."))
+				throw new HttpError(400, "Ruta no valida: debe empezar por /servicio/..., p. ej. /metrics-service/metrics/trainingstatus/aggregated/2026-10-04.");
+			if (GARMIN_API_PROHIBIDO.test(ruta))
+				throw new HttpError(403, "Esa ruta no se puede leer desde aqui (login, subidas o descargas de archivos).");
+
+			const lista = Object.entries(params || {});
+			const usa = (marca) => ruta.includes(marca) || lista.some(([, v]) => String(v).includes(marca));
+			const rellenar = {};
+			if (usa("{usuario}")) rellenar["{usuario}"] = await displayName(env, userId);
+			if (usa("{perfil}")) {
+				const sp = await apiGet(env, userId, "/userprofile-service/socialProfile");
+				rellenar["{perfil}"] = String(sp?.profileId ?? sp?.userProfilePK ?? sp?.id ?? "");
+			}
+			const poner = (t) => Object.entries(rellenar).reduce((x, [k, v]) => x.split(k).join(encodeURIComponent(v)), String(t));
+			ruta = poner(ruta);
+			const pendiente = (ruta.match(/\{[^}]+\}/) || [])[0];
+			if (pendiente) throw new HttpError(400, `Falta rellenar ${pendiente} en la ruta.`);
+
+			// URLSearchParams repite las claves: así van varios metric=.
+			const qs = new URLSearchParams();
+			for (const [k, v] of lista) for (const x of Array.isArray(v) ? v : [v]) qs.append(k, poner(x));
+
+			let data;
+			try {
+				data = await apiGet(env, userId, ruta, [...qs].length ? qs : undefined);
+			} catch (e) {
+				if (e instanceof SyntaxError) throw new HttpError(502, `Garmin no ha devuelto JSON en ${ruta} (puede ser un archivo).`);
+				if (e.status === 404) throw new HttpError(404, `Garmin no tiene ${ruta} (HTTP 404). Mire el catalogo (garmin_api sin path) o revise la ruta y los parametros.`);
+				throw e;
+			}
+			if (data == null) return { path: ruta, datos: null, nota: "Garmin no tiene datos para eso (respuesta vacia)." };
+			if (Array.isArray(campos) && campos.length)
+				return { path: ruta, ...recortarGarmin(Object.fromEntries(campos.map((c) => [c, porRuta(data, c) ?? null]))) };
+			return { path: ruta, ...recortarGarmin(data) };
+		},
+	},
+
 	garmin_forma: {
 		title: "Forma y tendencia segun Garmin",
 		description:
-			"Lo que Garmin calcula de tu forma, con su evolucion: estado de entreno (productivo, mantenimiento, perdida de forma...), carga aguda y cronica con la franja optima y su ratio, carga de la semana, balance de carga del mes, " +
+			"Lo que Garmin calcula de tu forma, con su evolucion: estado de entreno (productivo, mantenimiento, perdida de forma...), carga aguda y cronica con la franja optima y su ratio, carga de la semana, " +
+			"enfoque de carga de 4 semanas (Load Focus: anaerobico, aerobico intenso y suave frente a su objetivo), carga de cada actividad (Exercise Load) sumada por semana y deporte, " +
 			"VO2max de correr y de bici semana a semana, Endurance Score y Hill Score en el tiempo, predicciones de carrera (5K, 10K, media y maraton), umbral de lactato, FTP, edad fisica y aclimatacion al calor y a la altitud. " +
 			"Responde a '?estoy en forma?', '?me estoy pasando de carga?' o '?como ha ido mi VO2max?'. Para el dia a dia (readiness, sueno, VFC) use garmin_training_readiness y coach_hoy.",
 		schema: {
@@ -1836,7 +2050,7 @@ const TOOLS = {
 			const pedir = (nombre, path, params) =>
 				apiGet(env, userId, path, params).catch(() => { faltan.push(nombre); return null; });
 			const nombre = await displayName(env, userId).catch(() => null);
-			const [estado, vo2, endurance, hill, carreras, lactato, ftp, edad, ajustes] = await Promise.all([
+			const [estado, vo2, endurance, hill, carreras, lactato, ftp, edad, ajustes, actividades] = await Promise.all([
 				pedir("estado de entreno", `/metrics-service/metrics/trainingstatus/aggregated/${fin}`),
 				pedir("VO2max", `/metrics-service/metrics/maxmet/daily/${ini}/${fin}`),
 				pedir("Endurance Score", "/metrics-service/metrics/endurancescore/stats", { startDate: ini, endDate: fin, aggregation: "weekly" }),
@@ -1846,6 +2060,7 @@ const TOOLS = {
 				pedir("FTP", "/biometric-service/biometric/latestFunctionalThresholdPower/CYCLING"),
 				pedir("edad fisica", `/fitnessage-service/fitnessage/${fin}`),
 				apiGet(env, userId, "/userprofile-service/userprofile/user-settings").catch(() => null),
+				pedir("carga por actividad", "/activitylist-service/activities/search/activities", { startDate: ini, endDate: fin, start: "0", limit: "400" }),
 			]);
 
 			const vo2Serie = porSemana((Array.isArray(vo2) ? vo2 : [])
@@ -1864,6 +2079,23 @@ const TOOLS = {
 				.map((h) => ({ fecha: h.calendarDate, puntos: h.overallScore ?? null, fuerza: h.strengthScore ?? null, resistencia: h.enduranceScore ?? null }))
 				.filter((p) => p.fecha && p.puntos != null)
 				.sort((a, b) => a.fecha.localeCompare(b.fecha)));
+			// Exercise Load: la carga que Garmin da a cada actividad, sumada por semana.
+			const cargaSem = new Map();
+			for (const a of Array.isArray(actividades) ? actividades : []) {
+				const dia = (a.startTimeLocal || "").slice(0, 10);
+				if (!dia || a.activityTrainingLoad == null) continue;
+				const lunes = sumaDias(dia, -((new Date(`${dia}T00:00:00Z`).getUTCDay() + 6) % 7));
+				const w = cargaSem.get(lunes) || { semana: lunes, carga: 0, actividades: 0, por_deporte: {} };
+				const t = a.activityType?.typeKey || "otro";
+				w.carga += a.activityTrainingLoad;
+				w.actividades += 1;
+				w.por_deporte[t] = (w.por_deporte[t] || 0) + a.activityTrainingLoad;
+				cargaSem.set(lunes, w);
+			}
+			const cargaSemanas = [...cargaSem.values()].sort((a, b) => a.semana.localeCompare(b.semana)).map((w) => ({
+				...w, carga: Math.round(w.carga),
+				por_deporte: Object.fromEntries(Object.entries(w.por_deporte).map(([k, v]) => [k, Math.round(v)])),
+			}));
 			const pred = Array.isArray(carreras) ? carreras[0] : carreras;
 			const vatios = ftp?.functionalThresholdPower ?? null;
 			const peso = ajustes?.userData?.weight ?? null; // en gramos
@@ -1872,6 +2104,7 @@ const TOOLS = {
 				desde: ini,
 				hasta: fin,
 				...estadoGarmin(estado),
+				carga_por_semana: cargaSemanas.length ? cargaSemanas : null,
 				vo2max: vo2Serie.length ? {
 					correr: vo2Serie.filter((p) => p.correr != null).at(-1)?.correr ?? null,
 					bici: vo2Serie.filter((p) => p.bici != null).at(-1)?.bici ?? null,
@@ -1942,7 +2175,7 @@ async function handleRpc(message, env, userId) {
 	const instrucciones = async () =>
 				"Datos de Garmin Connect del usuario que ha autorizado este conector. Las fechas van en " +
 				"YYYY-MM-DD y por defecto es hoy. Para preguntas sobre descanso use garmin_sleep y garmin_hrv; " +
-				"para carga y rendimiento, garmin_activities y garmin_training_readiness; para forma y tendencia (estado de entreno, carga, VO2max, predicciones), garmin_forma. Si una herramienta " +
+				"para carga y rendimiento, garmin_activities y garmin_training_readiness; para forma y tendencia (estado de entreno, carga, VO2max, predicciones), garmin_forma. Si ninguna herramienta trae el dato que busca (estres, SpO2, respiracion, records, material, zonas, planes de Garmin...), no diga que no lo tiene: mire el catalogo con garmin_api sin path y pidalo con garmin_api. Si una herramienta " +
 				"falla con error de autenticacion, llame a garmin_status para diagnosticar.\n\n" +
 				"Para planificar rutas de bici: proponga usted los puntos de paso a partir de su conocimiento " +
 				"geografico y llame a garmin_plan_route, que los une por carreteras reales y devuelve las " +

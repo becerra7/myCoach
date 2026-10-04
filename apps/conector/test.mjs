@@ -556,7 +556,7 @@ const rpc = async (env, token, message) => {
 	check("un navegador en la raiz sigue viendo la pagina", (await (await get(env, "/")).text()).includes("<h1>"));
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("tools/list devuelve 46 herramientas", list.body.result.tools.length === 46);
+	check("tools/list devuelve 47 herramientas", list.body.result.tools.length === 47);
 	check("app_guardar se anuncia como escritura", anot0(list).app_guardar.readOnlyHint === false);
 	{
 		const call = (name, args) => rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name, arguments: args } });
@@ -1103,6 +1103,11 @@ const rpc = async (env, token, message) => {
 		if (u.pathname.includes("FunctionalThresholdPower")) return new Response("{}", { status: 404 });
 		if (u.pathname.includes("fitnessage")) return r({ chronologicalAge: 36, fitnessAge: 29.43, achievableFitnessAge: 27.1 });
 		if (u.pathname.includes("user-settings")) return r({ userData: { weight: 72000 } });
+		if (u.pathname.includes("search/activities")) return r([
+			{ startTimeLocal: "2026-09-16 08:00:00", activityTrainingLoad: 95.4, activityType: { typeKey: "running" } },
+			{ startTimeLocal: "2026-09-22 08:00:00", activityTrainingLoad: 150.2, activityType: { typeKey: "cycling" } },
+			{ startTimeLocal: "2026-09-24 08:00:00", activityTrainingLoad: 79.8, activityType: { typeKey: "running" } },
+			{ startTimeLocal: "2026-09-25 08:00:00", activityTrainingLoad: null, activityType: { typeKey: "yoga" } }]);
 		return new Response("{}", { status: 404 });
 	};
 	const res = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 14, method: "tools/call",
@@ -1113,7 +1118,9 @@ const rpc = async (env, token, message) => {
 	check("forma: estado del reloj principal, traducido", f.estado?.estado === "Productivo" && f.estado.codigo_garmin === "PRODUCTIVE_3", JSON.stringify(f.estado));
 	check("forma: carga aguda y crónica con su franja y ratio", f.carga?.aguda_7d === 690 && f.carga.cronica_28d === 560 &&
 		f.carga.franja_optima_cronica[1] === 840 && f.carga.ratio_estado === "Óptima" && f.carga.franja_semana[0] === 420, JSON.stringify(f.carga));
-	check("forma: balance del mes traducido", f.balance_mes?.veredicto === "Falta anaeróbico" && f.balance_mes.anaerobica.carga === 100);
+	check("forma: enfoque de carga (Load Focus) traducido", f.enfoque_carga?.veredicto === "Falta anaeróbico" && f.enfoque_carga.anaerobica.carga === 100);
+	check("forma: Exercise Load sumada por semana y deporte", f.carga_por_semana?.length === 2 && f.carga_por_semana[1].carga === 230 &&
+		f.carga_por_semana[1].por_deporte.cycling === 150 && f.carga_por_semana[0].actividades === 1, JSON.stringify(f.carga_por_semana));
 	check("forma: aclimatación al calor", f.aclimatacion?.calor_pct === 40);
 	check("forma: VO2máx semana a semana (correr y bici)", f.vo2max?.correr === 52.6 && f.vo2max.bici === 55 &&
 		f.vo2max.semanas.length === 2 && f.vo2max.tendencia_correr?.cambio === 0.6, JSON.stringify(f.vo2max));
@@ -1133,6 +1140,77 @@ const rpc = async (env, token, message) => {
 	const vacio = JSON.parse((await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 15, method: "tools/call",
 		params: { name: "garmin_forma", arguments: {} } })).body.result.content[0].text);
 	check("forma: sin datos de Garmin no falla", vacio.vo2max === null && vacio.estado === null && vacio.sin_datos?.length >= 7, JSON.stringify(vacio).slice(0, 200));
+	globalThis.fetch = base;
+}
+
+// ── 8b quater ter. Garmin a pelo (garmin_api) ──
+{
+	mockGarmin({ "ana@x.com": { password: "a", data: { displayName: "ana", hrv: 50 } } });
+	const env = makeEnv();
+	const { tokens } = await connect(env, "ana@x.com", "a");
+	const base = globalThis.fetch;
+	const pedidas = [];
+	globalThis.fetch = async (url, init) => {
+		const u = new URL(url);
+		if (u.hostname !== "connectapi.garmin.com") return base(url, init);
+		pedidas.push({ path: u.pathname, search: u.search, method: init?.method || "GET" });
+		const r = (x) => new Response(JSON.stringify(x));
+		if (u.pathname.includes("socialProfile")) return r({ displayName: "ana", profileId: 777 });
+		if (u.pathname.includes("trainingloadbalance")) return r({ metricsTrainingLoadBalanceDTOMap: { "1": { monthlyLoadAnaerobic: 80 } } });
+		if (u.pathname.includes("racepredictions/latest/ana")) return r({ time5K: 1230 });
+		if (u.pathname.includes("filterGear")) return r([{ userProfilePk: 777, displayName: "Zapas" }]);
+		if (u.pathname.includes("fitnessstats-service")) return r([{ activityTrainingLoad: 80 }]);
+		if (u.pathname.includes("dailySleepData")) return r({ grande: "x".repeat(70000), dailySleepDTO: { sleepScores: { overall: { value: 81 } } } });
+		if (u.pathname.includes("hrv-service")) return new Response(null, { status: 204 });
+		return new Response("{}", { status: 404 });
+	};
+	const llamar = async (args) => {
+		const res = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 16, method: "tools/call", params: { name: "garmin_api", arguments: args } });
+		const c = res.body.result?.content?.[0]?.text;
+		return { error: res.body.result?.isError || !!res.body.error, out: c ? (() => { try { return JSON.parse(c); } catch { return c; } })() : res.body.error };
+	};
+	const lista = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 17, method: "tools/list" });
+	const ann = anot0(lista).garmin_api;
+	check("garmin_api: solo lectura", ann?.readOnlyHint === true);
+
+	const cat = (await llamar({})).out;
+	check("garmin_api: sin path da el catálogo por grupos", cat.grupos?.forma?.length > 5 && cat.grupos.dia.some((e) => e.path.includes("dailyStress")));
+	check("garmin_api: el catálogo filtra por grupo", Object.keys((await llamar({ grupo: "umbrales" })).out.grupos).join() === "umbrales");
+
+	const lb = (await llamar({ path: "/metrics-service/metrics/trainingloadbalance/latest/2026-10-04" })).out;
+	check("garmin_api: devuelve el JSON de Garmin tal cual", lb.datos?.metricsTrainingLoadBalanceDTOMap?.["1"]?.monthlyLoadAnaerobic === 80, JSON.stringify(lb));
+	check("garmin_api: hace GET", pedidas.at(-1).method === "GET");
+
+	const rp = (await llamar({ path: "/metrics-service/metrics/racepredictions/latest/{usuario}" })).out;
+	check("garmin_api: rellena {usuario}", rp.datos?.time5K === 1230 && rp.path.endsWith("/latest/ana"), JSON.stringify(rp));
+	const gear = (await llamar({ path: "/gear-service/gear/filterGear", params: { userProfilePk: "{perfil}" } })).out;
+	check("garmin_api: rellena {perfil} en los parámetros", gear.datos?.[0]?.displayName === "Zapas" && pedidas.at(-1).search === "?userProfilePk=777", pedidas.at(-1).search);
+
+	await llamar({ path: "/fitnessstats-service/activity/all", params: { startDate: "2026-09-01", metric: ["activityTrainingLoad", "trainingEffectLabel"] } });
+	check("garmin_api: una lista en params repite la clave", pedidas.at(-1).search === "?startDate=2026-09-01&metric=activityTrainingLoad&metric=trainingEffectLabel", pedidas.at(-1).search);
+	await llamar({ path: "https://connectapi.garmin.com/hrv-service/hrv/2026-10-01?x=1" });
+	check("garmin_api: acepta la URL entera con la consulta pegada", pedidas.at(-1).path === "/hrv-service/hrv/2026-10-01" && pedidas.at(-1).search === "?x=1");
+
+	const vacio = (await llamar({ path: "/hrv-service/hrv/2026-10-01" })).out;
+	check("garmin_api: 204 sin cuerpo es 'sin datos', no un error", vacio.datos === null && /no tiene datos/.test(vacio.nota), JSON.stringify(vacio));
+
+	const grande = (await llamar({ path: "/wellness-service/wellness/dailySleepData/{usuario}", params: { date: "2026-10-01" } })).out;
+	check("garmin_api: una respuesta grande no se corta a ciegas", grande.datos?.dailySleepDTO && !grande.datos.grande && /caracteres/.test(grande.campos_grandes?.grande), JSON.stringify(grande).slice(0, 200));
+	const campos = (await llamar({ path: "/wellness-service/wellness/dailySleepData/{usuario}", params: { date: "2026-10-01" }, campos: ["dailySleepDTO.sleepScores.overall.value"] })).out;
+	check("garmin_api: campos saca solo lo pedido", campos.datos?.["dailySleepDTO.sleepScores.overall.value"] === 81, JSON.stringify(campos));
+
+	const antes = pedidas.length;
+	const malas = await Promise.all([
+		llamar({ path: "/di-oauth2-service/oauth/token" }),
+		llamar({ path: "/download-service/files/activity/1" }),
+		llamar({ path: "/metrics-service/../di-oauth2-service/x" }),
+		llamar({ path: "https://otro.example.com/robar" }),
+		llamar({ path: "/metrics-service/metrics/trainingstatus/aggregated/{fecha}" }),
+	]);
+	check("garmin_api: no toca login, descargas, rutas raras ni plantillas sin rellenar", malas.every((m) => m.error) && pedidas.length === antes,
+		JSON.stringify(malas.map((m) => m.error)));
+	const no = await llamar({ path: "/nada-service/x" });
+	check("garmin_api: un 404 remite al catálogo", no.error && /catalogo/.test(JSON.stringify(no.out)), JSON.stringify(no.out));
 	globalThis.fetch = base;
 }
 
@@ -1168,7 +1246,7 @@ const rpc = async (env, token, message) => {
 	check("el token de acceso vale sin leer del KV", init.body.result?.serverInfo?.name === "garmin");
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("las herramientas se listan igualmente", list.body.result.tools.length === 46);
+	check("las herramientas se listan igualmente", list.body.result.tools.length === 47);
 
 	// Y el dato que si vive en KV avisa en vez de mentir
 	const call = await rpc(env, tokens.access_token, {

@@ -127,6 +127,18 @@ Cada dato se pide por separado: si Garmin no tiene uno (sin potenciómetro no
 hay FTP), el resto sale igual y `sin_datos` dice cuál falta. La web aún no
 la usa, así que no está en la lista de herramientas de `apps/worker`.
 
+## Cualquier dato de Garmin (`garmin_api`)
+
+Respaldo de solo lectura para lo que no tiene herramienta propia. Sin `path`
+devuelve el catálogo de endpoints conocidos (`ENDPOINTS_GARMIN`, por grupos).
+Con `path` hace un GET a connectapi y devuelve el JSON tal cual:
+
+- rellena `{usuario}` y `{perfil}`;
+- si la respuesta es grande, la recorta sin romper el JSON y con `campos` se pide solo una parte.
+
+Nunca toca login, subidas ni descargas de archivos. El inventario completo y
+qué usa myCoach de cada cosa están en `docs/GARMIN-API.md`.
+
 ## Intervals.icu
 
 Segunda fuente, oficial: Intervals.icu es socio de Garmin y recibe cada
