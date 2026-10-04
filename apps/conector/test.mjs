@@ -556,7 +556,7 @@ const rpc = async (env, token, message) => {
 	check("un navegador en la raiz sigue viendo la pagina", (await (await get(env, "/")).text()).includes("<h1>"));
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("tools/list devuelve 40 herramientas", list.body.result.tools.length === 40);
+	check("tools/list devuelve 43 herramientas", list.body.result.tools.length === 43);
 	check("app_guardar se anuncia como escritura", anot0(list).app_guardar.readOnlyHint === false);
 	{
 		const call = (name, args) => rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name, arguments: args } });
@@ -1245,7 +1245,7 @@ const rpc = async (env, token, message) => {
 	check("el token de acceso vale sin leer del KV", init.body.result?.serverInfo?.name === "garmin");
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("las herramientas se listan igualmente", list.body.result.tools.length === 40);
+	check("las herramientas se listan igualmente", list.body.result.tools.length === 43);
 
 	// Y el dato que si vive en KV avisa en vez de mentir
 	const call = await rpc(env, tokens.access_token, {
@@ -1895,23 +1895,132 @@ const rpc = async (env, token, message) => {
 	globalThis.fetch = abajo;
 }
 
+// ── 12 quater. Agenda: tus compromisos y tu calendario mandan sobre el plan ──
+{
+	const fechaMadrid = (d = new Date()) =>
+		new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+	const HOY_C = fechaMadrid();
+	const mas = (f, n) => { const d = new Date(`${f}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+	const lunes = (() => { const d = new Date(`${HOY_C}T12:00:00Z`); return mas(HOY_C, -((d.getUTCDay() + 6) % 7)); })();
+	const L = mas(lunes, 7); // la semana que viene: entera por delante
+	const ics = (f) => f.replaceAll("-", "");
+	let calendario = "ok";
+	mockGarmin({ "ana@x.com": { password: "a", data: { displayName: "ana", hrv: 50 } }, "bob@x.com": { password: "b", data: { displayName: "bob", hrv: 60 } } });
+	const abajo = globalThis.fetch;
+	globalThis.fetch = async (url, init) => {
+		const u = String(url);
+		if (!u.startsWith("https://cal.test/")) return abajo(url, init);
+		if (calendario === "caido" || u.endsWith("no.ics")) return new Response("<html>no</html>");
+		return new Response(["BEGIN:VCALENDAR",
+			"BEGIN:VEVENT", "UID:boda", "SUMMARY:Boda de Marta", `DTSTART;VALUE=DATE:${ics(mas(L, 5))}`, `DTEND;VALUE=DATE:${ics(mas(L, 6))}`, "END:VEVENT",
+			"BEGIN:VEVENT", "UID:dentista", "SUMMARY:Dentista", `DTSTART;TZID=Europe/Madrid:${ics(mas(L, 4))}T100000`, `DTEND;TZID=Europe/Madrid:${ics(mas(L, 4))}T110000`, "END:VEVENT",
+			"END:VCALENDAR"].join("\r\n"));
+	};
+	const env = makeEnv();
+	const ana = (await connect(env, "ana@x.com", "a")).tokens.access_token;
+	const bob = (await connect(env, "bob@x.com", "b")).tokens.access_token;
+	const llamar = async (token, name, args = {}) => {
+		const res = (await rpc(env, token, { jsonrpc: "2.0", id: 40, method: "tools/call", params: { name, arguments: args } })).body.result;
+		return res.isError ? { error: res.content[0].text } : JSON.parse(res.content[0].text);
+	};
+	const next = {
+		[L]: { dep: "bici", t: "fondo", d: "Rodaje 1 h", min: 60 },
+		[mas(L, 1)]: { dep: "bici", t: "int", d: "Series 5 x 4 min", min: 60 },
+		[mas(L, 3)]: { dep: "correr", t: "fondo", d: "Rodaje 1 h 30", min: 90 },
+		[mas(L, 5)]: { dep: "bici", t: "fondo", d: "Fondo 3 h", min: 180 },
+	};
+	const hoyPlan = { [HOY_C]: { dep: "bici", t: "fondo", d: "Rodaje 1 h", min: 60 } };
+	await llamar(ana, "app_guardar", { doc: "estado/app", datos: { plan: hoyPlan, next, goal: { modo: "forma" }, sports: ["bici", "correr"] } });
+
+	// Una franja deja el resto del día libre
+	const cena = await llamar(ana, "agenda_anotar", { fecha: mas(L, 1), de: "19:30", a: "22:00", titulo: "Cena con amigos", tipo: "social" });
+	check("agenda: una franja no bloquea el día entero", cena.guardado === false && cena.choques.length === 0 && cena.propuesta_plan === null, JSON.stringify(cena));
+	check("agenda: sin guardar=true no se guarda nada", (await llamar(ana, "agenda", { desde: L })).dias[1].eventos.length === 0);
+
+	// Todo el día: la sesión clave se mueve, sin pegarla a otra exigente
+	const viaje = await llamar(ana, "agenda_anotar", { fecha: mas(L, 1), titulo: "Viaje a Bilbao", tipo: "viaje" });
+	check("agenda: un día entero ocupado choca con la sesión", viaje.choques.some((c) => c.regla === "dia_ocupado" && c.fecha === mas(L, 1) && c.texto.includes("Viaje a Bilbao")), JSON.stringify(viaje.choques));
+	const mov = viaje.propuesta_plan?.cambios || {};
+	check("agenda: las series pasan a un día libre de esa semana", mov[mas(L, 1)] === null && mov[mas(L, 2)]?.t === "int" && mov[mas(L, 2)].d === "Series 5 x 4 min", JSON.stringify(viaje.propuesta_plan));
+	const g1 = await llamar(ana, "agenda_anotar", { fecha: mas(L, 1), titulo: "Viaje a Bilbao", tipo: "viaje", guardar: true });
+	check("agenda: con guardar=true queda guardado con su id", g1.guardado && /^c/.test(g1.compromiso.id));
+	const ap = await llamar(ana, "coach_proponer", { cambios: mov, porque: viaje.propuesta_plan.porque, guardar: true });
+	check("agenda: la propuesta se aplica con coach_proponer", ap.guardado === true, JSON.stringify(ap));
+	const vuelta = await llamar(ana, "coach_proponer", { cambios: { [mas(L, 1)]: next[mas(L, 1)] }, porque: "x" });
+	check("agenda: poner una sesión en un día ocupado no pasa", vuelta.valido === false && vuelta.semanas[0].errores.some((e) => e.regla === "dia_ocupado"), JSON.stringify(vuelta));
+	const igual = await llamar(ana, "coach_proponer", { cambios: { [mas(L, 1)]: { dep: "correr", t: "rec", d: "30 min en el hotel", min: 30 } }, porque: "Entreno en el viaje", entrena_igualmente: true });
+	check("agenda: si dice que entrena igualmente, solo se avisa", igual.valido === true && igual.semanas[0].avisos.some((a) => a.regla === "dia_ocupado"), JSON.stringify(igual));
+	const hoyIgual = await llamar(ana, "coach_proponer", { cambios: { [HOY_C]: { dep: "bici", t: "rec", d: "Suave", min: 45 } }, porque: "x" });
+	check("agenda: un choque en otro día no frena el cambio de hoy", hoyIgual.valido === true, JSON.stringify(hoyIgual));
+
+	// Una franja larga: el relleno se recorta al hueco que queda
+	const curro = await llamar(ana, "agenda_anotar", { fecha: mas(L, 3), de: "06:00", a: "20:30", titulo: "Turno largo", tipo: "trabajo" });
+	const jue = curro.propuesta_plan?.cambios?.[mas(L, 3)];
+	check("agenda: si no cabe, el rodaje se recorta a lo libre", curro.choques[0]?.regla === "no_cabe" && jue?.min === 75 && jue.d.startsWith("Versión corta"), JSON.stringify(curro));
+
+	// Corregir y borrar
+	const corr = await llamar(ana, "agenda_anotar", { id: g1.compromiso.id, de: "08:00", a: "12:00", guardar: true });
+	check("agenda: corregir cambia la franja y conserva lo demás", corr.compromiso.titulo === "Viaje a Bilbao" && corr.compromiso.de === "08:00" && corr.compromiso.id === g1.compromiso.id, JSON.stringify(corr));
+	check("agenda: de y a van juntos", Boolean((await llamar(ana, "agenda_anotar", { fecha: L, de: "19:00", titulo: "x" })).error));
+	check("agenda: el pasado no se anota", Boolean((await llamar(ana, "agenda_anotar", { fecha: mas(HOY_C, -1), titulo: "x" })).error));
+	check("agenda: borrar sin id no hace nada a ciegas", Boolean((await llamar(ana, "agenda_anotar", { borrar: true, guardar: true })).error));
+	const borr = await llamar(ana, "agenda_anotar", { id: g1.compromiso.id, borrar: true, guardar: true });
+	check("agenda: borrar lo quita", borr.guardado && (await llamar(ana, "agenda", { desde: L })).dias[1].eventos.length === 0);
+
+	// El calendario: se conecta desde la app y el motor lo usa
+	check("calendario: solo https o webcal", Boolean((await llamar(ana, "agenda_calendario", { url: "http://cal.test/ok.ics" })).error));
+	check("calendario: tiene que ser un calendario", Boolean((await llamar(ana, "agenda_calendario", { url: "https://cal.test/no.ics" })).error));
+	const con = await llamar(ana, "agenda_calendario", { url: "webcal://cal.test/ok.ics" });
+	check("calendario: conectado", con.conectado === true);
+	const guardado = [...env._store.entries()].find(([k]) => k.endsWith(":agenda/fuente"))?.[1] || "";
+	check("calendario: el enlace se guarda cifrado", guardado && !guardado.includes("cal.test"), guardado);
+	const sem = await llamar(ana, "coach_semana", { semana: "siguiente" });
+	const sab = sem.dias.find((d) => d.fecha === mas(L, 5));
+	check("calendario: coach_semana trae los eventos de cada día", sab.agenda?.todo_ocupado === true && sab.agenda.eventos[0].origen === "calendario" && sab.agenda.eventos[0].titulo === "Boda de Marta", JSON.stringify(sab));
+	check("calendario: el plan que choca sale en las reglas", sem.plan_cumple_reglas.errores.some((e) => e.regla === "dia_ocupado" && e.fecha === mas(L, 5)), JSON.stringify(sem.plan_cumple_reglas));
+	const vie = (await llamar(ana, "agenda", { desde: L })).dias[4];
+	check("calendario: un evento con hora deja libres los huecos de alrededor", vie.libre_min > 300 && vie.huecos.length === 2 && vie.huecos[0] === "06:00-09:45", JSON.stringify(vie));
+	const finde = await llamar(ana, "agenda_anotar", { fecha: mas(L, 5), titulo: "Comida familiar", de: "14:00", a: "17:00" });
+	check("calendario: el fondo largo de la boda se mueve al domingo", finde.propuesta_plan?.cambios?.[mas(L, 6)]?.min === 180, JSON.stringify(finde.propuesta_plan));
+
+	// Sin culpa: el día sin hueco no cuenta como saltado (se comprueba con hoy)
+	await llamar(ana, "agenda_anotar", { fecha: HOY_C, titulo: "Mudanza", tipo: "casa", guardar: true });
+	const hoy = await llamar(ana, "coach_hoy");
+	check("coach_hoy: dice que hoy no tienes hueco", hoy.agenda?.cabe === false && hoy.mensaje.includes("no tienes hueco") && hoy.mensaje.includes("Mudanza"), JSON.stringify({ agenda: hoy.agenda, mensaje: hoy.mensaje }));
+
+	// Si el calendario no responde, todo sigue funcionando y se dice
+	calendario = "caido";
+	for (const k of [...env._store.keys()].filter((k) => k.startsWith("agenda-ics:"))) env._store.delete(k);
+	const sinCal = await llamar(ana, "agenda", { desde: L });
+	check("calendario caído: se avisa y lo tuyo sigue", Boolean(sinCal.calendario.error) && sinCal.dias.length === 7, JSON.stringify(sinCal.calendario));
+	calendario = "ok";
+
+	// Cada uno su agenda
+	const deBob = await llamar(bob, "agenda", { desde: L });
+	check("agenda: la de otro usuario no se ve", deBob.calendario.conectado === false && deBob.dias.every((d) => d.eventos.length === 0));
+	await llamar(ana, "agenda_calendario", { quitar: true });
+	check("calendario: quitarlo borra el enlace", (await llamar(ana, "agenda", { desde: L })).calendario.conectado === false);
+
+	globalThis.fetch = abajo;
+}
+
 // ── 12 ter. Convenciones de las herramientas (el camino para crecer sin romper) ──
 {
 	mockGarmin({ "ana@x.com": { password: "a", data: { displayName: "ana", hrv: 50 } } });
 	const env = makeEnv();
 	const { tokens } = await connect(env, "ana@x.com", "a");
 	const tools = (await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 30, method: "tools/list" })).body.result.tools;
-	const FAMILIAS = /^(garmin|coach|entrenos?|entreno|fuerza|cardio|comida|comidas|peso|intervals|app|mycoach)(_[a-z0-9]+)*$/;
+	const FAMILIAS = /^(agenda|garmin|coach|entrenos?|entreno|fuerza|cardio|comida|comidas|peso|intervals|app|mycoach)(_[a-z0-9]+)*$/;
 	check("convención: cada herramienta empieza por su familia", tools.every((t) => FAMILIAS.test(t.name)), tools.filter((t) => !FAMILIAS.test(t.name)).map((t) => t.name).join());
 	check("convención: todas con título, descripción y esquema de objeto", tools.every((t) => t.title && t.description?.length > 40 && t.inputSchema?.type === "object"));
 	check("convención: descripciones de menos de 1500 caracteres", tools.every((t) => t.description.length < 1500), tools.filter((t) => t.description.length >= 1500).map((t) => t.name).join());
 	const soloApp = tools.filter((t) => t._meta?.ui?.visibility?.join() === "app").map((t) => t.name).sort();
-	check("las de la app no se le enseñan al modelo (visibility app)", soloApp.join() === "app_guardar,fuerza_dia,intervals_conectar,intervals_desconectar", soloApp.join());
+	check("las de la app no se le enseñan al modelo (visibility app)", soloApp.join() === "agenda_calendario,app_guardar,fuerza_dia,intervals_conectar,intervals_desconectar", soloApp.join());
 	check("la app sigue pudiendo llamarlas", !(await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 31, method: "tools/call", params: { name: "app_guardar", arguments: { doc: "notas", datos: [] } } })).body.result.isError);
 	const viejas = ["garmin_sleep", "garmin_hrv", "garmin_daily_summary", "garmin_body_battery", "garmin_training_readiness", "garmin_course_detail", "fuerza_entrenos", "cardio_entrenos", "fuerza_enviar_garmin", "cardio_enviar_garmin"];
 	check("las herramientas juntadas ya no existen", !tools.some((t) => viejas.includes(t.name)));
 	const visibles = tools.filter((t) => !t._meta?.ui?.visibility || t._meta.ui.visibility.includes("model"));
-	check("Claude ve 36 herramientas", visibles.length === 36, String(visibles.length));
+	check("Claude ve 38 herramientas", visibles.length === 38, String(visibles.length));
 }
 
 // ── 13. Intervals.icu: clave cifrada, actividades, series, bienestar y curvas ──

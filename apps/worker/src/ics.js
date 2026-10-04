@@ -4,6 +4,16 @@
 // y ediciones de una sola repetición. Los eventos "disponible" y los cancelados no ocupan.
 
 const pad = n => String(n).padStart(2, '0');
+
+/** Descarga un .ics (máx. 5 MB). null si no responde o no es un calendario. */
+export async function descargarIcs(url) {
+  try {
+    const r = await fetch(url, { headers: { Accept: 'text/calendar, */*' }, redirect: 'follow', signal: AbortSignal.timeout(10000) });
+    if (!r.ok) return null;
+    const t = await r.text();
+    return t.length < 5e6 && t.includes('BEGIN:VCALENDAR') ? t : null;
+  } catch { return null; }
+}
 const WD = { SU: 0, MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6 };
 
 /** Minutos que la zona `tz` va por delante de UTC en el instante `ms`. */

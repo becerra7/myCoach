@@ -41,7 +41,7 @@ test('login con PKCE, callback con cookie y llamada a una herramienta', async ()
   const cookie = cb.headers.get('Set-Cookie').split(';')[0];
   assert.match(cb.headers.get('Set-Cookie'), /HttpOnly; Secure; SameSite=Lax/);
   const me = await req('/api/me', { headers: { Cookie: cookie } });
-  assert.deepEqual(await me.json(), { conectado: true, calendario: false });
+  assert.deepEqual(await me.json(), { conectado: true });
   assert.match(me.headers.get('Set-Cookie'), new RegExp(`^${cookie}; .*Max-Age=${60 * 60 * 24 * 60}`), 'la sesión se renueva al abrir');
   const r = await req('/api/mcp', { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ tool: 'garmin_activities', input: { limit: 5 } }) });
   assert.deepEqual(await r.json(), { payload: { tool: 'garmin_activities', ok: true } });
@@ -69,23 +69,21 @@ test('con service binding, las llamadas al conector van por él y no por interne
   assert.deepEqual(vistos, ['/oauth/register']);
 });
 
-test('calendario: guardar el enlace, leer bloques ocupados y quitarlo', async () => {
-  const ics = ['BEGIN:VCALENDAR', 'BEGIN:VEVENT', 'UID:1', 'SUMMARY:Trabajo', 'DTSTART;TZID=Europe/Madrid:20260901T090000', 'DTEND;TZID=Europe/Madrid:20260901T180000', 'RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
-  const prev = globalThis.fetch;
-  globalThis.fetch = async (u, init) => String(u).startsWith('https://cal.test/') ? new Response(String(u).endsWith('ok.ics') ? ics : '<html>', { status: 200 }) : prev(u, init);
+test('calendario: el enlace que había en la sesión pasa al conector al abrir la app, una sola vez', async () => {
+  const login = await req('/api/login'); const st = new URL(login.headers.get('Location')).searchParams.get('state');
+  const cookie = (await req(`/api/callback?code=c2&state=${st}`)).headers.get('Set-Cookie').split(';')[0];
+  const sid = cookie.split('=')[1];
+  const s = await env.SESIONES.get(`mc:s:${sid}`, 'json');
+  await env.SESIONES.put(`mc:s:${sid}`, JSON.stringify({ ...s, cal: 'https://cal.test/ok.ics' }));
+  const prev = globalThis.fetch; const vistos = [];
+  globalThis.fetch = async (u, init) => { if (String(u).endsWith('/mcp')) vistos.push(JSON.parse(init.body).params); return prev(u, init); };
   try {
-    const login = await req('/api/login'); const st = new URL(login.headers.get('Location')).searchParams.get('state');
-    const cookie = (await req(`/api/callback?code=c2&state=${st}`)).headers.get('Set-Cookie').split(';')[0];
-    const post = u => req('/api/calendario', { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ url: u }) });
-    assert.equal((await post('http://cal.test/ok.ics')).status, 400, 'solo https/webcal');
-    assert.equal((await post('https://cal.test/no.ics')).status, 400, 'tiene que ser un .ics');
-    assert.equal((await post('webcal://cal.test/ok.ics')).status, 200);
-    assert.equal((await (await req('/api/me', { headers: { Cookie: cookie } })).json()).calendario, true);
-    const r = await (await req('/api/calendario?desde=2026-09-28&dias=7', { headers: { Cookie: cookie } })).json();
-    assert.equal(r.eventos.length, 5);
-    assert.deepEqual(r.eventos[0], { f: '2026-09-28', de: '09:00', a: '18:00', t: 'Trabajo' });
-    await req('/api/calendario', { method: 'DELETE', headers: { Cookie: cookie } });
-    assert.deepEqual(await (await req('/api/calendario', { headers: { Cookie: cookie } })).json(), { configurado: false, eventos: [] });
+    assert.deepEqual(await (await req('/api/me', { headers: { Cookie: cookie } })).json(), { conectado: true });
+    assert.deepEqual(vistos, [{ name: 'agenda_calendario', arguments: { url: 'https://cal.test/ok.ics' } }]);
+    assert.equal((await env.SESIONES.get(`mc:s:${sid}`, 'json')).cal, undefined, 'la sesión ya no guarda el enlace');
+    await req('/api/me', { headers: { Cookie: cookie } });
+    assert.equal(vistos.length, 1, 'no se vuelve a pasar');
+    assert.equal((await req('/api/calendario', { headers: { Cookie: cookie } })).status, 404, 'el calendario de la sesión ya no existe');
   } finally { globalThis.fetch = prev; }
 });
 
