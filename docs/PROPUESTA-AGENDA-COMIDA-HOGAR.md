@@ -1,6 +1,11 @@
 # Agenda, plan de comidas y app de pareja: análisis y propuesta
 
-_Octubre 2026. Análisis conjunto de arquitectura, producto, planificador y nutricionista. Nada implementado: es para decidir._
+_Octubre 2026. Análisis conjunto de arquitectura, producto, planificador y nutricionista._
+
+> **Decidido (4 de octubre de 2026)**
+> - **Primero, compromisos.** El cambio grande de la agenda se comparte antes de hacerlo: ver `docs/PLAN-COMPROMISOS.md`.
+> - **Comidas, en simple.** Sin base de datos de alimentos, sin catálogo y sin plan semanal por ahora. Claude estima el valor nutricional, como hoy, y una comida se puede **guardar como plato** (un sofrito, tu desayuno de siempre) con sus ingredientes y valores. La próxima vez Claude la reutiliza sin preguntar qué lleva. Sustituye al apartado 4 y a las fases 2 y 3.
+> - **La app de pareja será marca propia: myLuv.** No es prioridad ahora. Hay que dejar abierto que en el futuro crucen datos con myCoach (compromisos, plan, comidas) y pensar cómo compartir el conector sin que afecte a quien no la use.
 
 ## 1. Resumen
 
