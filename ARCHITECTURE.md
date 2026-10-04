@@ -24,7 +24,7 @@ Tu Claude (claude.ai / app) ── /mcp ────► └───────
 | `00-geo-dominio.js` | Dominio puro: geografía (municipio/país de cada punto), clasificación por zonas de pulso, W/kg por física, `construir(dataset)` → modelo `M`, indicadores con "qué dato falta". |
 | `10-estado.js` | Estado de usuario `S` (plan, comidas, objetivo…), persistencia, utilidades de fecha, resumen semanal. |
 | `20-hoy.js` … `40-forma-pantallas.js` | Pantallas (Hoy, Plan, Forma, test, evolución, ajustes). |
-| `35-agenda.js` | Tu calendario (iCal) y huecos para entrenar; aviso de semana sin plan. |
+| `35-agenda.js` | Tu agenda (compromisos y calendario, del conector): "No puedo este día", choques con el plan y aviso de semana sin plan. |
 | `50-pueblos-comida-claude.js` | Pueblos, comida, chat, sincronización con Garmin, acciones. |
 | `55-coach.js` | Tarjeta "Tu entrenador": semáforo del día, aplicar la propuesta y anotar cómo estás. Lo decide el conector (`coach_hoy`, `coach_proponer`, `coach_anotar`); en demo, un ejemplo con las mismas reglas. |
 | `60-mapa.js` | Mapa táctil a pantalla completa (SVG, pellizcar, zoom, encuadre de un pueblo). |
@@ -36,9 +36,14 @@ Siguiente paso de escalado (sin cambiar el comportamiento):
 2. Pasar los módulos a ES modules con un bundler (esbuild) y cargar la geografía (1,8 MB) bajo demanda desde `/geo/*.json` con caché, en vez de ir incrustada.
 3. Mover la sincronización pesada (detalles, rutas, cruce con municipios) al Worker con un cron diario, para que el móvil solo descargue el resultado.
 
-## Calendario
+## Agenda: compromisos y calendario
 
-El usuario pega el enlace privado iCal de su calendario (Google, Outlook, iCloud). El Worker lo guarda en la sesión, lo descarga (caché 10 min) y `apps/worker/src/ics.js` devuelve solo los bloques ocupados de los próximos días en hora de Madrid: zonas horarias, repeticiones, excepciones y cambios de hora incluidos. La app coloca cada sesión en un hueco libre (6:00-22:00, 15 min de margen), la recorta si no cabe o la mueve al día de descanso libre más cercano. Con Google Calendar por OAuth se podría evitar pegar el enlace, pero exige verificación de Google para datos de calendario.
+Vive en el conector, para que la web y tu Claude vean lo mismo:
+
+- **Compromisos** (`agenda/compromisos`): lo que anotas tú, en la app ("No puedo este día") o con tu Claude (`agenda_anotar`). Una franja (de 19:30 a 22:00) solo ocupa esas horas; sin hora, el día entero.
+- **Calendario**: el enlace privado iCal (Google, Outlook, iCloud) se conecta desde Ajustes (`agenda_calendario`, solo la app) y se guarda cifrado. El conector lo descarga (caché de 10 min) y `apps/worker/src/ics.js` saca lo ocupado en hora de Madrid: zonas horarias, repeticiones, excepciones, días enteros y cambios de hora. Con Google Calendar por OAuth se evitaría pegar el enlace, pero exige la verificación de Google para datos de calendario.
+- **El motor** (`reglasAgenda` en `validarSemana`): se entrena de 6:00 a 22:00 con 15 min de margen alrededor de cada compromiso. Si una sesión no cabe, la clave se mueve a un día libre de la semana sin pegarla a otra exigente, la de relleno se recorta al hueco y, si no hay sitio, el día queda libre. Son errores con versión corregida; con `entrena_igualmente` pasan a aviso.
+- **Quién lo usa**: `coach_semana` trae la agenda de cada día y sus choques; `coach_hoy`, la de hoy y si la sesión cabe; `coach_proponer` la comprueba en los días que cambia; la web la enseña (candado y texto) y, al preparar una semana, usa la versión corregida del motor.
 
 ## Camino a app móvil
 

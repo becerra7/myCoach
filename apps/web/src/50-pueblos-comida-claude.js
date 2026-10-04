@@ -153,7 +153,7 @@ function estadoParaClaude() {
   return { hoy: HOY, readiness: rdy(), deportes: S.sports, objetivo: { modo: S.goal.modo, ...objetivos() }, forma: forma(), notas: Object.fromEntries(Object.entries(dims()).map(([k, x]) => [k, { nota: x.v, dato: x.u }])),
     semana_actual: days7(SEM).map(dia), semana_que_viene: S.next ? days7(PROX).map(dia) : 'sin planificar', resumen_semana: insightsSemana(SEM).map(x => x[2]),
     desde: M.acts.length ? M.acts[M.acts.length - 1].f : null, horas_por_deporte: Object.fromEntries(Object.entries(horasPorDeporte()).map(([k, v]) => [k, Math.round(v * 10) / 10])), perfil: { edad: M.perfil.edad, peso: M.perfil.peso, vo2max: M.perfil.vo2, endurance: M.perfil.es, hill: M.perfil.hill }, fuente: M.fuente,
-    agenda: CAL ? Object.fromEntries(Object.entries(CAL).filter(([f]) => f >= HOY && f < addDays(PROX, 7)).map(([f, e]) => [f, e.map(x => x.todoDia ? `todo el día: ${x.t}` : `${x.de}-${x.a}`)])) : 'sin calendario conectado', comida_hoy: S.meals.filter(m => m.f === HOY).map(m => ({ tipo: m.tipo, cuartos_carbohidrato: m.c, proteina: m.p, verdura: m.v })) };
+    agenda: CAL ? Object.fromEntries(Object.entries(CAL).filter(([f]) => f >= HOY && f < addDays(PROX, 7)).map(([f, e]) => [f, e.map(textoEvento)])) : 'sin compromisos ni calendario', comida_hoy: S.meals.filter(m => m.f === HOY).map(m => ({ tipo: m.tipo, cuartos_carbohidrato: m.c, proteina: m.p, verdura: m.v })) };
 }
 function guion(q) {
   q = q.toLowerCase();
@@ -285,14 +285,15 @@ const ACTIONS = {
   week: el => { S.week = el.dataset.v; save(); render(); markFlow(el.dataset.v < SEM ? 'revision' : el.dataset.v === PROX ? 'planificar' : 'semana'); },
   day: el => sheetDia(el.dataset.v), move: el => sheetMover(el.dataset.v), 'move-to': el => doMove(el.dataset.v, el.dataset.to),
   'draft-dep': el => { const d = S.nextDraft; const v = el.dataset.v; d.deps = d.deps.includes(v) ? d.deps.filter(x => x !== v) : [...d.deps, v]; save(); render(); },
-  'gen-week': () => { const d = S.nextDraft; if (!d.deps.some(k => SPORTS[k].cardio)) { ask({ title: 'Elige un deporte de resistencia', text: 'Bici, correr, skimo o montaña.', actions: [{ label: 'Vale', kind: 'fill' }] }); return; }
+  'gen-week': async () => { const d = S.nextDraft; if (!d.deps.some(k => SPORTS[k].cardio)) { ask({ title: 'Elige un deporte de resistencia', text: 'Bici, correr, skimo o montaña.', actions: [{ label: 'Vale', kind: 'fill' }] }); return; }
     const w = semSel(); const p = generarSemana(d.deps, d.h, S.goal.modo, w); if (w === SEM) for (const f of Object.keys(p)) if (f < HOY) delete p[f];
-    const notas = aplicarAgenda(p);
-    commit(`${w === SEM ? 'Semana preparada desde hoy' : 'Semana propuesta'}${notas.length ? `. Por tu agenda: ${notas.join('; ')}` : '. Revísala y cámbiala a tu gusto'}.`, () => { if (w === SEM) S.plan = { ...S.plan, ...p }; else S.next = p; }); markFlow('planificar'); },
+    // La agenda la mira el motor del conector: lo que no cabe lo mueve, lo recorta o deja el día libre.
+    const notas = await encajarEnAgenda(p);
+    commit(`${w === SEM ? 'Semana preparada desde hoy' : 'Semana propuesta'}${notas.length ? `. Por tu agenda: ${notas.join(' ')}` : '. Revísala y cámbiala a tu gusto'}`, () => { if (w === SEM) S.plan = { ...S.plan, ...p }; else S.next = p; }); markFlow('planificar'); },
   'plan-sem': el => { S.tab = 'plan'; S.week = el.dataset.v; S.stack = []; save(); vt(() => render(true)); },
   'cal-guardar': async el => { const u = ($('#cal-url') || {}).value || ''; if (!u.trim()) { toast('Pega el enlace de tu calendario'); return; } el.disabled = true; el.textContent = 'Leyendo tu calendario…';
-    try { const r = await PLATFORM.calendario.guardar(u.trim()); await cargarCalendario(); toast(`Calendario conectado: ${r.eventos} eventos en 14 días`); } catch (e) { toast(e.message || 'No he podido leer ese calendario', { ms: 7000 }); el.disabled = false; el.textContent = 'Conectar calendario'; } },
-  'cal-quitar': async () => { try { await PLATFORM.calendario.quitar(); } catch (e) { } CAL = null; S.calOk = false; save(); render(); toast('Calendario quitado'); },
+    try { const r = await coachCall('agenda_calendario', { url: u.trim() }, true); await cargarCalendario(true); toast(`Calendario conectado: ${r.eventos_14_dias} eventos en 14 días`); } catch (e) { toast(e.message || 'No he podido leer ese calendario', { ms: 7000 }); el.disabled = false; el.textContent = 'Conectar calendario'; } },
+  'cal-quitar': async () => { try { await coachCall('agenda_calendario', { quitar: true }, true); } catch (e) { toast('No he podido quitarlo: ' + (e.message || e.code || 'error')); return; } S.calOk = false; save(); await cargarCalendario(true); render(); toast('Calendario quitado'); },
   replan: () => { commit('Plan de la próxima semana borrado', () => { S.next = null; }); },
   'goal-edit': () => push({ s: 'objetivo' }),
   // Sin Claude en esta vista no hay chat de imitación: se prepara el encargo para tu Claude.
@@ -328,6 +329,7 @@ const ACTIONS = {
   'ob-var': el => { S.variant = el.dataset.v; save(); renderOnboarding(); }, 'ob-ai': el => { S.ai = el.dataset.v; save(); renderOnboarding(); },
   'ob-done': () => { S.onboarded = true; S.tab = 'hoy'; S.stack = []; save(); markFlow('primer-uso'); vt(() => render(true)); sync(false); },
 };
+Object.assign(ACTIONS, ACCIONES_AGENDA);
 document.addEventListener('click', e => { const el = e.target.closest('[data-a]'); if (!el || el.matches('input,textarea') || el.closest('#proto')) return; const f = ACTIONS[el.dataset.a]; if (f) { e.preventDefault(); f(el); } });
 document.addEventListener('input', e => {
   const el = e.target, a = el.dataset && el.dataset.a; if (!a) return;

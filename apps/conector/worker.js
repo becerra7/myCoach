@@ -24,6 +24,7 @@
  */
 
 import { CATALOGO_GARMIN } from "./ejercicios-garmin.js";
+import { descargarIcs, ocupados } from "../worker/src/ics.js";
 
 // ─────────────────────────────── Garmin ───────────────────────────────
 
@@ -3911,11 +3912,11 @@ async function calcularHoy(env, userId, { fecha } = {}) {
  * pero se le dice al usuario. Devuelve tambien una version corregida para que
  * quien habla pueda ofrecerla en vez de un simple "no".
  */
-function validarSemana(semanaPlan, { objetivo, hoy, colorHoy = null, perfil = {} }) {
+function validarSemana(semanaPlan, { objetivo, hoy, colorHoy = null, perfil = {}, agenda = null, agendaDias = null, agendaComoAviso = false }) {
 	const errores = [];
 	const avisos = [];
 	const corregido = structuredClone(semanaPlan);
-	const fechas = Object.keys(semanaPlan).sort();
+	let fechas = Object.keys(semanaPlan).sort();
 
 	for (const f of fechas) {
 		const s = semanaPlan[f];
@@ -3926,6 +3927,16 @@ function validarSemana(semanaPlan, { objetivo, hoy, colorHoy = null, perfil = {}
 			errores.push({ fecha: f, regla: "formato", texto: `Duración no válida el ${diaDe(f)}: ${s.min} min.` });
 	}
 	if (errores.length) return { errores, avisos, corregido: null };
+
+	// La agenda va primero: lo que se mueve por ella pasa luego por las demas reglas.
+	if (agenda) {
+		// Si el usuario ya ha dicho que entrena igualmente, solo se avisa y no se corrige nada.
+		if (agendaComoAviso) avisos.push(...reglasAgenda(structuredClone(corregido), agenda, hoy, agendaDias));
+		else {
+			errores.push(...reglasAgenda(corregido, agenda, hoy, agendaDias));
+			fechas = Object.keys(corregido).filter((f) => corregido[f] != null).sort();
+		}
+	}
 
 	for (const f of fechas) {
 		const s = semanaPlan[f];
@@ -4074,7 +4085,22 @@ const COACH_TOOLS = {
 			"La decision la toma el motor: explíquela con sus razones, no la cambie por su cuenta.",
 		schema: { type: "object", properties: { fecha: { type: "string", description: "YYYY-MM-DD. Por defecto hoy (hora de Madrid)." } } },
 		run: async (env, userId, { fecha } = {}) => {
-			const hoy = await calcularHoy(env, userId, { fecha });
+			const [hoy, agenda] = await Promise.all([
+				calcularHoy(env, userId, { fecha }),
+				leerAgenda(env, userId, fecha || fechaLocal(), 1).catch(() => null),
+			]);
+			// Lo que tienes hoy en la agenda y si la sesión cabe: si no, se dice y coach_semana trae la propuesta.
+			const eventos = agenda?.porDia[hoy.fecha] || [];
+			if (eventos.length) {
+				const libre = libreDelDia(eventos);
+				const s = hoy.sesion_prevista;
+				const cabe = !s || s.t === "descanso" || libre.libre_min >= Math.max(Number(s.min) || 0, HUECO_UTIL);
+				hoy.agenda = { eventos, ...libre, cabe };
+				if (!cabe)
+					hoy.mensaje += libre.libre_min >= HUECO_UTIL
+						? ` Ojo: hoy solo tienes ${textoMin(libre.libre_min)} libres (${eventos.map(textoEvento).join(", ")}).`
+						: ` Ojo: hoy no tienes hueco (${eventos.map(textoEvento).join(", ")}).`;
+			}
 			if (!fecha || fecha === fechaLocal()) await guardarDoc(env, userId, "coach/hoy", hoy);
 			return hoy;
 		},
@@ -4099,23 +4125,33 @@ const COACH_TOOLS = {
 			const lunesHoy = lunesDe(hoy);
 			// Lo de Garmin es de hoy: vale para revisar esta semana y para planificar la siguiente.
 			const conGarmin = lunesDe(ref) >= lunesHoy;
-			const [estadoApp, perfil, hist, estadoG] = await Promise.all([
+			const lunes = lunesDe(ref);
+			const [estadoApp, perfil, hist, estadoG, agenda] = await Promise.all([
 				leerDoc(env, userId, "estado/app"),
 				leerDoc(env, userId, "atleta/perfil"),
 				historico(env, userId),
 				conGarmin ? apiGet(env, userId, `/metrics-service/metrics/trainingstatus/aggregated/${hoy}`).catch(() => null) : null,
+				leerAgenda(env, userId, lunes, 7).catch(() => ({ porDia: {}, calendario: { conectado: false } })),
 			]);
 			const objetivo = objetivoDe(estadoApp);
 			const plan = planCompleto(estadoApp);
-			const lunes = lunesDe(ref);
 			const res = resumenSemana(lunes, plan, hist.actividades, hist, objetivo, hoy);
+			// Cada dia con lo que tienes en la agenda. Un dia sin hueco no cuenta como saltado: sin culpa.
+			for (const d of res.dias) {
+				const eventos = agenda.porDia[d.fecha];
+				if (!eventos?.length) continue;
+				const libre = libreDelDia(eventos);
+				d.agenda = { eventos, ...libre };
+				if (d.estado === "saltado" && libre.libre_min < HUECO_UTIL) d.estado = "ocupado";
+			}
 			const semanaPlan = Object.fromEntries(semanaDe(lunes).filter((f) => plan[f]).map((f) => [f, plan[f]]));
-			const reglas = validarSemana(semanaPlan, { objetivo, hoy, perfil: perfil || {} });
+			const reglas = validarSemana(semanaPlan, { objetivo, hoy, perfil: perfil || {}, agenda: agenda.porDia });
 			const forma = hist.curva.at(-1);
 			return {
 				objetivo,
 				...res,
 				plan_cumple_reglas: { errores: reglas.errores, avisos: reglas.avisos },
+				calendario: agenda.calendario,
 				...(conGarmin ? avisosGarmin(estadoGarmin(estadoG)) : {}),
 				siguiente_semana_planificada: semanaDe(sumaDias(lunes, 7)).some((f) => plan[f]),
 				forma: forma && { forma_ctl: forma.ctl, fatiga_atl: forma.atl, frescura_tsb: forma.tsb, lectura: lecturaFrescura(forma.tsb) },
@@ -4142,10 +4178,14 @@ const COACH_TOOLS = {
 				},
 				porque: { type: "string", description: "Motivo en una frase, p. ej. 'Cena el martes; series al jueves'." },
 				guardar: { type: "boolean", description: "true solo cuando el usuario ya ha dicho que si." },
+				entrena_igualmente: {
+					type: "boolean",
+					description: "true solo si el usuario ha dicho que entrena ese dia aunque su agenda diga que no cabe: la agenda pasa a aviso.",
+				},
 			},
 			required: ["cambios", "porque"],
 		},
-		run: async (env, userId, { cambios, porque, guardar = false } = {}) => {
+		run: async (env, userId, { cambios, porque, guardar = false, entrena_igualmente = false } = {}) => {
 			if (!cambios || typeof cambios !== "object" || Array.isArray(cambios)) throw new HttpError(400, "cambios debe ser un objeto fecha -> sesion");
 			const hoy = fechaLocal();
 			const actual = lunesDe(hoy);
@@ -4157,10 +4197,11 @@ const COACH_TOOLS = {
 				if (![actual, siguiente].includes(lunesDe(f))) throw new HttpError(400, `El ${f} no es de esta semana ni de la siguiente.`);
 			}
 
-			const [estadoApp, perfil, hoyGuardado] = await Promise.all([
+			const [estadoApp, perfil, hoyGuardado, agenda] = await Promise.all([
 				leerDoc(env, userId, "estado/app"),
 				leerDoc(env, userId, "atleta/perfil"),
 				leerDoc(env, userId, "coach/hoy"),
+				agendaDelPlan(env, userId, hoy),
 			]);
 			const objetivo = objetivoDe(estadoApp);
 			const plan = planCompleto(estadoApp);
@@ -4196,7 +4237,8 @@ const COACH_TOOLS = {
 			const semanas = [...new Set(fechas.map(lunesDe))].sort();
 			const resultado = semanas.map((l) => {
 				const semanaPlan = Object.fromEntries(semanaDe(l).filter((f) => nuevo[f]).map((f) => [f, nuevo[f]]));
-				const v = validarSemana(semanaPlan, { objetivo, hoy, colorHoy, perfil: perfil || {} });
+				// La agenda se mira en los dias que se cambian: lo demas ya estaba asi y no debe frenar este cambio.
+				const v = validarSemana(semanaPlan, { objetivo, hoy, colorHoy, perfil: perfil || {}, agenda: agenda.porDia, agendaDias: fechas, agendaComoAviso: entrena_igualmente });
 				// Con errores, la version corregida completa: lo que cambia respecto al plan de antes.
 				const corregidos = v.errores.length && v.corregido
 					? Object.fromEntries(semanaDe(l)
@@ -4464,7 +4506,323 @@ Object.assign(COACH_TOOLS, {
 	},
 });
 
+// ───────────────────────── Agenda: compromisos y calendario ─────────────────────────
+//
+// Lo que no es entreno y ocupa tiempo: lo que anotas tú (o tu Claude) y tu
+// calendario (el enlace iCal privado de Google, iCloud u Outlook). El motor lo
+// usa para no ponerte una sesión donde no cabe: primero la mueve, si no puede la
+// recorta y, si tampoco, deja el día libre. La web solo lo enseña.
+
+const AGENDA_DOC = "agenda/compromisos";
+const AGENDA_FUENTE = "agenda/fuente";
+const icsCacheKey = (userId) => `agenda-ics:${userId}`;
+const VENTANA_DIA = [6 * 60, 22 * 60]; // se entrena entre las 6:00 y las 22:00
+const MARGEN_MIN = 15; // antes y después de cada compromiso, para llegar y cambiarse
+const HUECO_UTIL = 30; // menos de 30 min libres no dan para entrenar
+const TIPOS_COMPROMISO = ["trabajo", "viaje", "familia", "social", "casa", "salud", "otros"];
+const REGLAS_AGENDA = new Set(["dia_ocupado", "no_cabe"]);
+const HORA = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+const aMinutos = (h) => {
+	if (h === "24:00") return 1440;
+	const [a, b] = String(h).split(":").map(Number);
+	return a * 60 + (b || 0);
+};
+const aHora = (m) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+const textoMin = (m) => (m >= 60 ? `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60}` : ""}` : `${m} min`);
+
+/** Huecos para entrenar en un día con estos eventos. Un evento de día entero lo ocupa todo. */
+function huecosDelDia(eventos = []) {
+	if (eventos.some((e) => e.todo_dia)) return [];
+	const ocupado = eventos
+		.map((e) => [Math.max(0, aMinutos(e.de) - MARGEN_MIN), Math.min(1440, aMinutos(e.a) + MARGEN_MIN)])
+		.sort((a, b) => a[0] - b[0]);
+	const out = [];
+	let t = VENTANA_DIA[0];
+	for (const [a, b] of ocupado) {
+		if (a > t) out.push([t, Math.min(a, VENTANA_DIA[1])]);
+		t = Math.max(t, b);
+		if (t >= VENTANA_DIA[1]) break;
+	}
+	if (t < VENTANA_DIA[1]) out.push([t, VENTANA_DIA[1]]);
+	return out.filter(([a, b]) => b - a >= HUECO_UTIL);
+}
+
+/** Cómo queda un día: si está ocupado entero, el hueco más largo y todos los huecos. */
+function libreDelDia(eventos = []) {
+	const huecos = huecosDelDia(eventos);
+	return {
+		todo_ocupado: eventos.some((e) => e.todo_dia),
+		libre_min: huecos.reduce((m, [a, b]) => Math.max(m, b - a), 0),
+		huecos: huecos.map(([a, b]) => `${aHora(a)}-${aHora(b)}`),
+	};
+}
+
+const textoEvento = (e) => `${e.titulo}${e.todo_dia ? "" : ` de ${e.de} a ${e.a}`}`;
+
+/**
+ * Reglas de la agenda sobre una semana. Corrige `plan` en el sitio: la sesión
+ * que no cabe se mueve a un día de la semana donde sí (sin pegar dos exigentes);
+ * si no hay ninguno, se recorta al hueco que quede o el día se deja libre.
+ * `soloDias`: mirar solo esos días (los que se están cambiando).
+ */
+function reglasAgenda(plan, agenda, hoy, soloDias = null) {
+	const errores = [];
+	for (const f of Object.keys(plan).sort()) {
+		if (soloDias && !soloDias.includes(f)) continue;
+		const s = plan[f];
+		const eventos = agenda[f] || [];
+		if (!s || s.t === "descanso" || f < hoy || !eventos.length) continue;
+		const min = Number(s.min) || 0;
+		const { libre_min } = libreDelDia(eventos);
+		if (libre_min >= Math.max(min, HUECO_UTIL)) continue;
+
+		const motivo = eventos.map(textoEvento).join(", ");
+		const cabe = (g) => libreDelDia(agenda[g] || []).libre_min >= Math.max(min, HUECO_UTIL);
+		const exigente = DUROS.has(s.t);
+		// La sesión que se mueve no cuenta: deja de estar en su día.
+		const duro = (g) => g !== f && DUROS.has(plan[g]?.t);
+		const destinos = semanaDe(f)
+			.filter((g) => g !== f && g >= hoy && (!plan[g] || plan[g].t === "descanso") && cabe(g))
+			.filter((g) => !exigente || (!duro(sumaDias(g, -1)) && !duro(sumaDias(g, 1))))
+			// Primero los días sin nada, luego el más cercano y, a la misma distancia, el de después.
+			.sort((a, b) => Number(Boolean(plan[a])) - Number(Boolean(plan[b])) || Math.abs(Date.parse(a) - Date.parse(f)) - Math.abs(Date.parse(b) - Date.parse(f)) || b.localeCompare(a));
+		const recortable = libre_min >= HUECO_UTIL;
+		// La sesión clave se mueve antes que recortarla; la de relleno se recorta si cabe algo.
+		const destino = !recortable || exigente || min >= 120 ? destinos[0] : null;
+
+		let que;
+		if (destino) {
+			plan[destino] = { ...s };
+			plan[f] = null;
+			que = `la paso al ${diaDe(destino)}`;
+		} else if (recortable) {
+			const corta = Math.floor(libre_min / 5) * 5;
+			plan[f] = { ...s, min: corta, d: /^Versión corta/.test(s.d || "") ? s.d : `Versión corta: ${s.d || ""}`.trim() };
+			que = `la dejo en ${textoMin(corta)}`;
+		} else {
+			plan[f] = null;
+			que = "no hay otro día libre esta semana: lo dejo libre";
+		}
+		errores.push(recortable
+			? { fecha: f, regla: "no_cabe", texto: `El ${diaDe(f)} solo tienes ${textoMin(libre_min)} libres (${motivo}) y la sesión es de ${textoMin(min)}: ${que}.` }
+			: { fecha: f, regla: "dia_ocupado", texto: `El ${diaDe(f)} no tienes hueco para entrenar (${motivo}): ${que}.` });
+	}
+	return errores;
+}
+
+/** Eventos del calendario conectado entre `desde` y `dias` días después. Nunca rompe: si falla, lo dice. */
+async function eventosCalendario(env, userId, desde, dias) {
+	const fuente = await leerDoc(env, userId, AGENDA_FUENTE);
+	if (!fuente?.url) return { eventos: [], estado: { conectado: false } };
+	let texto = await env.GARMIN.get(icsCacheKey(userId));
+	if (!texto) {
+		texto = await descargarIcs(await descifrar(env, fuente.url)).catch(() => null);
+		if (texto === null) return { eventos: [], estado: { conectado: true, error: "No he podido leer tu calendario ahora mismo: lo tengo en cuenta en cuanto vuelva." } };
+		await env.GARMIN.put(icsCacheKey(userId), texto, { expirationTtl: 600 });
+	}
+	return { eventos: ocupados(texto, desde, dias, ZONA_COACH), estado: { conectado: true } };
+}
+
+/**
+ * Lo ocupado de cada día: tus compromisos y tu calendario. → { porDia: { fecha: [evento] }, calendario }
+ * `compromisos` sustituye a los guardados (para ver qué pasaría antes de guardar).
+ */
+async function leerAgenda(env, userId, desde, dias, compromisos) {
+	const hasta = sumaDias(desde, dias - 1);
+	const [propios, cal] = await Promise.all([
+		compromisos ?? leerDoc(env, userId, AGENDA_DOC),
+		eventosCalendario(env, userId, desde, dias).catch(() => ({ eventos: [], estado: { conectado: true, error: "No he podido leer tu calendario ahora mismo." } })),
+	]);
+	const porDia = {};
+	for (const c of Array.isArray(propios) ? propios : []) {
+		for (let f = c.fecha < desde ? desde : c.fecha; f <= (c.hasta || c.fecha) && f <= hasta; f = sumaDias(f, 1))
+			(porDia[f] ||= []).push({ id: c.id, titulo: c.titulo, tipo: c.tipo, ...(c.de ? { de: c.de, a: c.a } : { todo_dia: true }), origen: "tuyo" });
+	}
+	for (const e of cal.eventos)
+		(porDia[e.f] ||= []).push({ titulo: e.t, ...(e.todoDia ? { todo_dia: true } : { de: e.de, a: e.a }), origen: "calendario" });
+	for (const f of Object.keys(porDia)) porDia[f].sort((a, b) => Number(!a.todo_dia) - Number(!b.todo_dia) || String(a.de).localeCompare(String(b.de)));
+	return { porDia, calendario: cal.estado };
+}
+
+/** La agenda de esta semana y la siguiente, lo que necesita el motor para validar el plan. */
+const agendaDelPlan = (env, userId, hoy) => leerAgenda(env, userId, lunesDe(hoy), 14).catch(() => ({ porDia: {}, calendario: { conectado: false } }));
+
+/**
+ * Qué choca en el plan guardado con esta agenda y cómo lo arreglaría el motor:
+ * los cambios (antes → después) listos para coach_proponer.
+ */
+function choquesConElPlan(plan, porDia, { objetivo, hoy, perfil, fechas }) {
+	const lunesAfectados = [...new Set(fechas.filter((f) => f >= hoy).map(lunesDe))].filter((l) => l === lunesDe(hoy) || l === sumaDias(lunesDe(hoy), 7));
+	const choques = [];
+	const cambios = {};
+	for (const l of lunesAfectados) {
+		const semanaPlan = Object.fromEntries(semanaDe(l).filter((f) => plan[f]).map((f) => [f, plan[f]]));
+		const v = validarSemana(semanaPlan, { objetivo, hoy, perfil, agenda: porDia, agendaDias: fechas });
+		choques.push(...v.errores.filter((e) => REGLAS_AGENDA.has(e.regla)));
+		if (v.corregido)
+			for (const f of semanaDe(l))
+				if (JSON.stringify(v.corregido[f] ?? null) !== JSON.stringify(plan[f] ?? null)) cambios[f] = sesionParaProponer(v.corregido[f]);
+	}
+	return { choques, cambios: choques.length ? cambios : null };
+}
+
+/** Una sesión del plan tal y como la recibe coach_proponer. */
+const sesionParaProponer = (s) => s
+	? { dep: s.dep, t: s.t, d: s.d, ...(s.min != null ? { min: s.min } : {}), ...(s.entreno ? { entreno: s.entreno } : {}), ...(s.entreno_cardio ? { entreno_cardio: s.entreno_cardio } : {}) }
+	: null;
+
+const AGENDA_TOOLS = {
+	agenda: {
+		title: "Agenda: cuando puedo entrenar",
+		description:
+			"Lo que ocupa el tiempo del usuario dia a dia: los compromisos que ha anotado (agenda_anotar) y su calendario si lo " +
+			"ha conectado (Google, iCloud u Outlook por iCal), con los huecos libres para entrenar (de 6:00 a 22:00, con 15 min " +
+			"de margen), la sesion prevista y si cabe. Uselo para '¿cuando puedo entrenar?' o antes de proponer una semana. " +
+			"coach_semana ya trae la agenda de cada dia: no hace falta llamar a las dos.",
+		schema: {
+			type: "object",
+			properties: {
+				desde: { type: "string", description: "YYYY-MM-DD. Por defecto hoy." },
+				dias: { type: "integer", minimum: 1, maximum: 21, description: "Por defecto 7." },
+			},
+		},
+		run: async (env, userId, { desde, dias = 7 } = {}) => {
+			const hoy = fechaLocal();
+			const ini = /^\d{4}-\d{2}-\d{2}$/.test(desde || "") ? desde : hoy;
+			const n = Math.min(21, Math.max(1, Math.round(Number(dias) || 7)));
+			const [{ porDia, calendario }, estadoApp] = await Promise.all([leerAgenda(env, userId, ini, n), leerDoc(env, userId, "estado/app")]);
+			const plan = planCompleto(estadoApp);
+			return {
+				calendario,
+				dias: Array.from({ length: n }, (_, i) => {
+					const f = sumaDias(ini, i);
+					const eventos = porDia[f] || [];
+					const libre = libreDelDia(eventos);
+					const s = plan[f] && plan[f].t !== "descanso" ? plan[f] : null;
+					return {
+						fecha: f, dia: diaDe(f), eventos, ...libre,
+						...(s ? { sesion_prevista: s, cabe: libre.libre_min >= Math.max(Number(s.min) || 0, HUECO_UTIL) } : {}),
+					};
+				}),
+			};
+		},
+	},
+
+	agenda_anotar: {
+		title: "Agenda: anotar un compromiso",
+		write: true,
+		description:
+			"Anota, corrige o borra algo que ocupa tiempo y no es entreno: una cena, un viaje, una reunion, recoger a los ninos. " +
+			"Sin de/a ocupa el dia entero; con de/a, solo esa franja (p. ej. de 19:30 a 22:00) y el resto del dia sigue libre. " +
+			"Con guardar=false (por defecto) no guarda nada: dice que sesiones del plan chocan y que cambios propone el motor " +
+			"(propuesta_plan). Enseñe el antes → despues; con el si del usuario, llame con guardar=true y, si acepta el cambio " +
+			"del plan, aplique propuesta_plan con coach_proponer (guardar=true). Para corregir o borrar, pase el id.",
+		schema: {
+			type: "object",
+			properties: {
+				fecha: { type: "string", description: "YYYY-MM-DD" },
+				hasta: { type: "string", description: "YYYY-MM-DD, ultimo dia si dura varios (un viaje)." },
+				de: { type: "string", description: "HH:MM. Sin de/a, todo el dia." },
+				a: { type: "string", description: "HH:MM" },
+				titulo: { type: "string", description: "Corto: 'Cena con amigos', 'Viaje a Bilbao'." },
+				tipo: { type: "string", enum: TIPOS_COMPROMISO },
+				id: { type: "string", description: "Para corregir o borrar uno que ya existe." },
+				borrar: { type: "boolean" },
+				guardar: { type: "boolean", description: "true solo cuando el usuario ya ha dicho que si." },
+			},
+		},
+		run: async (env, userId, { fecha, hasta, de, a, titulo, tipo, id, borrar = false, guardar = false } = {}) => {
+			const hoy = fechaLocal();
+			const lista = (await leerDoc(env, userId, AGENDA_DOC)) || [];
+			const previo = id ? lista.find((c) => c.id === id) : null;
+			if (id && !previo) throw new HttpError(400, `No hay ningun compromiso con id ${id}. Mire los que hay con agenda.`);
+			if (borrar && !previo) throw new HttpError(400, "Para borrar, pase el id del compromiso (sale en agenda).");
+
+			let nuevo = null;
+			if (!borrar) {
+				const base = previo || {};
+				const f = fecha ?? base.fecha;
+				const h = hasta === undefined ? base.hasta : hasta || undefined;
+				const franja = de !== undefined || a !== undefined ? { de: de || undefined, a: a || undefined } : { de: base.de, a: base.a };
+				const t = String(titulo ?? base.titulo ?? "").trim().slice(0, 80);
+				if (!/^\d{4}-\d{2}-\d{2}$/.test(f || "")) throw new HttpError(400, "fecha debe ser YYYY-MM-DD.");
+				if (f < hoy && !previo) throw new HttpError(400, `El ${f} ya ha pasado.`);
+				if (f > sumaDias(hoy, 180)) throw new HttpError(400, "Como mucho, seis meses vista.");
+				if (h && (!/^\d{4}-\d{2}-\d{2}$/.test(h) || h < f || h > sumaDias(f, 30))) throw new HttpError(400, "hasta debe ser YYYY-MM-DD, igual o despues de fecha y como mucho 30 dias.");
+				if (Boolean(franja.de) !== Boolean(franja.a)) throw new HttpError(400, "Pase de y a juntos (HH:MM), o ninguno para todo el dia.");
+				if (franja.de && (!HORA.test(franja.de) || !HORA.test(franja.a) || franja.a <= franja.de)) throw new HttpError(400, "de y a van como HH:MM y a tiene que ser despues de de.");
+				if (!t) throw new HttpError(400, "Pon un titulo corto: 'Cena', 'Viaje a Bilbao'.");
+				const tp = tipo ?? base.tipo;
+				if (tp && !TIPOS_COMPROMISO.includes(tp)) throw new HttpError(400, `tipo: ${TIPOS_COMPROMISO.join(", ")}.`);
+				nuevo = {
+					id: previo?.id || `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+					fecha: f, ...(h && h !== f ? { hasta: h } : {}), ...(franja.de ? { de: franja.de, a: franja.a } : {}),
+					titulo: t, ...(tp ? { tipo: tp } : {}),
+				};
+			}
+			// Los pasados se limpian solos: la agenda es de lo que viene.
+			const resto = lista.filter((c) => c.id !== (previo?.id ?? null) && (c.hasta || c.fecha) >= sumaDias(hoy, -14));
+			const despues = nuevo ? [...resto, nuevo] : resto;
+
+			// Qué choca con el plan con la agenda nueva.
+			const [estadoApp, perfil, { porDia }] = await Promise.all([
+				leerDoc(env, userId, "estado/app"),
+				leerDoc(env, userId, "atleta/perfil"),
+				leerAgenda(env, userId, lunesDe(hoy), 14, despues),
+			]);
+			const dias = [nuevo, previo].filter(Boolean).flatMap((c) => {
+				const out = [];
+				for (let f = c.fecha; f <= (c.hasta || c.fecha); f = sumaDias(f, 1)) out.push(f);
+				return out;
+			});
+			const { choques, cambios } = choquesConElPlan(planCompleto(estadoApp), porDia, { objetivo: objetivoDe(estadoApp), hoy, perfil: perfil || {}, fechas: dias });
+			const porque = nuevo ? `${nuevo.titulo} el ${diaDe(nuevo.fecha)}` : "";
+			const propuesta = cambios && Object.keys(cambios).length ? { cambios, porque: porque || "Agenda" } : null;
+
+			if (!guardar)
+				return {
+					guardado: false,
+					...(borrar ? { borraria: previo } : { compromiso: nuevo }),
+					choques,
+					propuesta_plan: propuesta,
+					siguiente_paso: choques.length
+						? "Choca con el plan. Enseñe el compromiso y propuesta_plan (antes → despues); con el si, guarde con guardar=true y aplique propuesta_plan con coach_proponer."
+						: "No choca con el plan. Enseñelo y, con el si, llame con guardar=true.",
+				};
+			await guardarDoc(env, userId, AGENDA_DOC, despues);
+			return { guardado: true, ...(borrar ? { borrado: previo } : { compromiso: nuevo }), choques, propuesta_plan: propuesta };
+		},
+	},
+
+	agenda_calendario: {
+		// Solo la app: el enlace privado del calendario no pasa por el chat.
+		soloApp: true,
+		title: "Agenda: conectar el calendario",
+		write: true,
+		description:
+			"Conecta el calendario con su enlace privado iCal (Google: Configuracion del calendario → Direccion secreta en " +
+			"formato iCal) o lo quita con quitar=true. El enlace se guarda cifrado.",
+		schema: { type: "object", properties: { url: { type: "string" }, quitar: { type: "boolean" } } },
+		run: async (env, userId, { url, quitar = false } = {}) => {
+			if (quitar) {
+				await env.GARMIN.delete(appKey(userId, AGENDA_FUENTE));
+				await env.GARMIN.delete(icsCacheKey(userId));
+				return { conectado: false };
+			}
+			const cal = String(url || "").trim().replace(/^webcal:\/\//i, "https://");
+			if (!/^https:\/\/[^\s]+$/i.test(cal)) throw new HttpError(400, "Pega el enlace que empieza por https:// o webcal://");
+			const texto = await descargarIcs(cal);
+			if (texto === null) throw new HttpError(400, 'Ese enlace no devuelve un calendario. Copia la "dirección secreta en formato iCal".');
+			await guardarDoc(env, userId, AGENDA_FUENTE, { url: await cifrar(env, cal) });
+			await env.GARMIN.put(icsCacheKey(userId), texto, { expirationTtl: 600 });
+			return { conectado: true, eventos_14_dias: ocupados(texto, fechaLocal(), 14, ZONA_COACH).length };
+		},
+	},
+};
+
 Object.assign(TOOLS, COACH_TOOLS);
+Object.assign(TOOLS, AGENDA_TOOLS);
 
 /** Instrucciones del entrenador: como habla y como decide, sea quien sea el que lo llame. */
 const instruccionesCoach = (nombre = NOMBRE_COACH) =>
@@ -4481,6 +4839,12 @@ const instruccionesCoach = (nombre = NOMBRE_COACH) =>
 	" Planifique solo bici, correr y skimo (y fuerza como complemento); el resto de deportes cuenta como carga pero no se " +
 	"planifica. Si el usuario quiere cambiar el nombre del entrenador, guardelo con coach_perfil_guardar en entrenador.nombre." +
 	" Para '¿estoy mejorando?' use coach_progreso (velocidad, ritmo, VAM, potencia, cadencia, pulso y eficiencia por deporte)." +
+	" AGENDA: si cuenta algo que le ocupa tiempo (cena, viaje, reunion, turno, recoger a los ninos), anotelo con agenda_anotar: " +
+	"sin de/a es todo el dia; con de/a, solo esa franja. Primero sin guardar: si choca con el plan, devuelve la propuesta del motor " +
+	"(mover, recortar o dejar libre); ensenela y, con su si, guarde el compromiso y aplique la propuesta con coach_proponer. " +
+	"Su calendario (si lo ha conectado en la app) y sus compromisos ya vienen en coach_semana (agenda de cada dia) y en agenda: " +
+	"no le pregunte lo que ya esta ahi. Nunca ponga una sesion en un dia sin hueco sin preguntarle; si dice que entrena igualmente, " +
+	"coach_proponer con entrena_igualmente=true." +
 	" DATOS DE GARMIN: coach_hoy ya trae lo que decide el dia (sueno, VFC, readiness, pulso, frescura, carga de 7 dias de Garmin con su franja, " +
 	"estado de entreno y estres de ayer). Si fuentes.sin_descanso es true, su dispositivo no mide el descanso (p. ej. solo un Edge): no le pida datos " +
 	"de sueno ni de VFC, pregunte como se encuentra y anotelo con coach_anotar. garmin_dia trae un dia entero (o la serie de varios dias); garmin_forma, " +

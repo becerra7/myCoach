@@ -14,7 +14,7 @@ https://garmin.<tu-subdominio>.workers.dev/mcp
 
 Es el camino para crecer sin romper. Lo comprueban los tests (`12 ter`).
 
-- **Nombre = familia + qué hace**, en castellano: `garmin_*` lee Garmin tal cual; `coach_*` es el método; el resto va por lo que hace en myCoach (`entrenos`, `entreno_enviar_garmin`, `comida_*`, `peso_*`, `fuerza_*`, `intervals_*`, `app_*`, `mycoach_*`).
+- **Nombre = familia + qué hace**, en castellano: `garmin_*` lee Garmin tal cual; `coach_*` es el método; `agenda*` es lo que ocupa el tiempo del usuario (compromisos y calendario); el resto va por lo que hace en myCoach (`entrenos`, `entreno_enviar_garmin`, `comida_*`, `peso_*`, `fuerza_*`, `intervals_*`, `app_*`, `mycoach_*`).
 - **Una herramienta por pregunta, no por endpoint.** Antes de añadir una, mira si cabe como parámetro de otra:
   - `garmin_dia` junta todo lo de un día (con `partes` y `dias`);
   - `garmin_forma` junta la forma y su evolución;

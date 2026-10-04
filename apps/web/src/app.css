@@ -1029,6 +1029,15 @@ button.hp-encaje{cursor:pointer;align-items:center;min-height:44px}
 .dias .fd small{display:block;font-size:12px;color:var(--ink-2);font-weight:600}
 .dias .fd b{font-size:26px;font-stretch:75%;font-weight:700}
 .dias .t b{display:block;font-weight:650}
+/* Agenda: candado y texto, nunca solo color */
+.agenda-l{display:flex;align-items:center;gap:6px;color:var(--label-2);margin-top:2px}
+.agenda-l svg{flex:none}
+.dia .c>.agenda-l{color:var(--label)}
+.choques{margin:0 0 12px;padding:14px 16px;border-radius:14px;background:var(--card);display:grid;gap:8px}
+.choques p{margin:0}
+.choques .agenda-l{color:var(--label)}
+.choques .coach-cambio{margin:0;background:var(--card-2)}
+.choques .btns{margin-top:4px}
 .dias .t b::before{content:"";display:inline-block;width:10px;height:10px;margin-right:8px;border-radius:2px;background:var(--c,var(--fill));vertical-align:1px}
 .dias .st{font-size:13px;font-weight:650;white-space:nowrap}
 .dias li.es-hoy>button{background:var(--surface)}

@@ -108,12 +108,18 @@ function bloqueDia(enHoy) {
   const items = HUECOS.map(([k, n, h]) => ({ k, n, h, m: sum.ms.find(m => tipoMeal(m) === k) }));
   sum.ms.filter(m => !HUECOS.some(([k]) => k === tipoMeal(m))).forEach(m => items.push({ k: tipoMeal(m), n: cap1(m.tipo), h: m.h || '12:00', m }));
   if (s && s.t !== 'descanso') items.push({ k: 'sesion', h: s.a ? '' : '10:30', s });
+  agendaDia(HOY).forEach(e => items.push({ k: 'agenda', h: e.todo_dia ? '00:00' : e.de, e }));
   const clave = it => it.k === 'sesion' ? '10:30' : (it.m?.h || it.h);
+  // Si la sesión de hoy no cabe en tu agenda, lo dice el motor (coach_hoy) y aquí se cuenta debajo.
+  const ag = COACH && COACH.fecha === HOY && COACH.agenda, noCabe = ag && ag.cabe === false && s && !s.a
+    ? (ag.libre_min >= 30 ? `Hoy solo tienes ${dur(ag.libre_min)} libres: tu entrenador te propone qué hacer en Plan.` : 'Hoy no tienes hueco: tu entrenador te propone moverla en Plan.') : '';
   items.sort((x, y) => clave(x).localeCompare(clave(y)));
   const durante = s && SPORTS[s.dep]?.cardio && s.t !== 'descanso' ? (s.min >= 90 ? 'Lleva hidrato: 60-90 g por hora desde la segunda hora.' : 'Menos de 90 min: con agua basta.') : '';
   const li = items.map(it => {
     if (it.k === 'sesion') return `<li><span class="h"></span><span class="eje"><i class="dep ${it.s.a ? 'ok' : ''}" style="${it.s.a ? '' : `border-color:${scol(it.s.dep)};background:${scol(it.s.dep)}`}"></i></span>
-      <button class="c" type="button" data-a="day" data-v="${HOY}"><b>${esc(it.s.a ? `Hecho: ${it.s.a.lugar}` : it.s.d)}</b>${durante && !it.s.a ? `<span class="small muted" style="display:block">${durante}</span>` : ''}</button></li>`;
+      <button class="c" type="button" data-a="day" data-v="${HOY}"><b>${esc(it.s.a ? `Hecho: ${it.s.a.lugar}` : it.s.d)}</b>${noCabe ? `<span class="agenda-l small">${ic('info', 14)}<span>${noCabe}</span></span>` : durante && !it.s.a ? `<span class="small muted" style="display:block">${durante}</span>` : ''}</button></li>`;
+    if (it.k === 'agenda') return `<li><span class="h">${it.e.todo_dia ? '' : esc(it.e.de)}</span><span class="eje"><i></i></span><div class="c"><span class="agenda-l">${ic('lock', 14)}<b>${esc(it.e.titulo)}</b></span>
+      <span class="small muted" style="display:block">${it.e.todo_dia ? 'Todo el día' : `Hasta las ${esc(it.e.a === '24:00' ? '00:00' : it.e.a)}`}</span></div></li>`;
     const m = it.m, merienda = it.k === 'merienda';
     return `<li><span class="h">${esc(m?.h || it.h)}</span><span class="eje"><i class="${m ? 'ok' : ''}"></i></span><div class="c"><b>${esc(it.n)}</b>${HUECOS.some(([k]) => k === it.k) ? `<span class="nivel">Hidrato ${nivelHidrato(o.cg.c, merienda)}</span>` : ''}
       <span class="small ${m ? '' : 'muted'}" style="display:block">${m ? `✓ ${esc(m.txt || 'Registrada')}: ${qTxt(+m.c || 0)} de hidrato, ${qTxt(+m.p || 0)} de proteína` : 'Sin registrar'}</span></div></li>`;
