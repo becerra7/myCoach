@@ -4,7 +4,7 @@
 
 Versión sencilla, liderada por Claude con el conector:
 - **Claude propone la sesión**: ejercicio, series × reps (o segundos), peso, material y descanso. La guarda como **entreno con nombre** (`fuerza_entreno_guardar`) para repetirla. En el plan, el día de fuerza apunta a él (`entreno: "pierna-a"`).
-- **Al reloj** (`fuerza_enviar_garmin`, con permiso): se crea como entreno de fuerza guiado en Garmin Connect y se programa para el día. Cada ejercicio lleva su nombre del catálogo de Garmin (`fuerza_ejercicios_garmin`, que busca en castellano), así que el reloj sabe qué grupos trabajas.
+- **Al reloj** (`entreno_enviar_garmin`, con permiso): se crea como entreno de fuerza guiado en Garmin Connect y se programa para el día. Cada ejercicio lleva su nombre del catálogo de Garmin (`fuerza_ejercicios_garmin`, que busca en castellano), así que el reloj sabe qué grupos trabajas.
 - **Al acabar**: si la hiciste con el reloj, las series que cuenta (reps y peso) cierran la sesión solas (`fuerza_desde_garmin`). Si no, le dices a Claude solo lo que cambió (`fuerza_registrar`). Si subiste peso o reps, te pregunta si lo deja así para la próxima.
 - **Histórico** por ejercicio (`fuerza_historial`), sume de qué entreno sume.
 - **En la app** (Hoy y la hoja del día en Plan): antes, cada ejercicio con su objetivo y lo que hiciste la última vez, y el botón "Enviar al reloj". Después, plan frente a lo hecho. Tocando un ejercicio, su histórico. No se marcan series en la app, por decisión.

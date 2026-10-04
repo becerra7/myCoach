@@ -43,7 +43,7 @@ El inventario salió de leer el código con un agente; los puntos marcados ✔ l
 | Feature | Cómo funciona hoy | Datos | Estado | Decisión |
 |---|---|---|---|---|
 | Bloque de fuerza del día | Ejercicios con series × reps, kg, material, descanso, última vez y estado frente al plan. Tocar un ejercicio abre su historial. **La app no marca series**: las cuenta el reloj o Claude | Coach (`fuerza_dia`) | ✅ | Mejorar: caso 2 (durante el entreno) está sin cubrir |
-| Enviar fuerza al reloj | Comprueba que cada ejercicio tenga su equivalente Garmin, confirma y envía | Coach (`fuerza_enviar_garmin`) | ✅ | Quedarse |
+| Enviar fuerza al reloj | Comprueba que cada ejercicio tenga su equivalente Garmin, confirma y envía | Coach (`entreno_enviar_garmin`) | ✅ | Quedarse |
 | Tus entrenos (librería) | Entrenos de fuerza con nombre más series de bici y correr | Coach | ✅ | Mejorar: acceso desde la navegación, no desde enlaces sueltos |
 | Editor de entreno de fuerza | Nombre, casa o gimnasio, ejercicios, series, reps, kg, descanso, duplicar, borrar. No se puede crear desde cero | Coach | ✅ | Añadir: crear desde cero |
 | Series de bici y correr | Pasos del día y "Enviar al reloj". Solo lectura | Coach (`cardio_*`) | ✅ | Añadir: crear y editar en la app |

@@ -123,50 +123,63 @@ no lo tiene.
 recorte. Las herramientas propias siguen siendo mejores para lo habitual,
 porque interpretan y traducen.
 
-## 4. Propuesta para la app
+## 4. En la app (hecho el 4 de octubre)
 
 La regla del repo: cada pantalla responde a una pregunta, y un dato no se
-repite. No se trata de pintar todo lo que da Garmin, sino lo que ayuda a
-decidir.
+repite. No se pinta todo lo que da Garmin, solo lo que ayuda a decidir.
 
-1. **Progreso → "¿Me estoy pasando o me quedo corto?"** Una tarjeta de **carga**: la aguda frente a su franja óptima (una barra con la franja marcada), el estado de Garmin en texto y el ratio. Debajo, **Load Focus**: tres barras (anaeróbico, aeróbico intenso, aeróbico suave) con su rango objetivo y el veredicto en una frase. Hoy la web guarda `balance` pero no lo enseña así.
-2. **Progreso → evolución**: VO2máx de correr **y de bici**, Endurance y Hill con `garmin_forma`. Son **1 llamada en vez de 13** y puntos semanales en vez de mensuales.
-3. **Actividad y lista de entrenos**: la **Exercise Load** de cada sesión y su beneficio principal ("Base", "Umbral"…). La barra semanal de carga por deporte sustituye a la estimada donde Garmin la tenga.
-4. **Tú / Ajustes → "Tus números"**: umbral (pulso y ritmo), FTP y W/kg, zonas, predicciones de carrera y edad física. Son de consulta, no de cada día.
-5. **Hoy, solo si cambia la decisión**: la aclimatación al calor o la altitud (útil en skimo y montaña) y el estrés o la respiración nocturna si están fuera de lo normal, como una razón más del semáforo. No como tarjetas nuevas.
-6. **El motor (conector), no la web**: que `coach_semana` use la franja de carga y el Load Focus en sus avisos ("Te falta anaeróbico: el jueves, series"), y que `coach_hoy` tenga en cuenta el ratio. Es una decisión de método: va a `docs/PLAN-COACH.md` antes de tocarlo.
+1. **Progreso → Forma: "Tu carga, según Garmin".** Responde a "¿me estoy pasando o me quedo corto?":
+   - la carga de 7 días frente a su franja óptima, con su lectura en texto y el estado de Garmin;
+   - debajo, el Load Focus en tres barras con su objetivo y qué hacer.
+   En escritorio va al lado de la frescura.
+2. **Evolución:** VO2máx de correr y de bici, Endurance y Hill salen de `garmin_forma`. Es **1 llamada en vez de 13**.
+3. **Actividad:** su carga de Garmin (Exercise Load).
+4. **Progreso → "Tus umbrales y predicciones"**: umbral (pulso y ritmo), FTP y W/kg, predicciones de carrera, edad física y aclimatación. Es de consulta.
+5. **Hoy:** la carga de 7 días, el estado de Garmin y el estrés de ayer son datos más del semáforo, con su explicación. No hay tarjetas nuevas.
+6. **Sin datos de descanso** (solo un Edge, o un reloj que no se lleva de noche): ver la sección 7.
 
-## 5. Las herramientas del MCP: qué sobra, qué falta y cómo ordenarlas
-
-Hoy hay **47 herramientas**. Claude elige peor cuantas más ve, y cada una
-cuesta tokens en cada conversación.
-
-| Familia | Herramientas | Propuesta |
+| Progreso: tu carga | Hoy sin reloj (solo un Edge) | Tus números |
 |---|---|---|
-| Garmin, lectura | `garmin_status`, `garmin_daily_summary`, `garmin_sleep`, `garmin_hrv`, `garmin_body_battery`, `garmin_training_readiness`, `garmin_activities`, `garmin_activity_detail`, `garmin_activity_route`, `garmin_courses`, `garmin_course_detail`, `garmin_forma`, `garmin_api` | Juntar las cinco del día (resumen, sueño, VFC, Body Battery, readiness) en **`garmin_dia`** (un día o un rango, con todo o con lo que se pida). Quedan: `garmin_dia`, `garmin_forma`, `garmin_activities`, `garmin_activity_detail`, `garmin_courses` (con detalle por id) y `garmin_api`. |
-| Garmin, escritura | `garmin_plan_route`, `garmin_save_course`, `fuerza_enviar_garmin`, `cardio_enviar_garmin`, `peso_registrar` | Juntar `fuerza_enviar_garmin` y `cardio_enviar_garmin` en **`entreno_enviar_garmin`**. |
-| Entrenador | `coach_*` (7) | Se queda igual: es el método. |
-| Entrenos | `fuerza_entrenos`, `fuerza_entreno_guardar`, `fuerza_ejercicios_garmin`, `fuerza_registrar`, `fuerza_desde_garmin`, `fuerza_historial`, `fuerza_dia`, `cardio_entrenos`, `entrenos_desde_garmin` | Juntar `fuerza_entrenos` y `cardio_entrenos` en **`entrenos`**. `fuerza_historial` y `fuerza_dia` son de la web: **solo web**. |
-| Intervals.icu | `intervals_*` (7) | `intervals_conectar` e `intervals_desconectar` son de Ajustes: **solo web**. `intervals_estado` se queda, porque las instrucciones de Claude la usan para saber si hay Intervals.icu. |
-| App | `app_leer`, `app_guardar`, `mycoach_abrir` | `app_guardar` **solo web**: Claude ya escribe por `coach_proponer` y `comida_registrar`, y es por donde se coló el plan roto. |
-| Comida y peso | `comida_registrar`, `comidas`, `peso_registrar`, `peso_historico` | Se quedan. |
+| ![Tarjeta de carga con la franja y el Load Focus](img/garmin/progreso-carga.png) | ![Hoy: Cómo llegas hoy, con la pregunta primero](img/garmin/hoy-sin-reloj.png) | ![Umbrales, predicciones y edad física](img/garmin/tus-numeros.png) |
 
-**"Solo web"** quiere decir que la herramienta sigue en el conector y la web
-la usa por `/api/mcp` como ahora, pero `tools/list` no se la enseña a Claude.
-Es una marca por herramienta, sin romper nada.
+Capturas a 390 px con los datos de la demo.
 
-Con todo esto quedarían unas **30 herramientas visibles para Claude** en vez
-de 47, sin perder nada: lo que no tenga herramienta, lo alcanza `garmin_api`.
+## 5. Las herramientas del MCP (hecho el 4 de octubre)
 
-**Orden de nombres:** `garmin_*` para leer Garmin tal cual; `coach_*` para el
-método; el resto por lo que hace en myCoach (`entrenos`, `comidas`, `peso`).
-Todo en castellano salvo los que ya existen; renombrar rompe chats y
-skills guardadas, así que se haría con alias durante un tiempo.
+De 47 herramientas a **40, de las que Claude ve 36**. No se pierde nada, porque lo que no tenga herramienta lo alcanza `garmin_api`.
 
-## 6. Qué falta comprobar
+| Antes | Ahora |
+|---|---|
+| `garmin_daily_summary`, `garmin_sleep`, `garmin_hrv`, `garmin_body_battery`, `garmin_training_readiness` | **`garmin_dia`**: un día entero (más estrés, respiración y SpO2, y los factores del readiness), con `partes`; o la serie de varios días con `dias`. |
+| El perfil de Garmin (`perfil_garmin`) dentro del readiness | En **`garmin_forma`**: `persona`, y el nivel de Endurance con el siguiente. |
+| `garmin_courses` + `garmin_course_detail` | **`garmin_courses`** (con `course_id`, el detalle). |
+| `fuerza_entrenos` + `cardio_entrenos` | **`entrenos`** (con `tipo`). |
+| `fuerza_enviar_garmin` + `cardio_enviar_garmin` | **`entreno_enviar_garmin`** (con `tipo`). |
+| `app_guardar`, `intervals_conectar`, `intervals_desconectar`, `fuerza_dia` | Siguen, pero **solo para la app** (`_meta.ui.visibility: ["app"]`): Claude no las ve. |
+
+Las convenciones para seguir creciendo sin romper están en el README del
+conector ("Convenciones de las herramientas"), y las comprueba un test.
+
+## 7. Quien no tiene reloj (solo un Edge)
+
+Un Edge mide las salidas, pero no el sueño, la VFC, el pulso en reposo ni el
+readiness. Enseñar esos huecos todos los días no aporta nada, así que:
+
+- **El conector lo detecta por los datos** (`fuentes`): mira qué ha llegado en las dos últimas semanas. No usa el modelo del dispositivo, así que también sirve para quien tiene reloj pero no duerme con él (entonces falta el sueño y la VFC, pero sale el pulso).
+- **Lo que no se mide no se enseña.** No aparece como "sin dato" ni cuenta como dato que falta.
+- **El semáforo decide con lo que hay:** la frescura, la carga de 7 días de Garmin y su estado (los da el Edge), y lo que cuentes.
+- **Hoy cambia:**
+  - "Tus datos de esta noche" pasa a "Cómo llegas hoy";
+  - la pregunta "¿Cómo te encuentras hoy?" va primero, con su botón, porque es lo que más pesa;
+  - el mensaje del entrenador lo pide si no lo has contado.
+- **Claude lo sabe:** las instrucciones le dicen que no pida datos de sueño a quien no los tiene.
+
+## 8. Qué falta comprobar
 
 - Ningún endpoint nuevo se ha probado aún contra una cuenta real: los tests usan respuestas simuladas con la forma que documenta la librería. Se prueba en `mycoach-pruebas` (workflow CI → Run workflow desde la rama).
   - `garmin_api` sin path y luego, por ejemplo, `/metrics-service/metrics/trainingloadbalance/latest/{hoy}`.
   - `garmin_forma` con `semanas: 12`.
 - **Ritmo del umbral:** al parecer Garmin da la velocidad del umbral en decenas de m/s y `garmin_forma` la convierte con esa suposición. Si el ritmo sale raro, es ahí.
 - **`{perfil}`** (para el material) se saca de `socialProfile.profileId`. Si Garmin no lo da, habrá que leerlo de otro sitio.
+- **`garmin_dia`** y la detección de `fuentes`: comprobar con una cuenta real con reloj y con otra que solo tenga un Edge.
+- **Skills de la cuenta de Claude** (`mycoach-uso` y las demás): nombran herramientas que ya no existen (`garmin_sleep`, `garmin_hrv`, `garmin_training_readiness`, `fuerza_entrenos`…). Hay que actualizarlas a la vez que se despliega.

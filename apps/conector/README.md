@@ -10,6 +10,28 @@ autentica con sus propias credenciales de Garmin.
 https://garmin.<tu-subdominio>.workers.dev/mcp
 ```
 
+## Convenciones de las herramientas
+
+Es el camino para crecer sin romper. Lo comprueban los tests (`12 ter`).
+
+- **Nombre = familia + qué hace**, en castellano: `garmin_*` lee Garmin tal cual; `coach_*` es el método; el resto va por lo que hace en myCoach (`entrenos`, `entreno_enviar_garmin`, `comida_*`, `peso_*`, `fuerza_*`, `intervals_*`, `app_*`, `mycoach_*`).
+- **Una herramienta por pregunta, no por endpoint.** Antes de añadir una, mira si cabe como parámetro de otra:
+  - `garmin_dia` junta todo lo de un día (con `partes` y `dias`);
+  - `garmin_forma` junta la forma y su evolución;
+  - `entrenos` y `entreno_enviar_garmin` llevan `tipo`;
+  - `garmin_courses` con `course_id` da el detalle de un recorrido.
+- **Lo que solo usa la app lleva `soloApp: true`.** Se anuncia con `_meta.ui.visibility: ["app"]` (MCP Apps): Claude no la ve, la app dentro de Claude sí la llama, y la web la usa por `/api/mcp`, que tiene su propia lista en `apps/worker/src/index.js`.
+- **Lo que escribe lleva `write: true`.** Si escribe en Garmin, pide `confirm` (o da vista previa sin él).
+- **Para Garmin, `garmin_api` es el respaldo.** Si un dato no tiene herramienta, Claude lo pide a pelo con el catálogo `ENDPOINTS_GARMIN`.
+  - Un dato nuevo de Garmin se añade primero al catálogo.
+  - Solo pasa a una herramienta propia cuando myCoach lo interpreta: lo traduce, lo compara o el motor lo usa.
+- **Cada dato de Garmin, por su lado.** Si el dispositivo no lo mide, sale en `sin_datos` y el resto llega igual. Un 401 (sin Garmin vinculado) sí corta, para decir cómo arreglarlo.
+- **Renombrar o juntar** se hace cambiando a la vez:
+  - el conector y sus instrucciones;
+  - la web (`apps/web/src`) y la lista de `apps/worker`;
+  - los tests;
+  - las skills de la cuenta que nombren la herramienta.
+
 ## Cómo funciona
 
 Garmin no tiene API pública para particulares (la oficial son 5.000 $ de
@@ -57,7 +79,7 @@ Guardarlas era una carrera que a veces se perdía.
 ### Recorridos
 
 `garmin_plan_route` traza y mide, `garmin_save_course` sube, y
-`garmin_courses` / `garmin_course_detail` releen lo que hay guardado en la
+`garmin_courses` (con `course_id`, el trazado de uno) relee lo que hay guardado en la
 cuenta. Esto ultimo existe porque sin ello Claude sube rutas a ciegas: no
 puede comprobar como han quedado ni saber cuales ya tiene el usuario.
 
@@ -75,8 +97,8 @@ negocia. Así da igual con quién hables: la lógica es la misma.
 
 | Herramienta | Qué hace |
 |---|---|
-| `coach_hoy` | Semáforo del día (verde / ámbar / rojo) con sus razones: readiness, VFC y pulso en reposo frente a tu mediana de 28 días, horas de sueño, frescura (TSB) y lo que hayas anotado. Si hace falta, propone cambiar, recortar o mover la sesión del plan. Trae un mensaje ya redactado. |
-| `coach_semana` | Plan frente a lo hecho día a día, carga de la semana frente a la media de 4 y avisos (rampa, descarga, fuerza, intensidad). |
+| `coach_hoy` | Semáforo del día (verde / ámbar / rojo) con sus razones: readiness, VFC y pulso en reposo frente a tu mediana de 28 días, horas de sueño, frescura (TSB), la carga de 7 días de Garmin frente a su franja óptima, el estado de entreno de Garmin (sobrecargado o en sobreesfuerzo cuentan), el estrés de ayer y lo que hayas anotado. Trae `garmin` (carga, Load Focus, estado, aclimatación) y `fuentes`: qué mide el dispositivo. Sin datos de descanso (solo un Edge) no enseña huecos y pide cómo te encuentras (`pide_sensacion`). Si hace falta, propone cambiar, recortar o mover la sesión del plan. Trae un mensaje ya redactado. |
+| `coach_semana` | Plan frente a lo hecho día a día, carga de la semana frente a la media de 4 y avisos (rampa, descarga, fuerza, intensidad). En esta semana y la siguiente, `avisos_garmin`: qué tipo de trabajo falta según el Load Focus y si la carga se sale de la franja. |
 | `coach_proponer` | Valida cambios de plan (máximo de intensos, nada de intensos seguidos, semáforo, horas, fuerza, lesiones). Sin `guardar` solo valida; con errores no guarda y ofrece una versión corregida. Deja el porqué en `coach/decisiones`. |
 | `coach_perfil` / `coach_perfil_guardar` | Objetivo con fecha, disponibilidad, lesiones, preferencias y material. |
 | `coach_anotar` | Sensaciones (1-5), dolores y notas. Un dolor en las últimas 36 h pone el día en rojo. |
@@ -90,11 +112,11 @@ mañana el cron deja `coach/hoy` calculado para quien usa myCoach.
 
 ## Fuerza (`fuerza_*`)
 
-Entrenos de fuerza con nombre, liderados por Claude: `fuerza_entrenos`, `fuerza_entreno_guardar`, `fuerza_registrar`, `fuerza_historial`, `fuerza_ejercicios_garmin` (busca en el catálogo de Garmin, en castellano; va en `ejercicios-garmin.js`), `fuerza_enviar_garmin` (crea el entreno de fuerza guiado en Garmin Connect y lo programa; escribe, pide confirmación), `fuerza_desde_garmin` (cierra la sesión con las series que contó el reloj) y `fuerza_dia` (lo que usa la app). Se guarda en `app:<id>:fuerza/entrenos` y `app:<id>:fuerza/registro`; la plantilla y lo hecho van separados.
+Entrenos de fuerza con nombre, liderados por Claude: `entrenos` (los de fuerza y los de bici y correr), `fuerza_entreno_guardar`, `fuerza_registrar`, `fuerza_historial`, `fuerza_ejercicios_garmin` (busca en el catálogo de Garmin, en castellano; va en `ejercicios-garmin.js`), `entreno_enviar_garmin` con `tipo: fuerza` (crea el entreno de fuerza guiado en Garmin Connect y lo programa; escribe, pide confirmación), `fuerza_desde_garmin` (cierra la sesión con las series que contó el reloj) y `fuerza_dia` (solo la app). Se guarda en `app:<id>:fuerza/entrenos` y `app:<id>:fuerza/registro`; la plantilla y lo hecho van separados.
 
-## Entrenos de bici y correr para el reloj (`cardio_*`)
+## Entrenos de bici y correr para el reloj
 
-`cardio_enviar_garmin` crea un entreno guiado por pasos (calentamiento, bloques que se repiten, recuperación, vuelta a la calma), cada paso por tiempo, distancia o hasta pulsar vuelta, con objetivo de pulso (zona del reloj o rango en ppm), potencia (zona o W), ritmo (min/km), velocidad (km/h) o cadencia. Sin `confirm` devuelve la vista previa y no escribe; con `confirm=true` lo crea en Garmin Connect, lo programa para el día, lo guarda (`app:<id>:cardio/entrenos`) y enlaza el día del plan (`entreno_cardio`). `cardio_entrenos` los lista para repetirlos.
+`entreno_enviar_garmin` con `tipo: cardio` crea un entreno guiado por pasos (calentamiento, bloques que se repiten, recuperación, vuelta a la calma), cada paso por tiempo, distancia o hasta pulsar vuelta, con objetivo de pulso (zona del reloj o rango en ppm), potencia (zona o W), ritmo (min/km), velocidad (km/h) o cadencia. Sin `confirm` devuelve la vista previa y no escribe; con `confirm=true` lo crea en Garmin Connect, lo programa para el día, lo guarda (`app:<id>:cardio/entrenos`) y enlaza el día del plan (`entreno_cardio`). `entrenos` los lista para repetirlos.
 
 ## Todas las métricas de una actividad
 

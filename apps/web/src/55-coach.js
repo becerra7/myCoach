@@ -45,8 +45,10 @@ function coachDemo() {
     { clave: 'vfc', nombre: 'VFC nocturna', valor: '52 ms', normal: '50 ms', estado: 'bien' },
     { clave: 'pulso', nombre: 'Pulso en reposo', valor: '49 ppm', normal: '48 ppm', estado: 'bien' },
     { clave: 'frescura', nombre: 'Frescura', valor: '−8, equilibrado', normal: null, estado: 'normal' },
+    { clave: 'carga_garmin', nombre: 'Carga de 7 días (Garmin)', valor: '612', normal: '430-790', estado: 'bien' },
   ];
-  return { fecha: HOY, demo: true, sesion_prevista: s, semaforo: { color, datos, razones: color === 'verde' ? [] : [`readiness ${r} de Garmin`], positivos: color === 'verde' ? ['has dormido 7 h 40', 'VFC normal'] : [] }, propuesta };
+  const fm = M.forma || {};
+  return { fecha: HOY, demo: true, garmin: fm.carga ? { estado: fm.estado, carga: fm.carga, enfoque_carga: fm.enfoque } : null, sesion_prevista: s, semaforo: { color, datos, razones: color === 'verde' ? [] : [`readiness ${r} de Garmin`], positivos: color === 'verde' ? ['has dormido 7 h 40', 'VFC normal'] : [] }, propuesta };
 }
 
 /* Qué hacer hoy, en una frase: la propuesta del motor o la sesión del plan */
@@ -68,13 +70,16 @@ function coachCambios(c) {
    sale y cómo lo lee el entrenador. "Qué hacer hoy" va en la tarjeta de abajo (Hoy y tu semana). */
 const EST_ICO = { good: 'check', 'label-2': 'dot', warn: 'info', bad: 'stop' };
 const valorCorto = v => v == null ? '—' : String(v).split(/ · |, /)[0];
-const NOMBRE_CORTO = { readiness: 'Readiness', sueno: 'Sueño', vfc: 'VFC', pulso: 'Pulso', frescura: 'Frescura' };
+const NOMBRE_CORTO = { readiness: 'Readiness', sueno: 'Sueño', vfc: 'VFC', pulso: 'Pulso', frescura: 'Frescura', carga_garmin: 'Carga 7 días', estado_garmin: 'Estado', estres: 'Estrés ayer' };
 /* Qué es cada dato, de dónde sale y cómo lo lee el entrenador (las mismas reglas que el conector) */
 const MET_INFO = {
   readiness: { t: 'Readiness de Garmin', que: 'La nota de Garmin (de 0 a 100) que junta tu sueño, tu VFC, la carga de los últimos días y el tiempo de recuperación que te queda.', lee: 'Por debajo de 55 el entrenador lo cuenta como algo peor; por debajo de 35, pide recuperar. A partir de 70 suma a favor.' },
   sueno: { t: 'Sueño', que: 'Las horas que dormiste anoche y la nota de sueño de Garmin. "Lo normal" es tu media de las últimas 4 semanas.', lee: 'Menos de 6 h 15 cuenta como algo peor; menos de 5 h, peor. 7 h o más suma a favor.' },
   vfc: { t: 'VFC nocturna', que: 'La variabilidad de tu frecuencia cardiaca mientras duermes. Más alta que tu normal suele querer decir que estás bien recuperado. "Lo normal" es tu media de 4 semanas.', lee: 'Si baja más de un 10 % de tu normal es algo peor; más de un 20 %, peor.' },
   pulso: { t: 'Pulso en reposo', que: 'Tu pulso más bajo del día. Comparado con tu media de 4 semanas.', lee: 'Si sube 4 ppm sobre tu normal es señal de cansancio (o de que algo se incuba); 7 o más, peor.' },
+  carga_garmin: { t: 'Carga de 7 días (Garmin)', que: 'La suma de la carga de tus actividades de la última semana, como la calcula Garmin (por lo que cada una te saca de tu equilibrio). "Lo normal" es tu franja óptima, que sale de lo que vienes haciendo en 4 semanas.', lee: 'Por encima de tu franja, el entrenador lo cuenta como algo peor. Dentro, bien. Por debajo no resta: es que hay margen.' },
+  estado_garmin: { t: 'Estado de entreno (Garmin)', que: 'Lo que Garmin lee de tu carga y de cómo evoluciona tu VO2máx: productivo, mantenimiento, recuperación, sobrecargado…', lee: 'Si Garmin te ve sobrecargado o en sobreesfuerzo, el entrenador lo cuenta como algo peor.' },
+  estres: { t: 'Estrés de ayer', que: 'El estrés medio de ayer según tu reloj (de 0 a 100), que sale de tu VFC durante el día.', lee: 'Por encima de 50 cuenta como algo peor: el cuerpo también se cansa fuera del entreno.' },
   frescura: { t: 'Frescura', que: 'Cómo de descansado llegas respecto a lo que has entrenado. Es tu forma (la carga media de las últimas 6 semanas) menos tu fatiga (la carga de los últimos 7 días). La carga de cada actividad sale de su pulso y su duración (TRIMP).', lee: 'Entre −10 y 10, en equilibrio. Más negativo es normal en una semana fuerte; por debajo de −18 el entrenador lo cuenta como algo peor, y por debajo de −30, peor. Por encima de 5 llegas fresco.' },
 };
 function escalaFrescura(v) {

@@ -411,7 +411,7 @@ const rpc = async (env, token, message) => {
 	const { tokens: nuevo } = await entrar("Ana@X.com ", "supersecreta");
 	const c = await cuenta(nuevo.access_token);
 	check("entrar con myCoach da la misma cuenta, con su Garmin", c.contrasena === true && c.garmin.vinculado === true);
-	const hrv = await rpc(env, nuevo.access_token, { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "garmin_hrv", arguments: {} } });
+	const hrv = await rpc(env, nuevo.access_token, { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "garmin_dia", arguments: { partes: ["vfc"] } } });
 	check("y las herramientas de Garmin siguen funcionando", !hrv.body.result.isError);
 
 	const mala = await intentar("entrar", "ana@x.com", "otracosa1");
@@ -427,7 +427,7 @@ const rpc = async (env, token, message) => {
 	// Bea empieza en myCoach sin Garmin y lo vincula despues.
 	const { tokens: bea } = await connect(env, "bea@x.com", "clavedebea", null, { modo: "crear" });
 	check("una cuenta nueva empieza sin Garmin", (await cuenta(bea.access_token)).garmin.vinculado === false);
-	const sinG = await rpc(env, bea.access_token, { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "garmin_hrv", arguments: {} } });
+	const sinG = await rpc(env, bea.access_token, { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "garmin_dia", arguments: { partes: ["vfc"] } } });
 	check("sin Garmin, la herramienta dice donde vincularlo",
 		sinG.body.result.isError && sinG.body.result.content[0].text.includes("Ajustes, Conexiones"));
 	const malG = await postJson(env, "/cuenta/garmin", { email: "ana@x.com", password: "mal" }, auth(bea.access_token));
@@ -556,7 +556,7 @@ const rpc = async (env, token, message) => {
 	check("un navegador en la raiz sigue viendo la pagina", (await (await get(env, "/")).text()).includes("<h1>"));
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("tools/list devuelve 47 herramientas", list.body.result.tools.length === 47);
+	check("tools/list devuelve 40 herramientas", list.body.result.tools.length === 40);
 	check("app_guardar se anuncia como escritura", anot0(list).app_guardar.readOnlyHint === false);
 	{
 		const call = (name, args) => rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name, arguments: args } });
@@ -673,13 +673,13 @@ const rpc = async (env, token, message) => {
 	const read = async (token) => {
 		const r = await rpc(env, token, {
 			jsonrpc: "2.0", id: 3, method: "tools/call",
-			params: { name: "garmin_hrv", arguments: { date: "2026-09-20" } },
+			params: { name: "garmin_dia", arguments: { date: "2026-09-20", partes: ["vfc"] } },
 		});
 		return JSON.parse(r.body.result.content[0].text);
 	};
 
-	check("ana ve su HRV", (await read(ana.tokens.access_token)).last_night_avg === 50);
-	check("bob ve su HRV", (await read(bob.tokens.access_token)).last_night_avg === 99);
+	check("ana ve su HRV", (await read(ana.tokens.access_token)).vfc?.media_noche === 50);
+	check("bob ve su HRV", (await read(bob.tokens.access_token)).vfc?.media_noche === 99);
 
 	const anaStatus = await rpc(env, ana.tokens.access_token, {
 		jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "garmin_status" },
@@ -916,7 +916,7 @@ const rpc = async (env, token, message) => {
 	check("acepta kilometros ya convertidos", lista.courses[4].distance_km === 30.5);
 	check("traduce la fecha en milisegundos", lista.courses[2].created === "2026-09-26");
 
-	const detalle = await call("garmin_course_detail", { course_id: "517620552", puntos: 12 });
+	const detalle = await call("garmin_courses", { course_id: "517620552", puntos: 12 });
 	check("lee un recorrido concreto", detalle.name === "Cerdanya: bucle solana");
 	check("reduce el trazado a los puntos pedidos", detalle.waypoints.length === 12);
 	check("el primer punto es el inicio", detalle.waypoints[0] === "42.3700,1.7600");
@@ -926,7 +926,7 @@ const rpc = async (env, token, message) => {
 
 	// Un recorrido sin trazado no debe reventar: se dice y ya.
 	globalThis.fetch = async () => new Response(JSON.stringify({ courseId: 5, courseName: "Sin linea" }));
-	const vacio = await call("garmin_course_detail", { course_id: "5" });
+	const vacio = await call("garmin_courses", { course_id: "5" });
 	check("un recorrido sin trazado no rompe", vacio.waypoints.length === 0 && vacio.name === "Sin linea");
 
 	// Si ninguna ruta contesta, el error dice que se intento.
@@ -1050,13 +1050,12 @@ const rpc = async (env, token, message) => {
 		return new Response("{}", { status: 404 });
 	};
 	const res = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 12, method: "tools/call",
-		params: { name: "garmin_training_readiness", arguments: { date: "2026-09-25" } } });
-	const pg = JSON.parse(res.body.result.content[0].text).perfil_garmin;
-	check("lee el VO2máx aunque maxmet venga vacío", pg.vo2max === 52.6);
-	check("sitúa el Endurance Score en su nivel", pg.endurance?.nivel === "Entrenado", `(${pg.endurance?.nivel})`);
-	check("dice cuánto falta para el siguiente nivel", pg.endurance?.siguiente?.nivel === "Muy entrenado" && pg.endurance.siguiente.desde === 6600);
-	check("interpreta el balance de carga del mes", pg.balance_carga_mes?.anaerobica?.carga === 796 &&
-		pg.balance_carga_mes.anaerobica.objetivo[1] === 327 && pg.balance_carga_mes.veredicto_garmin === "ABOVE_TARGETS");
+		params: { name: "garmin_forma", arguments: { date: "2026-09-25" } } });
+	const pg = JSON.parse(res.body.result.content[0].text);
+	check("sitúa el Endurance Score en su nivel", pg.endurance_score?.nivel === "Entrenado" && pg.endurance_score.actual === 6319, `(${pg.endurance_score?.nivel})`);
+	check("dice cuánto falta para el siguiente nivel", pg.endurance_score?.siguiente?.nivel === "Muy entrenado" && pg.endurance_score.siguiente.desde === 6600);
+	check("interpreta el enfoque de carga (Load Focus)", pg.enfoque_carga?.anaerobica?.carga === 796 &&
+		pg.enfoque_carga.anaerobica.objetivo[1] === 327 && pg.enfoque_carga.veredicto === "Por encima de los objetivos");
 	check("calcula la edad y lee el umbral de lactato", pg.persona.edad === 36 && pg.persona.umbral_lactato_ppm === 171 && pg.persona.peso_kg === 72);
 }
 
@@ -1246,11 +1245,11 @@ const rpc = async (env, token, message) => {
 	check("el token de acceso vale sin leer del KV", init.body.result?.serverInfo?.name === "garmin");
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("las herramientas se listan igualmente", list.body.result.tools.length === 47);
+	check("las herramientas se listan igualmente", list.body.result.tools.length === 40);
 
 	// Y el dato que si vive en KV avisa en vez de mentir
 	const call = await rpc(env, tokens.access_token, {
-		jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "garmin_hrv", arguments: {} },
+		jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "garmin_dia", arguments: { partes: ["vfc"] } },
 	});
 	check("si el registro aun no propago, lo explica",
 		call.body.result.content[0].text.includes("espera un minuto"));
@@ -1300,10 +1299,10 @@ const rpc = async (env, token, message) => {
 
 	const r = await rpc(env, token, {
 		jsonrpc: "2.0", id: 5, method: "tools/call",
-		params: { name: "garmin_hrv", arguments: { date: "2026-09-20" } },
+		params: { name: "garmin_dia", arguments: { date: "2026-09-20", partes: ["vfc"] } },
 	});
 	check("401 de Garmin dispara renovacion", refreshed);
-	check("tras renovar, devuelve datos", JSON.parse(r.body.result.content[0].text).last_night_avg === 77);
+	check("tras renovar, devuelve datos", JSON.parse(r.body.result.content[0].text).vfc?.media_noche === 77);
 	check("el token renovado se persiste",
 		JSON.parse(env._store.get(`user:${userId}`)).di_token === "nuevo");
 }
@@ -1806,6 +1805,115 @@ const rpc = async (env, token, message) => {
 	globalThis.fetch = abajo;
 }
 
+// ── 12 bis. El entrenador con todo lo de Garmin, y sin reloj (solo un Edge) ──
+{
+	const fechaMadrid = (d = new Date()) =>
+		new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+	const HOY_C = fechaMadrid();
+	const mas = (f, n) => { const d = new Date(`${f}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+	const salidas = Array.from({ length: 20 }, (_, i) => ({
+		activityId: 7000 + i, activityName: `Salida ${i}`, activityType: { typeKey: "cycling" },
+		startTimeLocal: `${mas(HOY_C, -(i * 2 + 1))} 09:00:00`,
+		duration: 3600, movingDuration: 3500, distance: 30000, averageHR: 135, maxHR: 170, aerobicTrainingEffect: 3, activityTrainingLoad: 90,
+	}));
+	mockGarmin({
+		"ana@x.com": { password: "a", data: { displayName: "ana", hrv: 50 } },
+		"edu@x.com": { password: "e", data: { displayName: "edu", hrv: null } },
+	});
+	const abajo = globalThis.fetch;
+	globalThis.fetch = async (url, init) => {
+		const u = new URL(url);
+		const quien = (init?.headers?.Authorization || "").replace("Bearer TOK-", "");
+		const r = (x) => new Response(JSON.stringify(x));
+		if (!quien || u.hostname !== "connectapi.garmin.com" || u.pathname.includes("socialProfile")) return abajo(url, init);
+		if (u.pathname.includes("/activitylist-service/")) return r(Number(u.searchParams.get("start")) ? [] : salidas);
+		if (u.pathname.includes("trainingstatus")) return r({
+			mostRecentTrainingStatus: { latestTrainingStatusData: { "1": { primaryTrainingDevice: true, trainingStatusFeedbackPhrase: "STRAINED_1",
+				acuteTrainingLoadDTO: { dailyTrainingLoadAcute: 900, dailyTrainingLoadChronic: 600, minTrainingLoadChronic: 450, maxTrainingLoadChronic: 840, acwrStatus: "HIGH" } } } },
+			mostRecentTrainingLoadBalance: { metricsTrainingLoadBalanceDTOMap: { "1": { trainingBalanceFeedbackPhrase: "ANAEROBIC_SHORTAGE", monthlyLoadAnaerobic: 20 } } } });
+		if (quien === "edu") {
+			// Solo un Edge: actividades sí, descanso no.
+			if (u.pathname.includes("/usersummary-service/")) return r({ totalSteps: null });
+			if (u.pathname.startsWith("/hrv-service/")) return new Response(null, { status: 204 });
+			if (u.pathname.includes("dailySleepData")) return r({ dailySleepDTO: {} });
+			if (u.pathname.includes("trainingreadiness")) return r([]);
+			return new Response("{}", { status: 404 });
+		}
+		if (u.pathname.includes("/usersummary-service/")) return r({ restingHeartRate: 48, sleepingSeconds: 7.4 * 3600, totalSteps: 9000, dailyStepGoal: 8000 });
+		if (u.pathname.includes("dailySleepData")) return r({ dailySleepDTO: { sleepTimeSeconds: 7.5 * 3600, deepSleepSeconds: 5400,
+			sleepScores: { overall: { value: 80 }, remPercentage: { qualifierKey: "GOOD" } } }, restingHeartRate: 48 });
+		if (u.pathname.startsWith("/hrv-service/hrv/")) return r({ hrvSummary: { lastNightAvg: 50, status: "BALANCED", baseline: { balancedLow: 44, balancedUpper: 58 } } });
+		if (u.pathname.includes("trainingreadiness")) return r([{ score: 80, level: "HIGH", sleepScoreFactorPercent: 85, hrvFactorPercent: 90, acwrFactorPercent: 60 }]);
+		if (u.pathname.includes("dailyStress")) return r({ avgStressLevel: 62, maxStressLevel: 95 });
+		if (u.pathname.includes("bodyBattery/reports")) return r([{ charged: 60, drained: 55, bodyBatteryStat: { highestValue: 90, lowestValue: 20 } }]);
+		if (u.pathname.includes("respiration")) return r({ avgWakingRespirationValue: 15, avgSleepRespirationValue: 13 });
+		return new Response("{}", { status: 404 }); // sin SpO2: ese reloj no lo mide
+	};
+	const env = makeEnv();
+	const ana = (await connect(env, "ana@x.com", "a")).tokens.access_token;
+	const edu = (await connect(env, "edu@x.com", "e")).tokens.access_token;
+	const llamar = async (token, name, args = {}) => {
+		const r = await rpc(env, token, { jsonrpc: "2.0", id: 21, method: "tools/call", params: { name, arguments: args } });
+		const res = r.body.result;
+		return res.isError ? { error: res.content[0].text } : JSON.parse(res.content[0].text);
+	};
+
+	// garmin_dia: todo un día en una llamada; lo que no mide el reloj, en sin_datos.
+	const dia = await llamar(ana, "garmin_dia", { date: HOY_C });
+	check("garmin_dia: sueño con fases, puntuación y factores", dia.sueno?.horas === 7.5 && dia.sueno.profundo_h === 1.5 && dia.sueno.factores?.remPercentage === "GOOD", JSON.stringify(dia.sueno));
+	check("garmin_dia: VFC con su franja normal", dia.vfc?.media_noche === 50 && dia.vfc.franja_normal[0] === 44 && dia.vfc.franja_normal[1] === 58);
+	check("garmin_dia: readiness con lo que pesa cada factor", dia.readiness?.puntos === 80 && dia.readiness.factores_pct.carga === 60);
+	check("garmin_dia: estrés, Body Battery, respiración y resumen", dia.estres?.medio === 62 && dia.body_battery?.maximo === 90 && dia.respiracion?.dormido === 13 && dia.resumen?.pasos === 9000);
+	check("garmin_dia: lo que no mide va a sin_datos", dia.spo2 === null && dia.sin_datos?.includes("spo2"), JSON.stringify(dia.sin_datos));
+	const solo = await llamar(ana, "garmin_dia", { date: HOY_C, partes: ["vfc"] });
+	check("garmin_dia: con partes, solo esas", solo.vfc?.media_noche === 50 && !("sueno" in solo) && !solo.sin_datos);
+
+	// El motor con lo de Garmin: carga por encima de la franja, estado sobrecargado y estrés alto.
+	const hoyA = await llamar(ana, "coach_hoy");
+	const porClave = Object.fromEntries((hoyA.semaforo?.datos || []).map((d) => [d.clave, d]));
+	check("coach_hoy: carga de 7 días de Garmin frente a su franja", porClave.carga_garmin?.valor === "900" && porClave.carga_garmin.normal === "450-840" && porClave.carga_garmin.estado === "leve", JSON.stringify(porClave.carga_garmin));
+	check("coach_hoy: el estado de Garmin (sobrecargado) cuenta", porClave.estado_garmin?.valor === "Sobrecargado" && hoyA.semaforo.razones.some((t) => /sobrecargado/.test(t)), JSON.stringify(hoyA.semaforo.razones));
+	check("coach_hoy: estrés alto ayer cuenta como leve", porClave.estres?.estado === "leve");
+	check("coach_hoy: tres señales leves de Garmin ponen ámbar", hoyA.semaforo.color === "ambar", hoyA.semaforo.color);
+	check("coach_hoy: trae la carga y el Load Focus de Garmin", hoyA.garmin?.carga?.aguda_7d === 900 && hoyA.garmin.enfoque_carga?.veredicto === "Falta anaeróbico");
+	check("coach_hoy: con reloj, mide el descanso", hoyA.fuentes?.sin_descanso === false && hoyA.fuentes.sueno && !hoyA.pide_sensacion, JSON.stringify(hoyA.fuentes));
+	const sem = await llamar(ana, "coach_semana");
+	check("coach_semana: el Load Focus dice qué tipo de trabajo falta", sem.avisos_garmin?.some((a) => a.regla === "enfoque_carga" && /anaeróbico/.test(a.texto)), JSON.stringify(sem.avisos_garmin));
+	check("coach_semana: y avisa de la carga por encima de la franja", sem.avisos_garmin.some((a) => a.regla === "carga_garmin" && /por encima/.test(a.texto)));
+
+	// Edu solo tiene un Edge: no hay huecos de sueño ni VFC; se le pregunta cómo llega.
+	const hoyE = await llamar(edu, "coach_hoy");
+	const claves = (hoyE.semaforo?.datos || []).map((d) => d.clave);
+	check("sin reloj: se detecta que no hay datos de descanso", hoyE.fuentes?.sin_descanso === true, JSON.stringify(hoyE.fuentes));
+	check("sin reloj: no se enseñan sueño, VFC, pulso ni readiness vacíos", !claves.some((k) => ["sueno", "vfc", "pulso", "readiness"].includes(k)) && claves.includes("frescura") && claves.includes("carga_garmin"), JSON.stringify(claves));
+	check("sin reloj: no cuenta como dato que falta", hoyE.semaforo.datos_que_faltan.length === 0 && hoyE.semaforo.sin_descanso === true);
+	check("sin reloj: pide cómo se encuentra", hoyE.pide_sensacion === true && /cuéntame cómo llegas/.test(hoyE.mensaje), hoyE.mensaje);
+	await llamar(edu, "coach_anotar", { tipo: "sensacion", fisico: 4, animo: 4 });
+	check("sin reloj: con lo anotado ya no lo pide", (await llamar(edu, "coach_hoy")).pide_sensacion === false);
+	const serie = await llamar(edu, "garmin_dia", { dias: 7 });
+	check("garmin_dia con dias: la serie guardada y qué mide el dispositivo", Array.isArray(serie.dias) && serie.dias.length >= 5 && serie.fuentes?.sin_descanso === true, JSON.stringify(serie).slice(0, 200));
+	globalThis.fetch = abajo;
+}
+
+// ── 12 ter. Convenciones de las herramientas (el camino para crecer sin romper) ──
+{
+	mockGarmin({ "ana@x.com": { password: "a", data: { displayName: "ana", hrv: 50 } } });
+	const env = makeEnv();
+	const { tokens } = await connect(env, "ana@x.com", "a");
+	const tools = (await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 30, method: "tools/list" })).body.result.tools;
+	const FAMILIAS = /^(garmin|coach|entrenos?|entreno|fuerza|cardio|comida|comidas|peso|intervals|app|mycoach)(_[a-z0-9]+)*$/;
+	check("convención: cada herramienta empieza por su familia", tools.every((t) => FAMILIAS.test(t.name)), tools.filter((t) => !FAMILIAS.test(t.name)).map((t) => t.name).join());
+	check("convención: todas con título, descripción y esquema de objeto", tools.every((t) => t.title && t.description?.length > 40 && t.inputSchema?.type === "object"));
+	check("convención: descripciones de menos de 1500 caracteres", tools.every((t) => t.description.length < 1500), tools.filter((t) => t.description.length >= 1500).map((t) => t.name).join());
+	const soloApp = tools.filter((t) => t._meta?.ui?.visibility?.join() === "app").map((t) => t.name).sort();
+	check("las de la app no se le enseñan al modelo (visibility app)", soloApp.join() === "app_guardar,fuerza_dia,intervals_conectar,intervals_desconectar", soloApp.join());
+	check("la app sigue pudiendo llamarlas", !(await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 31, method: "tools/call", params: { name: "app_guardar", arguments: { doc: "notas", datos: [] } } })).body.result.isError);
+	const viejas = ["garmin_sleep", "garmin_hrv", "garmin_daily_summary", "garmin_body_battery", "garmin_training_readiness", "garmin_course_detail", "fuerza_entrenos", "cardio_entrenos", "fuerza_enviar_garmin", "cardio_enviar_garmin"];
+	check("las herramientas juntadas ya no existen", !tools.some((t) => viejas.includes(t.name)));
+	const visibles = tools.filter((t) => !t._meta?.ui?.visibility || t._meta.ui.visibility.includes("model"));
+	check("Claude ve 36 herramientas", visibles.length === 36, String(visibles.length));
+}
+
 // ── 13. Intervals.icu: clave cifrada, actividades, series, bienestar y curvas ──
 {
 	mockGarmin({ "ana@x.com": { password: "a", data: { displayName: "ana", hrv: 50 } }, "bob@x.com": { password: "b", data: { displayName: "bob", hrv: 60 } } });
@@ -1999,14 +2107,14 @@ const rpc = async (env, token, message) => {
 	check("'8-10' queda como reps 8 y reps_max 10", g.guardado.ejercicios[0].reps === 8 && g.guardado.ejercicios[0].reps_max === 10);
 	check("avisa de los ejercicios sin Garmin", /Plancha/.test(g.aviso || ""));
 
-	const sinGarmin = await llamar("fuerza_enviar_garmin", { entreno: "Pierna A", confirm: true });
+	const sinGarmin = await llamar("entreno_enviar_garmin", { tipo: "fuerza", entreno: "Pierna A", confirm: true });
 	check("no se manda al reloj si falta el ejercicio de Garmin", /Plancha/.test(sinGarmin.error || ""));
 	pierna.ejercicios[2].garmin = { categoria: "PLANK", ejercicio: "PLANK" };
 	await llamar("fuerza_entreno_guardar", pierna);
-	const sinPermiso = await llamar("fuerza_enviar_garmin", { entreno: "pierna-a", confirm: false });
+	const sinPermiso = await llamar("entreno_enviar_garmin", { tipo: "fuerza", entreno: "pierna-a", confirm: false });
 	check("mandar al reloj pide confirmacion", /confirmacion/.test(sinPermiso.error || ""));
 
-	const env1 = await llamar("fuerza_enviar_garmin", { entreno: "pierna-a", fecha: HOY, confirm: true });
+	const env1 = await llamar("entreno_enviar_garmin", { tipo: "fuerza", entreno: "pierna-a", fecha: HOY, confirm: true });
 	const w = garmin.creados[0];
 	const g1 = w?.workoutSegments?.[0]?.workoutSteps?.[0];
 	check("se crea un entreno de fuerza en Garmin", env1.enviado === true && w.sportType.sportTypeKey === "strength_training" && w.workoutName === "Pierna A");
@@ -2021,20 +2129,20 @@ const rpc = async (env, token, message) => {
 	check("la plancha va al reloj por tiempo", plancha.endCondition.conditionTypeKey === "time" && plancha.endConditionValue === 40);
 	check("y se programa para el dia", garmin.programados[0]?.[0] === "500" && garmin.programados[0][1].date === HOY);
 	// Pareja estable: reenviar actualiza el mismo entreno en Garmin y no apila programados
-	const otraVezMismo = await llamar("fuerza_enviar_garmin", { entreno: "pierna-a", fecha: HOY, confirm: true });
+	const otraVezMismo = await llamar("entreno_enviar_garmin", { tipo: "fuerza", entreno: "pierna-a", fecha: HOY, confirm: true });
 	check("mandarlo otra vez actualiza el mismo entreno (no crea otro ni borra)",
 		otraVezMismo.actualizado === true && otraVezMismo.workout_id === "500" && garmin.creados.length === 1 && garmin.borrados.length === 0 &&
 		garmin.actualizados[0]?.[0] === "500" && garmin.actualizados[0][1].workoutId === 500, JSON.stringify(otraVezMismo));
 	check("el mismo dia no se programa dos veces", garmin.programados.length === 1);
 	const otroDia = new Date(Date.now() + 3 * 864e5).toISOString().slice(0, 10);
-	await llamar("fuerza_enviar_garmin", { entreno: "pierna-a", fecha: otroDia, confirm: true });
+	await llamar("entreno_enviar_garmin", { tipo: "fuerza", entreno: "pierna-a", fecha: otroDia, confirm: true });
 	check("otro dia si se programa, con el mismo entreno", garmin.programados.length === 2 && garmin.programados[1][0] === "500" && garmin.creados.length === 1);
 	garmin.putFalla = true;
-	const trasBorrarlo = await llamar("fuerza_enviar_garmin", { entreno: "pierna-a", fecha: HOY, confirm: true });
+	const trasBorrarlo = await llamar("entreno_enviar_garmin", { tipo: "fuerza", entreno: "pierna-a", fecha: HOY, confirm: true });
 	garmin.putFalla = false;
 	check("si Garmin ya no lo tiene, se crea otro y se apunta el nuevo", trasBorrarlo.actualizado === false && trasBorrarlo.workout_id === "501" && garmin.creados.length === 2 && garmin.borrados.includes("500"));
 
-	const lista = await llamar("fuerza_entrenos");
+	const lista = (await llamar("entrenos", { tipo: "fuerza" })).fuerza;
 	check("la lista de entrenos trae los nombres de ejercicio que ya usa", lista.entrenos[0].nombre === "Pierna A" && lista.nombres_de_ejercicio.includes("Sentadilla goblet"));
 
 	const reg = await llamar("fuerza_registrar", { entreno: "Pierna A", fecha: "2026-09-22", ejercicios: [{ nombre: "Sentadilla goblet", peso_kg: 22 }, { nombre: "Plancha", omitido: true }] });
@@ -2042,17 +2150,17 @@ const rpc = async (env, token, message) => {
 	check("registrar solo lo que cambio: lo demas, como estaba", cambios["Peso muerto rumano"].estado === "hecho");
 	check("el peso que sube se marca", cambios["Sentadilla goblet"].estado === "mas" && /22 kg \(plan 20\)/.test(cambios["Sentadilla goblet"].texto));
 	check("lo omitido sale como no hecho", cambios.Plancha.estado === "no_hecho");
-	const detalle = await llamar("fuerza_entrenos", { id: "pierna-a" });
+	const detalle = await llamar("entrenos", { id: "pierna-a" });
 	check("registrar no cambia la plantilla si no se pide", detalle.ejercicios[0].peso_kg === 20);
 	check("el plan de un ejercicio de tiempo se escribe en segundos", detalle.ejercicios[2].plan === "3 × 40 s");
 	check("el entreno trae la ultima vez de cada ejercicio", detalle.ejercicios[0].ultima?.texto === "3 × 8 · 22 kg" && detalle.ejercicios[0].ultima.fecha === "2026-09-22");
 	await llamar("fuerza_registrar", { entreno: "Pierna A", fecha: "2026-09-22", ejercicios: [{ nombre: "Sentadilla goblet", peso_kg: 22 }, { nombre: "Plancha", omitido: true }], actualizar_entreno: true });
-	const detalle2 = await llamar("fuerza_entrenos", { id: "pierna-a" });
+	const detalle2 = await llamar("entrenos", { id: "pierna-a" });
 	check("con actualizar_entreno, el peso hecho queda para la proxima", detalle2.ejercicios[0].peso_kg === 22 && detalle2.garmin?.desactualizado === true);
 
 	// Un dia de fuerza del plan sin entreno: al mandarlo al reloj para ese dia, queda enlazado.
 	await llamar("app_guardar", { doc: "estado/app", datos: { plan: { "2026-10-01": { dep: "fuerza", t: "otros", d: "Pierna en casa", min: 40 } } } });
-	await llamar("fuerza_enviar_garmin", { entreno: "pierna-a", fecha: "2026-10-01", confirm: true });
+	await llamar("entreno_enviar_garmin", { tipo: "fuerza", entreno: "pierna-a", fecha: "2026-10-01", confirm: true });
 	check("mandar al reloj enlaza el dia de fuerza del plan con su entreno", (await llamar("app_leer", { doc: "estado/app" })).plan["2026-10-01"].entreno === "pierna-a");
 	await llamar("app_guardar", { doc: "estado/app", datos: { plan: { "2026-10-01": { dep: "fuerza", t: "otros", d: "Pierna en casa", min: 40 } } } });
 	const sinEnlace = await llamar("fuerza_dia", { fecha: "2026-10-01" });
@@ -2099,7 +2207,7 @@ const rpc = async (env, token, message) => {
 	check("renombrar conserva el id", renombrado.guardado.id === "pierna-a-copia" && renombrado.guardado.nombre === "Pierna B");
 	await llamar("fuerza_entreno_guardar", { id: "pierna-a-copia", nombre: "Pierna B", borrar: true });
 	const borrado = await llamar("fuerza_entreno_guardar", { nombre: "Pierna A", borrar: true });
-	check("un entreno se puede borrar", borrado.borrado === "pierna-a" && (await llamar("fuerza_entrenos")).entrenos.length === 0);
+	check("un entreno se puede borrar", borrado.borrado === "pierna-a" && !(await llamar("entrenos")).fuerza.entrenos.length);
 	globalThis.fetch = base;
 }
 
@@ -2132,13 +2240,13 @@ const rpc = async (env, token, message) => {
 			{ tipo: "vuelta_calma", duracion_s: 600 },
 		],
 	};
-	const vista = await llamar("cardio_enviar_garmin", series);
+	const vista = await llamar("entreno_enviar_garmin", { tipo: "cardio", ...series });
 	check("sin confirm, solo la vista previa: no escribe en Garmin", vista.escrito === false && garmin.creados.length === 0);
 	check("la vista previa se lee: series y objetivos", vista.vista_previa.pasos.includes("5 ×") && vista.vista_previa.pasos.some((l) => /Serie: 4 min · 280-300 W/.test(l)) && vista.vista_previa.min_estimados === 60, JSON.stringify(vista.vista_previa));
-	const malo = await llamar("cardio_enviar_garmin", { ...series, pasos: [{ tipo: "intervalo", duracion_s: 60, objetivo: { tipo: "ritmo", min: "rapido", max: "4:00" } }] });
+	const malo = await llamar("entreno_enviar_garmin", { tipo: "cardio", ...series, pasos: [{ tipo: "intervalo", duracion_s: 60, objetivo: { tipo: "ritmo", min: "rapido", max: "4:00" } }] });
 	check("un ritmo mal escrito se explica", /min\/km/.test(malo.error || ""));
 	await llamar("app_guardar", { doc: "estado/app", datos: { plan: { "2026-10-02": { dep: "bici", t: "int", d: "Series", min: 60 } } } });
-	const ok = await llamar("cardio_enviar_garmin", { ...series, confirm: true });
+	const ok = await llamar("entreno_enviar_garmin", { tipo: "cardio", ...series, confirm: true });
 	const w = garmin.creados[0];
 	const pasos = w.workoutSegments[0].workoutSteps;
 	check("se crea un entreno de ciclismo en Garmin", ok.enviado === true && w.sportType.sportTypeKey === "cycling" && w.workoutName === "5 × 4 min umbral");
@@ -2153,7 +2261,7 @@ const rpc = async (env, token, message) => {
 	check("se programa para el dia y enlaza el dia de bici del plan", garmin.programados[0].date === "2026-10-02" && ok.enlazado_al_plan === true &&
 		(await llamar("app_leer", { doc: "estado/app" })).plan["2026-10-02"].entreno_cardio === "5-4-min-umbral");
 
-	const carrera = await llamar("cardio_enviar_garmin", { nombre: "Tempo 3 km", deporte: "correr", confirm: true, pasos: [
+	const carrera = await llamar("entreno_enviar_garmin", { tipo: "cardio", nombre: "Tempo 3 km", deporte: "correr", confirm: true, pasos: [
 		{ tipo: "calentamiento", distancia_m: 2000 },
 		{ tipo: "intervalo", distancia_m: 3000, objetivo: { tipo: "ritmo", min: "4:20", max: "4:40" } },
 		{ tipo: "vuelta_calma" },
@@ -2163,9 +2271,9 @@ const rpc = async (env, token, message) => {
 		carrera.enviado && garmin.creados[1].sportType.sportTypeKey === "running" && c[1].endCondition.conditionTypeKey === "distance" && c[1].endConditionValue === 3000 &&
 		c[1].targetType.workoutTargetTypeKey === "pace.zone" && c[1].targetValueOne < c[1].targetValueTwo && Math.abs(c[1].targetValueTwo - 1000 / 260) < 0.01 &&
 		c[2].endCondition.conditionTypeKey === "lap.button", JSON.stringify(c[1]));
-	const lista = await llamar("cardio_entrenos");
-	check("los entrenos quedan guardados para repetirlos", lista.entrenos.length === 2 && lista.entrenos.some((e) => e.id === "tempo-3-km" && e.deporte === "correr"));
-	const otra = await llamar("cardio_enviar_garmin", { id: "tempo-3-km", fecha: "2026-10-09", confirm: true });
+	const lista = await llamar("entrenos", { tipo: "cardio" });
+	check("los entrenos quedan guardados para repetirlos", lista.cardio.length === 2 && lista.cardio.some((e) => e.id === "tempo-3-km" && e.deporte === "correr"));
+	const otra = await llamar("entreno_enviar_garmin", { tipo: "cardio", id: "tempo-3-km", fecha: "2026-10-09", confirm: true });
 	check("repetir uno guardado solo con su id y la fecha", otra.enviado && garmin.programados.at(-1).date === "2026-10-09");
 	globalThis.fetch = base;
 }
@@ -2247,10 +2355,10 @@ const rpc = async (env, token, message) => {
 	check("importar: vista previa con fuerza y bici, sin natacion ni los de myCoach", vista.escrito === false && vista.nuevos.length === 2, JSON.stringify(vista));
 	const imp = await llamar("entrenos_desde_garmin", { confirm: true });
 	check("importar: entran los dos", imp.importados.length === 2 && imp.fallidos.length === 0, JSON.stringify(imp));
-	const pecho = (await llamar("fuerza_entrenos", { id: "pecho-gym" }));
+	const pecho = (await llamar("entrenos", { id: "pecho-gym", tipo: "fuerza" }));
 	const e0 = pecho.ejercicios?.[0] || {};
 	check("fuerza importada: series, reps, kg, descanso y ejercicio de Garmin", e0.series === 4 && e0.reps === 8 && e0.peso_kg === 60 && e0.descanso_s === 120 && e0.garmin?.ejercicio === "BARBELL_BENCH_PRESS" && pecho.garmin?.workout_id === "11", JSON.stringify(pecho).slice(0, 300));
-	const rod = await llamar("cardio_entrenos", { id: "rodillo-4x8" });
+	const rod = await llamar("entrenos", { id: "rodillo-4x8" });
 	check("bici importada: series con potencia y zona de pulso", rod.resumen.includes("4 ×") && rod.resumen.some((l) => /250-270 W/.test(l)) && /zona 2/.test(rod.resumen[0]), JSON.stringify(rod.resumen));
 	const otra = await llamar("entrenos_desde_garmin");
 	check("importar otra vez no duplica", otra.nuevos.length === 0);

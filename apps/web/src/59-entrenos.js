@@ -8,7 +8,7 @@ const ENT = {}; // id → { original, borrador, sucio } del entreno abierto
 async function cargarEntrenos(fresco) {
   if (!LIVE || S.modo !== 'vivo' || ENTS === 'cargando') return;
   ENTS = 'cargando';
-  try { ENTS = (await coachCall('fuerza_entrenos', {}, fresco)).entrenos || []; } catch (e) { ENTS = null; }
+  try { ENTS = (await coachCall('entrenos', { tipo: 'fuerza' }, fresco)).fuerza?.entrenos || []; } catch (e) { ENTS = null; }
   render(); if (sheetState && sheetState.id === 'elegir-entreno') fillSheet();
 }
 const clonar = o => JSON.parse(JSON.stringify(o));
@@ -21,7 +21,7 @@ let CENTS; // entrenos de bici y correr: undefined · 'cargando' · null · list
 async function cargarCardioLista(fresco) {
   if (!LIVE || S.modo !== 'vivo' || CENTS === 'cargando') return;
   CENTS = 'cargando';
-  try { CENTS = (await coachCall('cardio_entrenos', {}, fresco)).entrenos || []; } catch (e) { CENTS = null; }
+  try { CENTS = (await coachCall('entrenos', { tipo: 'cardio' }, fresco)).cardio || []; } catch (e) { CENTS = null; }
   render();
 }
 function scrEntrenos() {
@@ -63,7 +63,7 @@ function hojaCardioEntreno(id) {
 }
 async function enviarCardioId(id, f) {
   try {
-    const r = await coachCall('cardio_enviar_garmin', { id, fecha: f, confirm: true }, true);
+    const r = await coachCall('entreno_enviar_garmin', { tipo: 'cardio', id, fecha: f, confirm: true }, true);
     closeSheet(); toast(r.programado ? `En tu reloj para ${f === HOY ? 'hoy' : `el ${fCorta(f)}`}: sincronízalo` : 'En Garmin, pero no en el calendario');
     CZ[id] = undefined; CENTS = undefined; render();
   } catch (err) { toast('No he podido enviarlo: ' + (err.message || 'error')); }
@@ -72,7 +72,7 @@ async function enviarCardioId(id, f) {
 /* Un entreno, editable */
 async function abrirEntreno(id, fresco) {
   ENT[id] = { cargando: true };
-  try { const e = await coachCall('fuerza_entrenos', { id }, fresco); ENT[id] = { original: e, borrador: clonar(e), sucio: false }; }
+  try { const e = await coachCall('entrenos', { tipo: 'fuerza', id }, fresco); ENT[id] = { original: e, borrador: clonar(e), sucio: false }; }
   catch (err) { ENT[id] = { error: err.message || 'No lo encuentro' }; }
   render();
 }

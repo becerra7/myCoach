@@ -22,7 +22,7 @@ const cap1 = s => s.charAt(0).toUpperCase() + s.slice(1);
 const dur = m => m >= 60 ? `${Math.floor(m / 60)} h${m % 60 ? ' ' + String(Math.round(m % 60)).padStart(2, '0') : ''}` : `${Math.round(m)} min`;
 const half = v => Math.round(v * 2) / 2;
 let HOY = HOY_REAL, SEM = weekOf(HOY), PROX = addDays(SEM, 7);
-const rdy = () => S.readiness ?? (M && M.perfil && M.perfil.ready ? M.perfil.ready.score : null);
+const rdy = () => S.readiness ?? (typeof COACH !== 'undefined' && COACH?.datos_hoy?.readiness != null ? COACH.datos_hoy.readiness : M && M.perfil && M.perfil.ready ? M.perfil.ready.score : null);
 function setHoy(d) { HOY = d; SEM = weekOf(d); PROX = addDays(SEM, 7); }
 
 /* Deportes: color = ranura fija de la paleta categórica validada (nunca por rango) */

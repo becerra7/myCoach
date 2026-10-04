@@ -178,7 +178,7 @@ No hay capturas. Colores y tipografía solo se citan cuando una fuente los descr
 - Columna ANTERIOR junto a cada serie; un toque la copia (verificado, [Hevy](https://www.hevyapp.com/features/track-exercises/)).
 - Temporizador de descanso que salta al marcar la serie hecha (verificado, [Hevy](https://www.hevyapp.com/features/workout-rest-timer/)).
 
-**Copiar.** "La última vez: 3 × 8 a 40 kg" al lado de lo que toca hoy. myCoach ya guarda la última vez en `fuerza_entrenos`.
+**Copiar.** "La última vez: 3 × 8 a 40 kg" al lado de lo que toca hoy. myCoach ya guarda la última vez en `entrenos`.
 
 **Evitar.** Construir un registro en vivo serie a serie dentro de myCoach.
 

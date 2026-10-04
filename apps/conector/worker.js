@@ -1120,6 +1120,8 @@ function estadoGarmin(estado) {
 		// Load Focus: la carga de 4 semanas repartida por intensidad, con su objetivo.
 		enfoque_carga: balance ? {
 			veredicto: traducir(BALANCE_CARGA, balance.trainingBalanceFeedbackPhrase),
+			codigo_garmin: balance.trainingBalanceFeedbackPhrase ?? null,
+			que_hacer: QUE_FALTA[balance.trainingBalanceFeedbackPhrase] ?? null,
 			aerobica_baja: { carga: Math.round(balance.monthlyLoadAerobicLow ?? 0), objetivo: [balance.monthlyLoadAerobicLowTargetMin, balance.monthlyLoadAerobicLowTargetMax] },
 			aerobica_alta: { carga: Math.round(balance.monthlyLoadAerobicHigh ?? 0), objetivo: [balance.monthlyLoadAerobicHighTargetMin, balance.monthlyLoadAerobicHighTargetMax] },
 			anaerobica: { carga: Math.round(balance.monthlyLoadAnaerobic ?? 0), objetivo: [balance.monthlyLoadAnaerobicTargetMin, balance.monthlyLoadAnaerobicTargetMax] },
@@ -1286,6 +1288,143 @@ function recortarGarmin(data) {
 	return { datos, recortado: "Respuesta grande: van los campos pequeños. Para los demás use campos (p. ej. ['" + Object.keys(grandes)[0] + "']).", campos_grandes: grandes };
 }
 
+// ── El día según Garmin (garmin_dia) ──
+const PARTES_DIA = ["resumen", "sueno", "vfc", "body_battery", "readiness", "estres", "respiracion", "spo2"];
+const horas = (s) => (typeof s === "number" && s > 0 ? round(s / 3600, 2) : null);
+
+/**
+ * Un día de Garmin por partes. Cada parte se pide por su lado: si el
+ * dispositivo no la mide (un Edge no mide el sueño), sale null y se dice en
+ * sin_datos, sin tirar las demás.
+ */
+async function diaGarmin(env, userId, d, partes) {
+	const quiere = (p) => !partes?.length || partes.includes(p);
+	const sinDatos = [];
+	const pedir = (parte, path, params) =>
+		quiere(parte)
+			? apiGet(env, userId, path, params).then((x) => (x == null && sinDatos.push(parte), x)).catch((e) => {
+				// Sin Garmin vinculado (o sin poder renovar) no es "sin datos": se dice.
+				if (e.status === 401) throw e;
+				sinDatos.push(parte);
+				return null;
+			})
+			: null;
+	// Resumen y sueño van por el displayName: si no se consigue, esas dos salen sin datos.
+	const nombre = quiere("resumen") || quiere("sueno")
+		? await displayName(env, userId).catch((e) => { if (e.status === 401) throw e; return null; })
+		: null;
+	const [s, sl, hrv, bb, rd, st, resp, o2] = await Promise.all([
+		nombre ? pedir("resumen", `/usersummary-service/usersummary/daily/${nombre}`, { calendarDate: d }) : null,
+		nombre ? pedir("sueno", `/wellness-service/wellness/dailySleepData/${nombre}`, { date: d, nonSleepBufferMinutes: "60" }) : null,
+		pedir("vfc", `/hrv-service/hrv/${d}`),
+		pedir("body_battery", "/wellness-service/wellness/bodyBattery/reports/daily", { startDate: d, endDate: d }),
+		pedir("readiness", `/metrics-service/metrics/trainingreadiness/${d}`),
+		pedir("estres", `/wellness-service/wellness/dailyStress/${d}`),
+		pedir("respiracion", `/wellness-service/wellness/daily/respiration/${d}`),
+		pedir("spo2", `/wellness-service/wellness/daily/spo2/${d}`),
+	]);
+	const dto = sl?.dailySleepDTO || {};
+	const h = hrv?.hrvSummary || {};
+	const b = Array.isArray(bb) ? bb[0] : bb;
+	const r = Array.isArray(rd) ? rd[0] : rd;
+	// Un día sin nada de una parte cuenta como sin datos aunque Garmin conteste.
+	const parte = (nombreParte, obj) => {
+		if (!quiere(nombreParte)) return undefined;
+		const lleno = obj && Object.values(obj).some((v) => v != null && !(typeof v === "object" && !Object.values(v).some((x) => x != null)));
+		if (!lleno && !sinDatos.includes(nombreParte)) sinDatos.push(nombreParte);
+		return lleno ? obj : null;
+	};
+	const factores = Object.fromEntries(Object.entries(dto.sleepScores || {})
+		.filter(([k, v]) => k !== "overall" && v?.qualifierKey).map(([k, v]) => [k, v.qualifierKey]));
+	return {
+		fecha: d,
+		resumen: parte("resumen", s && {
+			pasos: s.totalSteps ?? null, objetivo_pasos: s.dailyStepGoal ?? null, km: s.totalDistanceMeters != null ? round(s.totalDistanceMeters / 1000) : null,
+			kcal_total: s.totalKilocalories ?? null, kcal_activas: s.activeKilocalories ?? null, pisos: s.floorsAscended != null ? Math.round(s.floorsAscended) : null,
+			minutos_intensidad: s.moderateIntensityMinutes != null || s.vigorousIntensityMinutes != null ? (s.moderateIntensityMinutes ?? 0) + 2 * (s.vigorousIntensityMinutes ?? 0) : null,
+			pulso_reposo: s.restingHeartRate ?? null, pulso_min: s.minHeartRate ?? null, pulso_max: s.maxHeartRate ?? null,
+		}),
+		sueno: parte("sueno", sl && {
+			horas: horas(dto.sleepTimeSeconds), profundo_h: horas(dto.deepSleepSeconds), ligero_h: horas(dto.lightSleepSeconds),
+			rem_h: horas(dto.remSleepSeconds), despierto_h: horas(dto.awakeSleepSeconds),
+			puntuacion: dto.sleepScores?.overall?.value ?? null, factores: Object.keys(factores).length ? factores : null,
+			pulso_reposo: sl.restingHeartRate ?? null, vfc_media: sl.avgOvernightHrv ?? null,
+			respiracion_media: dto.averageRespirationValue ?? null, estres_medio: dto.avgSleepStress ?? null,
+		}),
+		vfc: parte("vfc", hrv && {
+			media_noche: h.lastNightAvg ?? null, maximo_5min: h.lastNight5MinHigh ?? null, media_semana: h.weeklyAvg ?? null,
+			estado: h.status ?? null, franja_normal: h.baseline ? [h.baseline.balancedLow ?? h.baseline.lowUpper ?? null, h.baseline.balancedUpper ?? null] : null,
+		}),
+		body_battery: parte("body_battery", b && {
+			maximo: b.bodyBatteryStat?.highestValue ?? s?.bodyBatteryHighestValue ?? null, minimo: b.bodyBatteryStat?.lowestValue ?? s?.bodyBatteryLowestValue ?? null,
+			cargado: b.charged ?? null, gastado: b.drained ?? null,
+		}),
+		readiness: parte("readiness", r && {
+			puntos: r.score ?? null, nivel: r.level ?? null, mensaje_garmin: r.feedbackShort ?? r.feedbackLong ?? null,
+			recuperacion_h: r.recoveryTime != null ? round(r.recoveryTime / 60, 1) : null, carga_aguda: r.acuteLoad ?? null,
+			factores_pct: {
+				sueno: r.sleepScoreFactorPercent ?? null, historial_sueno: r.sleepHistoryFactorPercent ?? null, vfc: r.hrvFactorPercent ?? null,
+				recuperacion: r.recoveryTimeFactorPercent ?? null, carga: r.acwrFactorPercent ?? null, estres: r.stressHistoryFactorPercent ?? null,
+			},
+		}),
+		estres: parte("estres", st && { medio: st.avgStressLevel ?? null, maximo: st.maxStressLevel ?? null }),
+		respiracion: parte("respiracion", resp && {
+			despierto: resp.avgWakingRespirationValue ?? null, dormido: resp.avgSleepRespirationValue ?? null,
+			minima: resp.lowestRespirationValue ?? null, maxima: resp.highestRespirationValue ?? null,
+		}),
+		spo2: parte("spo2", o2 && { media: o2.averageSpO2 ?? null, minima: o2.lowestSpO2 ?? null, dormido: o2.avgSleepSpO2 ?? null }),
+		sin_datos: sinDatos.length ? [...new Set(sinDatos)] : undefined,
+	};
+}
+
+/**
+ * Qué mide el dispositivo de cada uno, por lo que ha llegado en las dos
+ * últimas semanas. Con un Edge (o un reloj que no se lleva de noche) no hay
+ * sueño ni VFC: no se enseñan huecos vacíos, se decide con lo que hay.
+ * null = aún no se sabe (pocos días guardados).
+ */
+function fuentesDescanso(dias, hoy) {
+	const recientes = dias.filter((d) => d.date < hoy && diasEntre(d.date, hoy) <= 14);
+	if (recientes.length < 5) return null;
+	const hay = (k) => recientes.some((d) => typeof d[k] === "number" && d[k] > 0);
+	const f = { sueno: hay("sleep_h"), vfc: hay("hrv"), pulso: hay("resting_hr") };
+	return { ...f, sin_descanso: !f.sueno && !f.vfc && !f.pulso };
+}
+
+/** Un recorrido guardado: sus metricas y el trazado reducido a puntos de paso. */
+async function detalleCourse(env, userId, { course_id, puntos }) {
+	const cuantos = Math.min(Math.max(puntos || 15, 5), 40);
+	const path = `/course-service/course/${encodeURIComponent(String(course_id))}`;
+
+	// Se pide el trazado explicitamente; si ese parametro no le gusta,
+	// se repite sin el antes de darlo por perdido.
+	let c;
+	try {
+		c = await apiGet(env, userId, path, { includeGeoPoints: "true" });
+	} catch {
+		c = await apiGet(env, userId, path);
+	}
+
+	const resumen = resumirCourse(c || {});
+	const linea = c?.geoPoints || [];
+	if (linea.length < 2)
+		return { ...resumen, waypoints: [], nota: "Garmin no ha devuelto el trazado de este recorrido." };
+
+	// Mismo reparto que en las actividades: la forma se conserva y el
+	// resultado cabe en una conversacion.
+	const paso = (linea.length - 1) / (cuantos - 1);
+	const waypoints = Array.from({ length: cuantos }, (_, i) => {
+		const p = linea[Math.round(i * paso)];
+		return `${Number(p.latitude).toFixed(4)},${Number(p.longitude).toFixed(4)}`;
+	});
+
+	return {
+		...resumen,
+		waypoints,
+		nota: "Puntos del recorrido guardado. Paselos a garmin_plan_route para variarlo.",
+	};
+}
+
 /** Polilínea codificada de Google (precisión 1e-5) a partir de puntos {lat, lon}. */
 function codificarPolilinea(puntos) {
 	let out = "";
@@ -1320,6 +1459,8 @@ const TOOLS = {
 		},
 	},
 	app_guardar: {
+		// Solo la app: Claude no la ve (ver CONVENCIONES en el README del conector).
+		soloApp: true,
 		title: "Guardar datos en myCoach",
 		write: true,
 		description:
@@ -1393,64 +1534,35 @@ const TOOLS = {
 		},
 	},
 
-	garmin_daily_summary: {
-		title: "Resumen diario",
+	garmin_dia: {
+		title: "Un dia segun Garmin",
 		description:
-			"Resumen de un dia: pasos, calorias, pisos, minutos de intensidad, frecuencia cardiaca en reposo, estres medio y Body Battery (maximo y minimo). Es la herramienta por defecto para '?como he estado hoy?' o para comparar dias.",
+			"Todo lo de un dia en una llamada: resumen (pasos, calorias, pisos, minutos de intensidad, pulso en reposo), sueno (horas, fases, puntuacion y sus factores), " +
+			"VFC (con su franja normal y estado), Body Battery, Training Readiness (con lo que pesa cada factor), estres, respiracion y SpO2. " +
+			"Con partes pide solo lo que necesite. Con dias (2-28) devuelve la serie de los ultimos dias que guarda myCoach (pulso en reposo, sueno, VFC, Body Battery, pasos). " +
+			"Lo que el dispositivo no mide (un Edge no mide el sueno) sale en sin_datos. Para la decision del dia use coach_hoy.",
 		schema: {
 			type: "object",
-			properties: { date: { type: "string", description: "Dia en formato YYYY-MM-DD. Por defecto, hoy." } },
+			properties: {
+				date: { type: "string", description: "Dia en formato YYYY-MM-DD (para el sueno, la noche que acaba ese dia). Por defecto, hoy." },
+				partes: { type: "array", items: { type: "string", enum: PARTES_DIA }, description: "Solo estas partes. Por defecto, todas." },
+				dias: { type: "integer", minimum: 1, maximum: 28, description: "Serie de los ultimos N dias hasta date, de lo guardado por myCoach." },
+			},
 		},
-		run: async (env, userId, { date }) => {
+		run: async (env, userId, { date, partes, dias } = {}) => {
 			const d = date || today();
-			const s = await apiGet(env, userId, `/usersummary-service/usersummary/daily/${await displayName(env, userId)}`, {
-				calendarDate: d,
-			});
+			const n = Math.min(28, Math.max(1, Math.round(Number(dias) || 1)));
+			if (n === 1) return diaGarmin(env, userId, d, Array.isArray(partes) ? partes.filter((p) => PARTES_DIA.includes(p)) : null);
+			const hist = await historico(env, userId);
+			const desde = sumaDias(d, -(n - 1));
+			const serie = hist.dias.filter((x) => x.date >= desde && x.date <= d).map((x) => ({
+				fecha: x.date, pulso_reposo: x.resting_hr ?? null, sueno_h: x.sleep_h != null ? round(x.sleep_h, 2) : null,
+				sueno_puntos: x.sleep_score ?? null, vfc: x.hrv ?? null, body_battery_max: x.body_battery_max ?? null,
+				body_battery_min: x.body_battery_min ?? null, pasos: x.steps ?? null,
+			}));
 			return {
-				date: d,
-				steps: s.totalSteps ?? null,
-				step_goal: s.dailyStepGoal ?? null,
-				distance_km: round((s.totalDistanceMeters ?? 0) / 1000),
-				calories_total: s.totalKilocalories ?? null,
-				calories_active: s.activeKilocalories ?? null,
-				floors_climbed: s.floorsAscended ?? null,
-				intensity_minutes: (s.moderateIntensityMinutes ?? 0) + (s.vigorousIntensityMinutes ?? 0),
-				resting_hr: s.restingHeartRate ?? null,
-				min_hr: s.minHeartRate ?? null,
-				max_hr: s.maxHeartRate ?? null,
-				stress_avg: s.averageStressLevel ?? null,
-				body_battery_high: s.bodyBatteryHighestValue ?? null,
-				body_battery_low: s.bodyBatteryLowestValue ?? null,
-			};
-		},
-	},
-
-	garmin_sleep: {
-		title: "Sueno de una noche",
-		description:
-			"Datos de sueno de una noche: horas totales, desglose por fases (profundo, ligero, REM, despierto), puntuacion de sueno y HRV nocturna. Uselo para preguntas sobre descanso, recuperacion o calidad del sueno.",
-		schema: {
-			type: "object",
-			properties: { date: { type: "string", description: "Dia en formato YYYY-MM-DD (la noche que termina ese dia). Por defecto, hoy." } },
-		},
-		run: async (env, userId, { date }) => {
-			const d = date || today();
-			const data = await apiGet(env, userId, `/wellness-service/wellness/dailySleepData/${await displayName(env, userId)}`, {
-				date: d,
-				nonSleepBufferMinutes: "60",
-			});
-			const dto = data?.dailySleepDTO || {};
-			const hours = (sec) => round((sec ?? 0) / 3600);
-			return {
-				date: d,
-				sleep_hours: hours(dto.sleepTimeSeconds),
-				deep_hours: hours(dto.deepSleepSeconds),
-				light_hours: hours(dto.lightSleepSeconds),
-				rem_hours: hours(dto.remSleepSeconds),
-				awake_hours: hours(dto.awakeSleepSeconds),
-				sleep_score: dto?.sleepScores?.overall?.value ?? null,
-				avg_overnight_hrv: data?.avgOvernightHrv ?? null,
-				resting_hr: data?.restingHeartRate ?? null,
+				desde, hasta: d, dias: serie, fuentes: fuentesDescanso(hist.dias, sumaDias(d, 1)),
+				nota: "Guardado por myCoach una vez al dia: la ultima noche puede no estar aun. Para un dia con todo el detalle, llame sin dias.",
 			};
 		},
 	},
@@ -1553,53 +1665,6 @@ const TOOLS = {
 					? zonas.map((z) => ({ zona: z.zoneNumber, desde_ppm: z.zoneLowBoundary, minutos: round((z.secsInZone ?? 0) / 60, 1) }))
 					: null,
 				analisis,
-			};
-		},
-	},
-
-	garmin_body_battery: {
-		title: "Body Battery por dias",
-		description:
-			"Evolucion de la Body Battery (reserva de energia) a lo largo de varios dias, con maximo, minimo, carga y descarga. Uselo para ver tendencias de energia y recuperacion.",
-		schema: {
-			type: "object",
-			properties: { days: { type: "integer", description: "Cuantos dias hacia atras, contando hoy (1-28). Por defecto 7." } },
-		},
-		run: async (env, userId, { days }) => {
-			const n = Math.min(Math.max(days || 7, 1), 28);
-			const data = await apiGet(env, userId, "/wellness-service/wellness/bodyBattery/reports/daily", {
-				startDate: daysAgo(n - 1),
-				endDate: today(),
-			});
-			return (data || []).map((d) => ({
-				date: d.date ?? null,
-				charged: d.charged ?? null,
-				drained: d.drained ?? null,
-				highest: d.bodyBatteryStat?.highestValue ?? null,
-				lowest: d.bodyBatteryStat?.lowestValue ?? null,
-			}));
-		},
-	},
-
-	garmin_hrv: {
-		title: "HRV de una noche",
-		description:
-			"Variabilidad de la frecuencia cardiaca (HRV) de una noche, con su estado respecto a la linea base personal. Es el mejor indicador para preguntas sobre recuperacion, fatiga acumulada o si conviene entrenar fuerte.",
-		schema: {
-			type: "object",
-			properties: { date: { type: "string", description: "Dia en formato YYYY-MM-DD. Por defecto, hoy." } },
-		},
-		run: async (env, userId, { date }) => {
-			const d = date || today();
-			const data = await apiGet(env, userId, `/hrv-service/hrv/${d}`);
-			const s = data?.hrvSummary || {};
-			return {
-				date: d,
-				last_night_avg: s.lastNightAvg ?? null,
-				last_night_5min_high: s.lastNight5MinHigh ?? null,
-				status: s.status ?? null,
-				baseline_low: s.baseline?.lowUpper ?? null,
-				baseline_high: s.baseline?.balancedUpper ?? null,
 			};
 		},
 	},
@@ -1830,12 +1895,19 @@ const TOOLS = {
 	garmin_courses: {
 		title: "Recorridos guardados en Garmin",
 		description:
-			"Lista los recorridos (courses) que el usuario tiene guardados en Garmin Connect, con nombre, distancia, desnivel y fecha. Devuelve un course_id que puede pasarse a garmin_course_detail. Uselo antes de proponer una ruta nueva, para no repetirle una que ya tiene, y para comprobar que una subida ha quedado bien.",
+			"Sin course_id: los recorridos (courses) que el usuario tiene guardados en Garmin Connect, con nombre, distancia, desnivel y fecha. " +
+			"Con course_id: ese recorrido con sus metricas y su trazado reducido a puntos de paso, que se pueden pasar tal cual a garmin_plan_route para variarlo. " +
+			"Uselo antes de proponer una ruta nueva, para no repetirle una que ya tiene, y para comprobar que una subida ha quedado bien.",
 		schema: {
 			type: "object",
-			properties: { limit: { type: "integer", description: "Cuantos recorridos devolver (1-50). Por defecto 20." } },
+			properties: {
+				limit: { type: "integer", description: "Cuantos recorridos devolver (1-50). Por defecto 20." },
+				course_id: { type: "string", description: "Un recorrido concreto (de esta lista o de garmin_save_course)." },
+				puntos: { type: "integer", description: "Con course_id: cuantos puntos de paso devolver (5-40). Por defecto 15." },
+			},
 		},
-		run: async (env, userId, { limit }) => {
+		run: async (env, userId, { limit, course_id, puntos }) => {
+			if (course_id) return detalleCourse(env, userId, { course_id, puntos });
 			const n = Math.min(Math.max(limit || 20, 1), 50);
 			const nombre = await displayName(env, userId);
 			const params = { includeGeoPoints: "false", start: "1", limit: String(n) };
@@ -1873,88 +1945,7 @@ const TOOLS = {
 		},
 	},
 
-	garmin_course_detail: {
-		title: "Por donde va un recorrido guardado",
-		description:
-			"Devuelve un recorrido guardado de Garmin Connect: sus metricas y su trazado reducido a unos pocos puntos de paso. Esos puntos se pueden pasar tal cual a garmin_plan_route para variarlo o rehacerlo sin partir de cero.",
-		schema: {
-			type: "object",
-			properties: {
-				course_id: {
-					type: "string",
-					description: "El course_id devuelto por garmin_courses o por garmin_save_course.",
-				},
-				puntos: { type: "integer", description: "Cuantos puntos de paso devolver (5-40). Por defecto 15." },
-			},
-			required: ["course_id"],
-		},
-		run: async (env, userId, { course_id, puntos }) => {
-			const cuantos = Math.min(Math.max(puntos || 15, 5), 40);
-			const path = `/course-service/course/${encodeURIComponent(String(course_id))}`;
 
-			// Se pide el trazado explicitamente; si ese parametro no le gusta,
-			// se repite sin el antes de darlo por perdido.
-			let c;
-			try {
-				c = await apiGet(env, userId, path, { includeGeoPoints: "true" });
-			} catch {
-				c = await apiGet(env, userId, path);
-			}
-
-			const resumen = resumirCourse(c || {});
-			const linea = c?.geoPoints || [];
-			if (linea.length < 2)
-				return { ...resumen, waypoints: [], nota: "Garmin no ha devuelto el trazado de este recorrido." };
-
-			// Mismo reparto que en las actividades: la forma se conserva y el
-			// resultado cabe en una conversacion.
-			const paso = (linea.length - 1) / (cuantos - 1);
-			const waypoints = Array.from({ length: cuantos }, (_, i) => {
-				const p = linea[Math.round(i * paso)];
-				return `${Number(p.latitude).toFixed(4)},${Number(p.longitude).toFixed(4)}`;
-			});
-
-			return {
-				...resumen,
-				waypoints,
-				nota: "Puntos del recorrido guardado. Paselos a garmin_plan_route para variarlo.",
-			};
-		},
-	},
-
-	garmin_training_readiness: {
-		title: "Preparacion para entrenar",
-		description:
-			"Puntuacion de Training Readiness (0-100) de Garmin para un dia, con los factores que la componen (sueno, HRV, carga aguda, recuperacion). Responde directamente a '?estoy listo para entrenar hoy?'.",
-		schema: {
-			type: "object",
-			properties: { date: { type: "string", description: "Dia en formato YYYY-MM-DD. Por defecto, hoy." } },
-		},
-		run: async (env, userId, { date }) => {
-			const d = date || today();
-			const [data, maxmet, endurance, hill, estado, ajustes] = await Promise.all([
-				apiGet(env, userId, `/metrics-service/metrics/trainingreadiness/${d}`),
-				apiGet(env, userId, `/metrics-service/metrics/maxmet/daily/${d}/${d}`).catch((e) => ({ error: e.message })),
-				apiGet(env, userId, "/metrics-service/metrics/endurancescore", { calendarDate: d }).catch((e) => ({ error: e.message })),
-				apiGet(env, userId, "/metrics-service/metrics/hillscore", { calendarDate: d }).catch((e) => ({ error: e.message })),
-				apiGet(env, userId, `/metrics-service/metrics/trainingstatus/aggregated/${d}`).catch((e) => ({ error: e.message })),
-				apiGet(env, userId, "/userprofile-service/userprofile/user-settings").catch((e) => ({ error: e.message })),
-			]);
-			const r = Array.isArray(data) ? data[0] : data;
-			const vo2 = Array.isArray(maxmet) ? maxmet[0] : maxmet;
-			return {
-				date: d,
-				score: r?.score ?? null,
-				level: r?.level ?? null,
-				sleep_score: r?.sleepScore ?? null,
-				hrv_factor: r?.hrvFactorPercent ?? null,
-				recovery_time_hours: r?.recoveryTime ? round(r.recoveryTime / 60, 1) : null,
-				acute_load: r?.acuteLoad ?? null,
-				// Lo que Garmin ya puntúa por su cuenta, interpretado.
-				perfil_garmin: perfilGarmin({ vo2, endurance, hill, estado, ajustes, fecha: d }),
-			};
-		},
-	},
 	garmin_api: {
 		title: "Garmin Connect a pelo (solo lectura)",
 		description:
@@ -2032,7 +2023,7 @@ const TOOLS = {
 			"Lo que Garmin calcula de tu forma, con su evolucion: estado de entreno (productivo, mantenimiento, perdida de forma...), carga aguda y cronica con la franja optima y su ratio, carga de la semana, " +
 			"enfoque de carga de 4 semanas (Load Focus: anaerobico, aerobico intenso y suave frente a su objetivo), carga de cada actividad (Exercise Load) sumada por semana y deporte, " +
 			"VO2max de correr y de bici semana a semana, Endurance Score y Hill Score en el tiempo, predicciones de carrera (5K, 10K, media y maraton), umbral de lactato, FTP, edad fisica y aclimatacion al calor y a la altitud. " +
-			"Responde a '?estoy en forma?', '?me estoy pasando de carga?' o '?como ha ido mi VO2max?'. Para el dia a dia (readiness, sueno, VFC) use garmin_training_readiness y coach_hoy.",
+			"Responde a '?estoy en forma?', '?me estoy pasando de carga?' o '?como ha ido mi VO2max?'. Para el dia a dia (readiness, sueno, VFC) use garmin_dia y coach_hoy.",
 		schema: {
 			type: "object",
 			properties: {
@@ -2048,9 +2039,9 @@ const TOOLS = {
 			// hay FTP), el resto sale igual y se dice cual falta.
 			const faltan = [];
 			const pedir = (nombre, path, params) =>
-				apiGet(env, userId, path, params).catch(() => { faltan.push(nombre); return null; });
+				apiGet(env, userId, path, params).catch((e) => { if (e.status === 401) throw e; faltan.push(nombre); return null; });
 			const nombre = await displayName(env, userId).catch(() => null);
-			const [estado, vo2, endurance, hill, carreras, lactato, ftp, edad, ajustes, actividades] = await Promise.all([
+			const [estado, vo2, endurance, hill, carreras, lactato, ftp, edad, ajustes, actividades, enduranceHoy] = await Promise.all([
 				pedir("estado de entreno", `/metrics-service/metrics/trainingstatus/aggregated/${fin}`),
 				pedir("VO2max", `/metrics-service/metrics/maxmet/daily/${ini}/${fin}`),
 				pedir("Endurance Score", "/metrics-service/metrics/endurancescore/stats", { startDate: ini, endDate: fin, aggregation: "weekly" }),
@@ -2061,7 +2052,10 @@ const TOOLS = {
 				pedir("edad fisica", `/fitnessage-service/fitnessage/${fin}`),
 				apiGet(env, userId, "/userprofile-service/userprofile/user-settings").catch(() => null),
 				pedir("carga por actividad", "/activitylist-service/activities/search/activities", { startDate: ini, endDate: fin, start: "0", limit: "400" }),
+				apiGet(env, userId, "/metrics-service/metrics/endurancescore", { calendarDate: fin }).catch(() => null),
 			]);
+			// Persona y nivel de Endurance, con las escalas de Garmin.
+			const perfil = perfilGarmin({ vo2: null, endurance: enduranceHoy, hill: null, estado, ajustes, fecha: fin });
 
 			const vo2Serie = porSemana((Array.isArray(vo2) ? vo2 : [])
 				.map((x) => ({
@@ -2103,6 +2097,7 @@ const TOOLS = {
 			return {
 				desde: ini,
 				hasta: fin,
+				persona: perfil.persona,
 				...estadoGarmin(estado),
 				carga_por_semana: cargaSemanas.length ? cargaSemanas : null,
 				vo2max: vo2Serie.length ? {
@@ -2112,7 +2107,11 @@ const TOOLS = {
 					tendencia_bici: tendencia(vo2Serie, "bici"),
 					semanas: vo2Serie,
 				} : null,
-				endurance_score: esSerie.length ? { actual: esSerie.at(-1).puntos, tendencia: tendencia(esSerie, "puntos"), semanas: esSerie } : null,
+				endurance_score: esSerie.length || perfil.endurance ? {
+					actual: perfil.endurance?.puntos ?? esSerie.at(-1)?.puntos ?? null,
+					nivel: perfil.endurance?.nivel ?? null, siguiente: perfil.endurance?.siguiente ?? null,
+					tendencia: tendencia(esSerie, "puntos"), semanas: esSerie,
+				} : null,
 				hill_score: hillSerie.length ? { actual: hillSerie.at(-1).puntos, tendencia: tendencia(hillSerie, "puntos"), semanas: hillSerie } : null,
 				predicciones_carrera: pred && (pred.time5K || pred.timeMarathon) ? {
 					fecha: pred.calendarDate ?? null,
@@ -2174,15 +2173,15 @@ async function handleRpc(message, env, userId) {
 	const capacidades = { tools: { listChanged: false }, resources: { listChanged: false } };
 	const instrucciones = async () =>
 				"Datos de Garmin Connect del usuario que ha autorizado este conector. Las fechas van en " +
-				"YYYY-MM-DD y por defecto es hoy. Para preguntas sobre descanso use garmin_sleep y garmin_hrv; " +
-				"para carga y rendimiento, garmin_activities y garmin_training_readiness; para forma y tendencia (estado de entreno, carga, VO2max, predicciones), garmin_forma. Si ninguna herramienta trae el dato que busca (estres, SpO2, respiracion, records, material, zonas, planes de Garmin...), no diga que no lo tiene: mire el catalogo con garmin_api sin path y pidalo con garmin_api. Si una herramienta " +
+				"YYYY-MM-DD y por defecto es hoy. Para el descanso y el dia (sueno, VFC, readiness, Body Battery, estres, respiracion, SpO2) use garmin_dia; " +
+				"para las actividades, garmin_activities y garmin_activity_detail; para forma y tendencia (estado de entreno, carga, Load Focus, VO2max, predicciones, umbral), garmin_forma. Si ninguna herramienta trae el dato que busca (records, material, zonas, planes de Garmin...), no diga que no lo tiene: mire el catalogo con garmin_api sin path y pidalo con garmin_api. Si una herramienta " +
 				"falla con error de autenticacion, llame a garmin_status para diagnosticar.\n\n" +
 				"Para planificar rutas de bici: proponga usted los puntos de paso a partir de su conocimiento " +
 				"geografico y llame a garmin_plan_route, que los une por carreteras reales y devuelve las " +
 				"metricas. No invente el trazado ni suponga la distancia: la que cuenta es la que mide la " +
 				"herramienta. Si no cuadra con lo pedido, mueva los puntos y repita. Para saber de donde sale " +
 				"el usuario habitualmente, mire garmin_activities. Guardar la ruta en Garmin (garmin_save_course) " +
-				"Los recorridos ya guardados se leen con garmin_courses y garmin_course_detail: mirelos antes " +
+				"Los recorridos ya guardados se leen con garmin_courses (con course_id, su trazado): mirelos antes " +
 				"de proponer una ruta nueva, para no repetir una que el usuario ya tiene. " +
 				"escribe en su cuenta: pida permiso antes." +
 				instruccionesCoach(await nombreEntrenador(env, userId).catch(() => NOMBRE_COACH));
@@ -2221,8 +2220,12 @@ async function handleRpc(message, env, userId) {
 				description: t.description,
 				inputSchema: t.schema,
 				annotations: { readOnlyHint: t.write !== true, destructiveHint: false },
-				// MCP Apps: la herramienta se enseña con una pantalla (ui://) si el cliente sabe.
-				...(t.ui ? { _meta: { ui: { resourceUri: ui }, "ui/resourceUri": ui } } : {}),
+				// MCP Apps: la herramienta se enseña con una pantalla (ui://) si el cliente sabe,
+				// y las que solo usa la app no se le enseñan al modelo (visibility: ["app"]).
+				...(t.ui || t.soloApp ? { _meta: {
+					ui: { ...(t.ui ? { resourceUri: ui } : {}), ...(t.soloApp ? { visibility: ["app"] } : {}) },
+					...(t.ui ? { "ui/resourceUri": ui } : {}),
+				} } : {}),
 			})),
 		});
 	}
@@ -3479,7 +3482,7 @@ function normalizarSesion(s, deporteDefecto) {
 		d: (titulo || (t === "descanso" ? "Descanso" : t)).slice(0, 120),
 		min: t === "descanso" ? 0 : Math.round(Number(minutos) || 0),
 		...(Number.isFinite(Number(s.fc_max)) ? { fc_max: Math.round(Number(s.fc_max)) } : {}),
-		// Un dia de fuerza puede apuntar a un entreno con nombre (fuerza_entrenos).
+		// Un dia de fuerza puede apuntar a un entreno con nombre (entrenos).
 		...(typeof s.entreno === "string" && s.entreno.trim() ? { entreno: s.entreno.trim().slice(0, 40) } : {}),
 		...(typeof s.entreno_cardio === "string" && s.entreno_cardio.trim() ? { entreno_cardio: s.entreno_cardio.trim().slice(0, 40) } : {}),
 	};
@@ -3565,7 +3568,7 @@ function lecturaFrescura(tsb) {
  * ambar desde 2. Ninguna senal sola pone el dia en rojo salvo un readiness
  * muy bajo o un dolor anotado: un mal dato suelto no debe tirar una semana.
  */
-function semaforo({ hoy, datosHoy = {}, base = {}, tsb = null, diario = [], perfil = {} }) {
+function semaforo({ hoy, datosHoy = {}, base = {}, tsb = null, diario = [], perfil = {}, garmin = null, fuentes = null }) {
 	const senales = [];
 	const positivos = [];
 	const senal = (peso, texto) => senales.push({ peso, texto });
@@ -3627,6 +3630,30 @@ function semaforo({ hoy, datosHoy = {}, base = {}, tsb = null, diario = [], perf
 		dato("frescura", "Frescura (forma − fatiga)", `${Math.round(tsb)} · ${lecturaFrescura(tsb)}`, null, est);
 	} else dato("frescura", "Frescura (forma − fatiga)", null, null, "sin_dato");
 
+	// La carga de 7 dias de Garmin frente a su franja optima. Es otro modelo
+	// que la frescura (sale del EPOC de cada actividad), asi que suma aparte.
+	const cg = garmin?.carga;
+	if (cg?.aguda_7d != null) {
+		const [lo, hi] = cg.franja_optima_cronica || [];
+		const alta = (hi != null && cg.aguda_7d > hi) || cg.ratio_estado === ESTADO_RATIO.VERY_HIGH;
+		let est = "bien";
+		if (alta) { senal(1, `carga de 7 días ${Math.round(cg.aguda_7d)}, por encima de tu franja (${Math.round(lo)}-${Math.round(hi)}) según Garmin`); est = "leve"; }
+		else if (lo != null && cg.aguda_7d < lo) est = "normal";
+		dato("carga_garmin", "Carga de 7 días (Garmin)", String(Math.round(cg.aguda_7d)), hi != null ? `${Math.round(lo)}-${Math.round(hi)}` : null, est);
+	}
+	const eg = garmin?.estado?.codigo_garmin || "";
+	if (/^(STRAINED|OVERREACHING)/.test(eg)) {
+		senal(1, `Garmin te ve ${garmin.estado.estado.toLowerCase()}`);
+		dato("estado_garmin", "Estado de entreno (Garmin)", garmin.estado.estado, null, "leve");
+	} else if (garmin?.estado?.estado) dato("estado_garmin", "Estado de entreno (Garmin)", garmin.estado.estado, null, /^(PRODUCTIVE|PEAKING)/.test(eg) ? "bien" : "normal");
+
+	const estres = datosHoy.stress_ayer;
+	if (estres != null) {
+		// Escala de Garmin: hasta 25 reposo, 26-50 bajo, 51-75 medio, mas de 75 alto.
+		if (estres > 50) senal(1, `estrés alto ayer (${Math.round(estres)} de media)`);
+		dato("estres", "Estrés de ayer", String(Math.round(estres)), null, estres > 50 ? "leve" : estres <= 25 ? "bien" : "normal");
+	}
+
 	// Lo que el usuario ha contado en las ultimas 36 h pesa tanto como los datos.
 	const reciente = diario.filter((n) => n?.fecha && diasEntre(n.fecha, hoy) <= 1);
 	for (const n of reciente) {
@@ -3651,15 +3678,21 @@ function semaforo({ hoy, datosHoy = {}, base = {}, tsb = null, diario = [], perf
 
 	const puntos = senales.reduce((s, x) => s + x.peso, 0);
 	const color = puntos >= 4 ? "rojo" : puntos >= 2 ? "ambar" : "verde";
-	const faltan = ["readiness", "hrv", "sleep_h"].filter((k) => datosHoy[k] == null);
+	// Lo que el dispositivo no mide no es un hueco que rellenar: no se enseña.
+	const mide = {
+		readiness: !fuentes || fuentes.sueno || fuentes.vfc, sueno: !fuentes || fuentes.sueno, vfc: !fuentes || fuentes.vfc, pulso: !fuentes || fuentes.pulso,
+		sleep_h: !fuentes || fuentes.sueno, hrv: !fuentes || fuentes.vfc,
+	};
+	const faltan = ["readiness", "hrv", "sleep_h"].filter((k) => datosHoy[k] == null && mide[k]);
 	return {
 		color,
 		dolor: reciente.some((n) => n.tipo === "dolor"),
 		puntos,
 		razones: senales.sort((a, b) => b.peso - a.peso).map((s) => s.texto),
 		positivos,
-		datos,
+		datos: datos.filter((d) => d.estado !== "sin_dato" || mide[d.clave] !== false),
 		datos_que_faltan: faltan,
+		...(fuentes?.sin_descanso ? { sin_descanso: true } : {}),
 	};
 }
 
@@ -3803,19 +3836,19 @@ async function historico(env, userId) {
 
 /** Lo de esta manana, en vivo: la noche de hoy aun no esta en D1. */
 async function datosDeHoy(env, userId, fecha) {
-	const [sueno, hrv, readiness] = await Promise.all([
-		TOOLS.garmin_sleep.run(env, userId, { date: fecha }).catch(() => null),
-		TOOLS.garmin_hrv.run(env, userId, { date: fecha }).catch(() => null),
-		apiGet(env, userId, `/metrics-service/metrics/trainingreadiness/${fecha}`).catch(() => null),
+	const [dia, ayer] = await Promise.all([
+		diaGarmin(env, userId, fecha, ["sueno", "vfc", "readiness"]),
+		// El estres de ayer, entero: el de hoy aun esta a medias.
+		apiGet(env, userId, `/wellness-service/wellness/dailyStress/${sumaDias(fecha, -1)}`).catch(() => null),
 	]);
-	const r = Array.isArray(readiness) ? readiness[0] : readiness;
 	return {
-		sleep_h: sueno?.sleep_hours || null,
-		sleep_score: sueno?.sleep_score ?? null,
-		resting_hr: sueno?.resting_hr ?? null,
-		hrv: hrv?.last_night_avg ?? sueno?.avg_overnight_hrv ?? null,
-		hrv_status: hrv?.status ?? null,
-		readiness: r?.score ?? null,
+		sleep_h: dia.sueno?.horas || null,
+		sleep_score: dia.sueno?.puntuacion ?? null,
+		resting_hr: dia.sueno?.pulso_reposo ?? null,
+		hrv: dia.vfc?.media_noche ?? dia.sueno?.vfc_media ?? null,
+		hrv_status: dia.vfc?.estado ?? null,
+		readiness: dia.readiness?.puntos ?? null,
+		stress_ayer: ayer?.avgStressLevel > 0 ? ayer.avgStressLevel : null,
 	};
 }
 
@@ -3831,18 +3864,21 @@ function anotadoDelDia(diario, dia) {
 
 async function calcularHoy(env, userId, { fecha } = {}) {
 	const hoy = fecha || fechaLocal();
-	const [estadoApp, perfil, diario, hist, datosHoy] = await Promise.all([
+	const [estadoApp, perfil, diario, hist, datosHoy, estadoG] = await Promise.all([
 		leerDoc(env, userId, "estado/app"),
 		leerDoc(env, userId, "atleta/perfil"),
 		leerDoc(env, userId, "atleta/diario"),
 		historico(env, userId),
 		datosDeHoy(env, userId, hoy),
+		apiGet(env, userId, `/metrics-service/metrics/trainingstatus/aggregated/${hoy}`).catch(() => null),
 	]);
 	const plan = planCompleto(estadoApp);
 	const sesion = plan[hoy] || null;
 	const forma = hist.curva.at(-1) || null;
 	const base = lineaBase(hist.dias, hoy);
-	const sem = semaforo({ hoy, datosHoy, base, tsb: forma?.tsb ?? null, diario: diario || [], perfil: perfil || {} });
+	const garmin = estadoGarmin(estadoG);
+	const fuentes = fuentesDescanso(hist.dias, hoy);
+	const sem = semaforo({ hoy, datosHoy, base, tsb: forma?.tsb ?? null, diario: diario || [], perfil: perfil || {}, garmin, fuentes });
 	const hechoHoy = hist.actividades.filter((a) => a.start_date === hoy);
 	// Si ya ha entrenado, no tiene sentido proponerle cambiar la sesion de hoy.
 	const ajuste = hechoHoy.length ? null : ajusteDelDia(sesion, sem.color, plan, hoy, sem.dolor);
@@ -3857,9 +3893,15 @@ async function calcularHoy(env, userId, { fecha } = {}) {
 		forma: forma && { forma_ctl: forma.ctl, fatiga_atl: forma.atl, frescura_tsb: forma.tsb, lectura: lecturaFrescura(forma.tsb) },
 		datos_hoy: datosHoy,
 		linea_base_28d: base,
+		// Lo que Garmin calcula de la carga (Training Load, Load Focus, estado) y que el motor usa.
+		garmin: garmin.carga || garmin.estado ? { estado: garmin.estado, carga: garmin.carga, enfoque_carga: garmin.enfoque_carga, aclimatacion: garmin.aclimatacion } : null,
+		// Qué mide su dispositivo: sin sueño ni VFC (un Edge), se decide con la carga y con lo que cuente.
+		fuentes,
+		pide_sensacion: !!fuentes?.sin_descanso && !anotadoDelDia(diario || [], hoy).sensacion,
 		entrenador: String(perfil?.entrenador?.nombre || "").trim() || NOMBRE_COACH,
 		anotado_hoy: anotadoDelDia(diario || [], hoy),
-		mensaje: mensajeDelDia(sem, sesion, ajuste),
+		mensaje: mensajeDelDia(sem, sesion, ajuste) +
+			(fuentes?.sin_descanso && !anotadoDelDia(diario || [], hoy).sensacion ? " Tu Garmin no mide el descanso: cuéntame cómo llegas y lo tengo en cuenta." : ""),
 		calculado_en: new Date().toISOString(),
 	};
 }
@@ -3935,6 +3977,30 @@ function validarSemana(semanaPlan, { objetivo, hoy, colorHoy = null, perfil = {}
 	return { errores, avisos, corregido };
 }
 
+/**
+ * Lo que dice Garmin de la carga, convertido en avisos para planificar:
+ * el Load Focus dice qué tipo de trabajo falta en las últimas 4 semanas y
+ * la franja de la carga aguda, si se está pasando o quedando corto.
+ */
+const QUE_FALTA = {
+	ANAEROBIC_SHORTAGE: "Te falta trabajo anaeróbico: una sesión con series cortas y muy duras (30 s a 2 min).",
+	AEROBIC_HIGH_SHORTAGE: "Te falta aeróbico intenso: una sesión a umbral o tempo (bloques de 8 a 20 min).",
+	AEROBIC_LOW_SHORTAGE: "Te falta base: más rodaje suave y largo.",
+};
+function avisosGarmin(g) {
+	const avisos = [];
+	const codigo = String(g.enfoque_carga?.codigo_garmin || "");
+	if (QUE_FALTA[codigo]) avisos.push({ regla: "enfoque_carga", texto: QUE_FALTA[codigo] });
+	const c = g.carga;
+	if (c?.aguda_7d != null && c.franja_optima_cronica) {
+		const [lo, hi] = c.franja_optima_cronica;
+		if (c.aguda_7d > hi) avisos.push({ regla: "carga_garmin", texto: `Tu carga de 7 días (${Math.round(c.aguda_7d)}) está por encima de tu franja (${Math.round(lo)}-${Math.round(hi)}): unos días más suaves.` });
+		else if (c.aguda_7d < lo) avisos.push({ regla: "carga_garmin", texto: `Tu carga de 7 días (${Math.round(c.aguda_7d)}) está por debajo de tu franja (${Math.round(lo)}-${Math.round(hi)}): hay margen para cargar más.` });
+	}
+	if (/^(STRAINED|OVERREACHING)/.test(g.estado?.codigo_garmin || "")) avisos.push({ regla: "estado_garmin", texto: `Garmin te ve ${g.estado.estado.toLowerCase()}: prioriza recuperar.` });
+	return { garmin: g.carga || g.enfoque_carga ? { estado: g.estado, carga: g.carga, enfoque_carga: g.enfoque_carga } : null, avisos_garmin: avisos };
+}
+
 function resumenSemana(lunes, plan, actividades, hist, objetivo, hoy) {
 	const dias = semanaDe(lunes).map((f) => {
 		const prevista = plan[f] || null;
@@ -3993,8 +4059,8 @@ const esquemaSesion = {
 		ajustada: { type: "boolean", description: "true si viene de una propuesta de coach_hoy (no se vuelve a ajustar)" },
 		d: { type: "string", description: "Descripcion corta, p. ej. 'Umbral: 3 x 10 min a 160-166 ppm'" },
 		min: { type: "number", description: "Duracion en minutos" },
-		entreno: { type: "string", description: "Dia de fuerza: id del entreno con nombre que toca (fuerza_entrenos), p. ej. 'tren-superior-en-casa'." },
-		entreno_cardio: { type: "string", description: "Dia de bici o correr: id del entreno guiado (cardio_entrenos)." },
+		entreno: { type: "string", description: "Dia de fuerza: id del entreno con nombre que toca (entrenos), p. ej. 'tren-superior-en-casa'." },
+		entreno_cardio: { type: "string", description: "Dia de bici o correr: id del entreno guiado (entrenos)." },
 	},
 };
 
@@ -4030,10 +4096,14 @@ const COACH_TOOLS = {
 		run: async (env, userId, { semana } = {}) => {
 			const hoy = fechaLocal();
 			const ref = semana === "siguiente" ? sumaDias(hoy, 7) : semana === "anterior" ? sumaDias(hoy, -7) : /^\d{4}-\d{2}-\d{2}$/.test(semana || "") ? semana : hoy;
-			const [estadoApp, perfil, hist] = await Promise.all([
+			const lunesHoy = lunesDe(hoy);
+			// Lo de Garmin es de hoy: vale para revisar esta semana y para planificar la siguiente.
+			const conGarmin = lunesDe(ref) >= lunesHoy;
+			const [estadoApp, perfil, hist, estadoG] = await Promise.all([
 				leerDoc(env, userId, "estado/app"),
 				leerDoc(env, userId, "atleta/perfil"),
 				historico(env, userId),
+				conGarmin ? apiGet(env, userId, `/metrics-service/metrics/trainingstatus/aggregated/${hoy}`).catch(() => null) : null,
 			]);
 			const objetivo = objetivoDe(estadoApp);
 			const plan = planCompleto(estadoApp);
@@ -4046,6 +4116,7 @@ const COACH_TOOLS = {
 				objetivo,
 				...res,
 				plan_cumple_reglas: { errores: reglas.errores, avisos: reglas.avisos },
+				...(conGarmin ? avisosGarmin(estadoGarmin(estadoG)) : {}),
 				siguiente_semana_planificada: semanaDe(sumaDias(lunes, 7)).some((f) => plan[f]),
 				forma: forma && { forma_ctl: forma.ctl, fatiga_atl: forma.atl, frescura_tsb: forma.tsb, lectura: lecturaFrescura(forma.tsb) },
 			};
@@ -4410,6 +4481,12 @@ const instruccionesCoach = (nombre = NOMBRE_COACH) =>
 	" Planifique solo bici, correr y skimo (y fuerza como complemento); el resto de deportes cuenta como carga pero no se " +
 	"planifica. Si el usuario quiere cambiar el nombre del entrenador, guardelo con coach_perfil_guardar en entrenador.nombre." +
 	" Para '¿estoy mejorando?' use coach_progreso (velocidad, ritmo, VAM, potencia, cadencia, pulso y eficiencia por deporte)." +
+	" DATOS DE GARMIN: coach_hoy ya trae lo que decide el dia (sueno, VFC, readiness, pulso, frescura, carga de 7 dias de Garmin con su franja, " +
+	"estado de entreno y estres de ayer). Si fuentes.sin_descanso es true, su dispositivo no mide el descanso (p. ej. solo un Edge): no le pida datos " +
+	"de sueno ni de VFC, pregunte como se encuentra y anotelo con coach_anotar. garmin_dia trae un dia entero (o la serie de varios dias); garmin_forma, " +
+	"la forma y su evolucion (estado de entreno, carga y Load Focus, VO2max, Endurance, Hill, predicciones, umbral, FTP); coach_semana, los avisos de " +
+	"Garmin para planificar (avisos_garmin: que tipo de trabajo falta). Si ninguna herramienta trae un dato, no diga que no lo tiene: busquelo en el " +
+	"catalogo de garmin_api (sin path) y pidalo con garmin_api." +
 	" DATOS Y GRAFICAS: nunca pida capturas de pantalla. garmin_activity_detail trae todas las metricas y las series de la " +
 	"actividad (stamina incluida si el reloj la graba) con un perfil de 24 tramos; si intervals_estado dice que Intervals.icu " +
 	"esta conectado, intervals_actividades, intervals_actividad (intervalos y series), intervals_bienestar e intervals_curvas " +
@@ -4417,14 +4494,14 @@ const instruccionesCoach = (nombre = NOMBRE_COACH) =>
 	" PANTALLAS: si el usuario quiere ver su app, su plan, su semana, su forma o sus pueblos, o acaba de cambiar el plan, " +
 	"abra la app dentro de la conversacion con mycoach_abrir (pantalla hoy, plan, comer, progreso, pueblos o ajustes). Es la app de " +
 	"verdad, con sus datos: no dibuje una tarjeta, un grafico ni un artefacto propio imitandola." +
-	" FUERZA: cada sesion con ejercicio, series x reps, peso, material y descanso. Antes de proponer, mire fuerza_entrenos " +
+	" FUERZA: cada sesion con ejercicio, series x reps, peso, material y descanso. Antes de proponer, mire entrenos " +
 	"(entrenos guardados, lo que hizo la ultima vez y los nombres de ejercicio que ya usa: reutilicelos). Para repetir un entreno, " +
 	"proponga el ajuste con la ultima vez (si hizo todas las reps, mas reps o mas peso). Si le gusta, guardelo con " +
 	"fuerza_entreno_guardar con un nombre (p. ej. 'Pierna A') y el ejercicio de Garmin de cada uno (fuerza_ejercicios_garmin); en el " +
-	"plan, el dia de fuerza lleva entreno: '<id>' (con coach_proponer: { dep: 'fuerza', t: 'otros', d, min, entreno: '<id>' }). Puede mandarlo al reloj con fuerza_enviar_garmin (escribe en Garmin: pida permiso). " +
+	"plan, el dia de fuerza lleva entreno: '<id>' (con coach_proponer: { dep: 'fuerza', t: 'otros', d, min, entreno: '<id>' }). Puede mandarlo al reloj con entreno_enviar_garmin tipo=fuerza (escribe en Garmin: pida permiso). " +
 	"Al acabar: si lo hizo con el reloj, fuerza_desde_garmin; si no, fuerza_registrar con solo lo que cambio. Si subio peso o reps, " +
 	"pregunte si lo deja asi para la proxima (actualizar_entreno). El historico, con fuerza_historial." +
-	" SERIES Y ENTRENOS DE BICI O CORRER PARA EL RELOJ: con cardio_enviar_garmin, por pasos (calentamiento, bloques que se repiten, " +
+	" SERIES Y ENTRENOS DE BICI O CORRER PARA EL RELOJ: con entreno_enviar_garmin tipo=cardio, por pasos (calentamiento, bloques que se repiten, " +
 	"recuperacion, vuelta a la calma) con objetivo de pulso, potencia, ritmo, velocidad o cadencia. Primero sin confirm para ver la " +
 	"vista previa y enseñarsela; solo con su si, confirm=true (escribe en Garmin). Rangos con sus zonas y umbrales; si no los sabe, zona de pulso del reloj." +
 	" COMIDA: en cuartos de plato (carbohidrato, proteina, verdura), sin calorias. Si le pasa una foto o le cuenta que ha comido, " +
@@ -4659,6 +4736,8 @@ const INTERVALS_TOOLS = {
 	},
 
 	intervals_conectar: {
+		// Solo la app: Claude no la ve (ver CONVENCIONES en el README del conector).
+		soloApp: true,
 		title: "Intervals.icu: conectar",
 		write: true,
 		description:
@@ -4683,6 +4762,8 @@ const INTERVALS_TOOLS = {
 	},
 
 	intervals_desconectar: {
+		// Solo la app: Claude no la ve (ver CONVENCIONES en el README del conector).
+		soloApp: true,
 		title: "Intervals.icu: desconectar",
 		write: true,
 		description: "Borra la clave de Intervals.icu guardada para este usuario.",
@@ -5925,29 +6006,34 @@ const esquemaEjercicio = {
 };
 
 Object.assign(TOOLS, {
-	fuerza_entrenos: {
-		title: "Entrenos de fuerza",
+	entrenos: {
+		title: "Entrenos guardados (fuerza, bici y correr)",
 		description:
-			"Sin id: la lista de entrenos de fuerza guardados (nombre, lugar, ejercicios, ultima vez) y los nombres de ejercicio que ya usa el usuario. " +
-			"Con id: el entreno completo, cada ejercicio con su plan y lo que hizo la ultima vez. Uselo antes de proponer o repetir una sesion de fuerza.",
-		schema: { type: "object", properties: { id: { type: "string", description: "Id del entreno (p. ej. 'pierna-a')." } } },
-		run: async (env, userId, { id }) => {
-			const { entrenos, sesiones } = await leerFuerza(env, userId);
+			"Sin id: los entrenos guardados, de fuerza (nombre, lugar, ejercicios, ultima vez, y los nombres de ejercicio que ya usa) y de bici y correr para el reloj. " +
+			"Con id: el entreno completo (fuerza: cada ejercicio con su plan y lo que hizo la ultima vez; bici o correr: sus pasos). " +
+			"Uselo antes de proponer o repetir una sesion. Para mandarlo al reloj, entreno_enviar_garmin.",
+		schema: {
+			type: "object",
+			properties: {
+				tipo: { type: "string", enum: ["fuerza", "cardio"], description: "Solo los de fuerza o solo los de bici y correr. Por defecto, los dos." },
+				id: { type: "string", description: "Id del entreno (p. ej. 'pierna-a')." },
+			},
+		},
+		run: async (env, userId, { tipo, id } = {}) => {
 			if (id) {
-				const e = entrenos[slugFuerza(id)] || Object.values(entrenos).find((x) => slugFuerza(x.nombre) === slugFuerza(id));
-				if (!e) throw new HttpError(404, `No hay ningun entreno "${id}". Entrenos: ${Object.values(entrenos).map((x) => x.nombre).join(", ") || "ninguno"}.`);
-				return entrenoConUltima(e, sesiones);
+				// Con id se busca donde este: si no se dice el tipo, primero fuerza.
+				const orden = tipo === "cardio" ? [entrenosCardio] : tipo === "fuerza" ? [entrenosFuerza] : [entrenosFuerza, entrenosCardio];
+				let error;
+				for (const f of orden) {
+					try { return { tipo: f === entrenosFuerza ? "fuerza" : "cardio", ...(await f(env, userId, { id })) }; } catch (e) { if (e.status !== 404) throw e; error = e; }
+				}
+				throw tipo ? error : new HttpError(404, `No hay ningun entreno "${id}" de fuerza ni de bici o correr.`);
 			}
-			const nombres = new Set();
-			for (const e of Object.values(entrenos)) for (const x of e.ejercicios) nombres.add(x.nombre);
-			for (const s of sesiones) for (const x of s.ejercicios) nombres.add(x.nombre);
-			return {
-				entrenos: Object.values(entrenos).map((e) => {
-					const c = entrenoConUltima(e, sesiones);
-					return { id: e.id, nombre: e.nombre, lugar: e.lugar || null, ejercicios: e.ejercicios.map((x) => x.nombre), ultima_sesion: c.ultima_sesion, veces: c.veces, min_estimados: c.min_estimados };
-				}),
-				nombres_de_ejercicio: [...nombres],
-			};
+			const [fuerza, cardio] = await Promise.all([
+				tipo === "cardio" ? null : entrenosFuerza(env, userId, {}),
+				tipo === "fuerza" ? null : entrenosCardio(env, userId, {}),
+			]);
+			return { ...(fuerza ? { fuerza } : {}), ...(cardio ? { cardio: cardio.entrenos } : {}) };
 		},
 	},
 
@@ -5955,7 +6041,7 @@ Object.assign(TOOLS, {
 		title: "Guardar un entreno de fuerza",
 		description:
 			"Crea o cambia un entreno de fuerza con nombre para poder repetirlo: cada ejercicio con series, reps, peso, material y descanso. " +
-			"Si un ejercicio ya existe con otro nombre, reutilice ese nombre (fuerza_entrenos los lista) para que el historico sume. " +
+			"Si un ejercicio ya existe con otro nombre, reutilice ese nombre (entrenos los lista) para que el historico sume. " +
 			"Ponga el campo garmin de cada ejercicio (fuerza_ejercicios_garmin) si se va a mandar al reloj. Con borrar=true lo elimina.",
 		schema: {
 			type: "object",
@@ -6147,43 +6233,6 @@ Object.assign(TOOLS, {
 		},
 	},
 
-	fuerza_enviar_garmin: {
-		title: "Mandar un entreno de fuerza al reloj",
-		write: true,
-		description:
-			"Crea el entreno en Garmin Connect como entreno de fuerza guiado (ejercicio, reps, peso y descanso por serie) y lo programa para la fecha, " +
-			"para que el reloj lo tenga al sincronizar. Todos los ejercicios necesitan el campo garmin. Si ya se mando antes, actualiza ese mismo entreno en Garmin (no crea otro). " +
-			"ESCRIBE en la cuenta de Garmin del usuario: pida su confirmacion y pase confirm=true solo cuando la de.",
-		schema: {
-			type: "object",
-			properties: {
-				entreno: { type: "string", description: "Id o nombre del entreno." },
-				fecha: { type: "string", description: "AAAA-MM-DD en que lo hara; por defecto hoy." },
-				confirm: { type: "boolean" },
-			},
-			required: ["entreno", "confirm"],
-		},
-		run: async (env, userId, args) => {
-			if (args.confirm !== true) throw new HttpError(400, "Falta la confirmacion explicita del usuario.");
-			const fecha = /^\d{4}-\d{2}-\d{2}$/.test(args.fecha || "") ? args.fecha : fechaLocal();
-			const doc = (await leerDoc(env, userId, FUERZA_ENTRENOS)) || { entrenos: {} };
-			const entreno = doc.entrenos?.[slugFuerza(args.entreno)] || Object.values(doc.entrenos || {}).find((x) => slugFuerza(x.nombre) === slugFuerza(args.entreno));
-			if (!entreno) throw new HttpError(404, `No hay ningun entreno "${args.entreno}".`);
-			const sin = entreno.ejercicios.filter((e) => !e.garmin).map((e) => e.nombre);
-			if (sin.length) throw new HttpError(400, `Para mandarlo al reloj falta el ejercicio de Garmin de: ${sin.join(", ")}. Buscalos con fuerza_ejercicios_garmin y guarde el entreno.`);
-
-			const { workoutId, programado, actualizado, pareja } = await enviarConPareja(env, userId, entreno.garmin, entrenoParaGarmin(entreno), fecha);
-			entreno.garmin = pareja;
-			await guardarDoc(env, userId, FUERZA_ENTRENOS, doc);
-			await enlazarEnPlan(env, userId, fecha, entreno.id);
-			return {
-				enviado: true, workout_id: workoutId, fecha, programado, actualizado,
-				mensaje: programado
-					? `"${entreno.nombre}" esta en tu calendario de Garmin para el ${fecha}. Sincroniza el reloj y lo tendras en Entrenamientos.`
-					: `"${entreno.nombre}" esta en tus entrenos de Garmin, pero no he podido ponerlo en el calendario: buscalo en Entrenamientos del reloj.`,
-			};
-		},
-	},
 
 	fuerza_desde_garmin: {
 		title: "Cerrar la sesion de fuerza con lo que conto el reloj",
@@ -6207,10 +6256,12 @@ Object.assign(TOOLS, {
 	},
 
 	fuerza_dia: {
+		// Solo la app: Claude no la ve (ver CONVENCIONES en el README del conector).
+		soloApp: true,
 		title: "La fuerza de un dia (para la app)",
 		description:
 			"El entreno de fuerza de un dia del plan con su ultima vez, y la sesion hecha si la hay (si no esta registrada y el reloj tiene una actividad de fuerza ese dia, la cierra). " +
-			"Lo usa la app; Claude puede usar fuerza_entrenos y fuerza_historial.",
+			"Lo usa la app; Claude puede usar entrenos y fuerza_historial.",
 		schema: { type: "object", properties: { fecha: { type: "string" } } },
 		run: async (env, userId, args) => {
 			const fecha = /^\d{4}-\d{2}-\d{2}$/.test(args.fecha || "") ? args.fecha : fechaLocal();
@@ -6410,79 +6461,133 @@ const esquemaPasoCardio = {
 };
 
 Object.assign(TOOLS, {
-	cardio_enviar_garmin: {
-		title: "Crear un entreno de bici o correr para el reloj",
+
+});
+
+Object.assign(TOOLS, {
+	entreno_enviar_garmin: {
+		title: "Mandar un entreno al reloj",
 		write: true,
 		description:
-			"Crea un entreno guiado de bici o correr por pasos: calentamiento, series (bloques con repetir), recuperacion, vuelta a la calma; " +
-			"cada paso por tiempo, distancia o hasta pulsar vuelta, con objetivo de pulso (zona del reloj o rango), potencia, ritmo, velocidad o cadencia. " +
-			"Sin confirm (o confirm=false) devuelve la vista previa y NO escribe nada: enseñela al usuario. Con confirm=true, tras su si, lo crea en Garmin Connect, " +
-			"lo programa para la fecha y lo guarda con su nombre para repetirlo (cardio_entrenos). Si ese dia del plan es de ese deporte, queda enlazado. " +
-			"Use las zonas y umbrales del usuario (coach_perfil, garmin_training_readiness) para los rangos; si no los sabe, mejor zona de pulso del reloj.",
+			"Crea un entreno guiado en Garmin Connect y lo programa para la fecha, para que el reloj lo tenga al sincronizar. ESCRIBE en la cuenta de Garmin del usuario. " +
+			"tipo=fuerza: un entreno de fuerza guardado (entreno = id o nombre), con ejercicio, reps, peso y descanso por serie; todos los ejercicios necesitan el campo garmin; " +
+			"si ya se mando antes, actualiza ese mismo entreno. Pase confirm=true solo cuando el usuario lo confirme. " +
+			"tipo=cardio: un entreno de bici o correr por pasos (calentamiento, series con repetir, recuperacion, vuelta a la calma), cada paso por tiempo, distancia o hasta pulsar vuelta, " +
+			"con objetivo de pulso (zona del reloj o rango), potencia, ritmo, velocidad o cadencia. Sin confirm devuelve la vista previa y NO escribe: enseñela. Con confirm=true, tras su si, " +
+			"lo crea, lo programa y lo guarda para repetirlo (con id y la fecha). Use las zonas y umbrales del usuario (coach_perfil, garmin_forma) para los rangos. " +
+			"En los dos casos, si ese dia del plan es de ese deporte, queda enlazado.",
 		schema: {
 			type: "object",
 			properties: {
-				nombre: { type: "string", description: "P. ej. '5 × 4 min a umbral'." },
-				deporte: { type: "string", enum: ["bici", "correr"] },
+				tipo: { type: "string", enum: ["fuerza", "cardio"] },
 				fecha: { type: "string", description: "AAAA-MM-DD en que lo hara; por defecto hoy." },
-				pasos: { type: "array", items: esquemaPasoCardio },
-				nota: { type: "string", description: "Para que sirve, en una frase." },
-				id: { type: "string", description: "Para volver a mandar uno guardado (sin pasos)." },
 				confirm: { type: "boolean" },
+				entreno: { type: "string", description: "Fuerza: id o nombre del entreno guardado." },
+				nombre: { type: "string", description: "Cardio: p. ej. '5 × 4 min a umbral'." },
+				deporte: { type: "string", enum: ["bici", "correr"], description: "Cardio." },
+				pasos: { type: "array", items: esquemaPasoCardio, description: "Cardio." },
+				nota: { type: "string", description: "Cardio: para que sirve, en una frase." },
+				id: { type: "string", description: "Cardio: para volver a mandar uno guardado (sin pasos)." },
 			},
+			required: ["tipo"],
 		},
 		run: async (env, userId, args) => {
-			const fecha = /^\d{4}-\d{2}-\d{2}$/.test(args.fecha || "") ? args.fecha : fechaLocal();
-			const doc = (await leerDoc(env, userId, CARDIO_ENTRENOS)) || { entrenos: {} };
-			doc.entrenos = doc.entrenos || {};
-			let entreno;
-			if (args.id && !args.pasos) {
-				entreno = doc.entrenos[slugFuerza(args.id)];
-				if (!entreno) throw new HttpError(404, `No hay ningun entreno de bici o correr "${args.id}".`);
-			} else {
-				if (!DEPORTES_CARDIO[args.deporte]) throw new HttpError(400, "deporte tiene que ser bici o correr.");
-				if (!Array.isArray(args.pasos) || !args.pasos.length) throw new HttpError(400, "El entreno necesita pasos.");
-				const nombre = String(args.nombre || "").trim().slice(0, 60);
-				if (!nombre) throw new HttpError(400, "El entreno necesita un nombre.");
-				entreno = {
-					id: slugFuerza(args.id || nombre), nombre, deporte: args.deporte,
-					pasos: args.pasos.slice(0, 30).map((p, i) => normalizarPasoCardio(p, `Paso ${i + 1}`)),
-					...(typeof args.nota === "string" && args.nota.trim() ? { nota: args.nota.trim().slice(0, 200) } : {}),
-				};
-			}
-			const vista = { nombre: entreno.nombre, deporte: entreno.deporte, fecha, min_estimados: Math.round(minutosCardio(entreno.pasos)), pasos: resumenCardio(entreno.pasos) };
-			if (args.confirm !== true)
-				return { vista_previa: vista, escrito: false, siguiente: "Enseñeselo al usuario y, si dice que si, llame otra vez con confirm=true." };
-
-			const previo = doc.entrenos[entreno.id];
-			const { workoutId, programado, actualizado, pareja } = await enviarConPareja(env, userId, previo?.garmin, cardioParaGarmin(entreno), fecha);
-			doc.entrenos[entreno.id] = { ...entreno, creado: previo?.creado || fechaLocal(), garmin: pareja };
-			await guardarDoc(env, userId, CARDIO_ENTRENOS, doc);
-			const enlazado = await enlazarCardioEnPlan(env, userId, fecha, entreno);
-			return {
-				enviado: true, ...vista, workout_id: workoutId, programado, actualizado, enlazado_al_plan: enlazado,
-				mensaje: programado
-					? `"${entreno.nombre}" esta en tu calendario de Garmin para el ${fecha}. Sincroniza el reloj y lo tendras en Entrenamientos.`
-					: `"${entreno.nombre}" esta en tus entrenos de Garmin, pero no he podido ponerlo en el calendario: buscalo en Entrenamientos del reloj.`,
-			};
-		},
-	},
-
-	cardio_entrenos: {
-		title: "Entrenos de bici y correr guardados",
-		description: "Sin id: la lista de entrenos de bici y correr ya creados para el reloj. Con id: sus pasos. Para repetir uno, cardio_enviar_garmin con id y la fecha.",
-		schema: { type: "object", properties: { id: { type: "string" } } },
-		run: async (env, userId, { id }) => {
-			const entrenos = (await leerDoc(env, userId, CARDIO_ENTRENOS))?.entrenos || {};
-			if (id) {
-				const e = entrenos[slugFuerza(id)];
-				if (!e) throw new HttpError(404, `No hay ningun entreno de bici o correr "${id}".`);
-				return { ...e, min_estimados: Math.round(minutosCardio(e.pasos)), resumen: resumenCardio(e.pasos) };
-			}
-			return { entrenos: Object.values(entrenos).map((e) => ({ id: e.id, nombre: e.nombre, deporte: e.deporte, min_estimados: Math.round(minutosCardio(e.pasos)), ultimo_envio: e.garmin?.fecha || null })) };
+			if (args.tipo === "fuerza") return enviarFuerzaGarmin(env, userId, args);
+			if (args.tipo === "cardio") return enviarCardioGarmin(env, userId, args);
+			throw new HttpError(400, "tipo tiene que ser fuerza o cardio.");
 		},
 	},
 });
+
+/** Entrenos de fuerza guardados (sin id, la lista; con id, uno con su ultima vez). */
+async function entrenosFuerza(env, userId, { id }) {
+	const { entrenos, sesiones } = await leerFuerza(env, userId);
+	if (id) {
+		const e = entrenos[slugFuerza(id)] || Object.values(entrenos).find((x) => slugFuerza(x.nombre) === slugFuerza(id));
+		if (!e) throw new HttpError(404, `No hay ningun entreno "${id}". Entrenos: ${Object.values(entrenos).map((x) => x.nombre).join(", ") || "ninguno"}.`);
+		return entrenoConUltima(e, sesiones);
+	}
+	const nombres = new Set();
+	for (const e of Object.values(entrenos)) for (const x of e.ejercicios) nombres.add(x.nombre);
+	for (const s of sesiones) for (const x of s.ejercicios) nombres.add(x.nombre);
+	return {
+		entrenos: Object.values(entrenos).map((e) => {
+			const c = entrenoConUltima(e, sesiones);
+			return { id: e.id, nombre: e.nombre, lugar: e.lugar || null, ejercicios: e.ejercicios.map((x) => x.nombre), ultima_sesion: c.ultima_sesion, veces: c.veces, min_estimados: c.min_estimados };
+		}),
+		nombres_de_ejercicio: [...nombres],
+	};
+}
+
+/** Entrenos de bici y correr guardados (sin id, la lista; con id, sus pasos). */
+async function entrenosCardio(env, userId, { id }) {
+	const entrenos = (await leerDoc(env, userId, CARDIO_ENTRENOS))?.entrenos || {};
+	if (id) {
+		const e = entrenos[slugFuerza(id)];
+		if (!e) throw new HttpError(404, `No hay ningun entreno de bici o correr "${id}".`);
+		return { ...e, min_estimados: Math.round(minutosCardio(e.pasos)), resumen: resumenCardio(e.pasos) };
+	}
+	return { entrenos: Object.values(entrenos).map((e) => ({ id: e.id, nombre: e.nombre, deporte: e.deporte, min_estimados: Math.round(minutosCardio(e.pasos)), ultimo_envio: e.garmin?.fecha || null })) };
+}
+
+/** Manda un entreno de fuerza guardado a Garmin y lo programa (pide confirm). */
+async function enviarFuerzaGarmin(env, userId, args) {
+	if (args.confirm !== true) throw new HttpError(400, "Falta la confirmacion explicita del usuario.");
+	const fecha = /^\d{4}-\d{2}-\d{2}$/.test(args.fecha || "") ? args.fecha : fechaLocal();
+	const doc = (await leerDoc(env, userId, FUERZA_ENTRENOS)) || { entrenos: {} };
+	const entreno = doc.entrenos?.[slugFuerza(args.entreno)] || Object.values(doc.entrenos || {}).find((x) => slugFuerza(x.nombre) === slugFuerza(args.entreno));
+	if (!entreno) throw new HttpError(404, `No hay ningun entreno "${args.entreno}".`);
+	const sin = entreno.ejercicios.filter((e) => !e.garmin).map((e) => e.nombre);
+	if (sin.length) throw new HttpError(400, `Para mandarlo al reloj falta el ejercicio de Garmin de: ${sin.join(", ")}. Buscalos con fuerza_ejercicios_garmin y guarde el entreno.`);
+
+	const { workoutId, programado, actualizado, pareja } = await enviarConPareja(env, userId, entreno.garmin, entrenoParaGarmin(entreno), fecha);
+	entreno.garmin = pareja;
+	await guardarDoc(env, userId, FUERZA_ENTRENOS, doc);
+	await enlazarEnPlan(env, userId, fecha, entreno.id);
+	return {
+		enviado: true, workout_id: workoutId, fecha, programado, actualizado,
+		mensaje: programado
+	? `"${entreno.nombre}" esta en tu calendario de Garmin para el ${fecha}. Sincroniza el reloj y lo tendras en Entrenamientos.`
+	: `"${entreno.nombre}" esta en tus entrenos de Garmin, pero no he podido ponerlo en el calendario: buscalo en Entrenamientos del reloj.`,
+	};
+}
+
+/** Crea (o repite) un entreno de bici o correr en Garmin; sin confirm, solo la vista previa. */
+async function enviarCardioGarmin(env, userId, args) {
+	const fecha = /^\d{4}-\d{2}-\d{2}$/.test(args.fecha || "") ? args.fecha : fechaLocal();
+	const doc = (await leerDoc(env, userId, CARDIO_ENTRENOS)) || { entrenos: {} };
+	doc.entrenos = doc.entrenos || {};
+	let entreno;
+	if (args.id && !args.pasos) {
+		entreno = doc.entrenos[slugFuerza(args.id)];
+		if (!entreno) throw new HttpError(404, `No hay ningun entreno de bici o correr "${args.id}".`);
+	} else {
+		if (!DEPORTES_CARDIO[args.deporte]) throw new HttpError(400, "deporte tiene que ser bici o correr.");
+		if (!Array.isArray(args.pasos) || !args.pasos.length) throw new HttpError(400, "El entreno necesita pasos.");
+		const nombre = String(args.nombre || "").trim().slice(0, 60);
+		if (!nombre) throw new HttpError(400, "El entreno necesita un nombre.");
+		entreno = {
+	id: slugFuerza(args.id || nombre), nombre, deporte: args.deporte,
+	pasos: args.pasos.slice(0, 30).map((p, i) => normalizarPasoCardio(p, `Paso ${i + 1}`)),
+	...(typeof args.nota === "string" && args.nota.trim() ? { nota: args.nota.trim().slice(0, 200) } : {}),
+		};
+	}
+	const vista = { nombre: entreno.nombre, deporte: entreno.deporte, fecha, min_estimados: Math.round(minutosCardio(entreno.pasos)), pasos: resumenCardio(entreno.pasos) };
+	if (args.confirm !== true)
+		return { vista_previa: vista, escrito: false, siguiente: "Enseñeselo al usuario y, si dice que si, llame otra vez con confirm=true." };
+
+	const previo = doc.entrenos[entreno.id];
+	const { workoutId, programado, actualizado, pareja } = await enviarConPareja(env, userId, previo?.garmin, cardioParaGarmin(entreno), fecha);
+	doc.entrenos[entreno.id] = { ...entreno, creado: previo?.creado || fechaLocal(), garmin: pareja };
+	await guardarDoc(env, userId, CARDIO_ENTRENOS, doc);
+	const enlazado = await enlazarCardioEnPlan(env, userId, fecha, entreno);
+	return {
+		enviado: true, ...vista, workout_id: workoutId, programado, actualizado, enlazado_al_plan: enlazado,
+		mensaje: programado
+	? `"${entreno.nombre}" esta en tu calendario de Garmin para el ${fecha}. Sincroniza el reloj y lo tendras en Entrenamientos.`
+	: `"${entreno.nombre}" esta en tus entrenos de Garmin, pero no he podido ponerlo en el calendario: buscalo en Entrenamientos del reloj.`,
+	};
+}
 
 // ──────────────────────────────── Comida ────────────────────────────────
 // Las comidas viven en estado/app.meals, en el formato de la app:

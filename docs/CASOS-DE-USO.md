@@ -26,7 +26,7 @@ Casos de apoyo: conectar Garmin y primer uso (onboarding), comer según la carga
 
 **Actividad.** Cifras, cómo cuenta en tu semana, plan frente a lo hecho, lo mejor de la salida (llano, subida, VAM), mapa y pueblos nuevos. En fuerza, plan frente a lo hecho por ejercicio. El detalle se pide al abrirla. "Corregir" el tipo.
 
-**Fuerza y Tus entrenos.** Librería de entrenos con nombre (casa o gimnasio), editor de ejercicios, envío al reloj (`fuerza_enviar_garmin`), historial por ejercicio. Las series de bici y correr se ven y se reenvían, pero no se editan en la app. La app no marca series: las cuenta el reloj o Claude.
+**Fuerza y Tus entrenos.** Librería de entrenos con nombre (casa o gimnasio), editor de ejercicios, envío al reloj (`entreno_enviar_garmin`), historial por ejercicio. Las series de bici y correr se ven y se reenvían, pero no se editan en la app. La app no marca series: las cuenta el reloj o Claude.
 
 **Peso.** Último pesaje, media de 7 días, cambio a 30 días y 3 meses, gráfica y tabla. La app no tiene entrada de peso: se registra con la báscula o con Claude (`peso_registrar`).
 

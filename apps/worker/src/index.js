@@ -19,7 +19,8 @@ const SESSION_TTL = 60 * 60 * 24 * 60;
 // Solo lo que usa la app. Nada de guardar rutas en Garmin desde la web.
 export const TOOLS = new Set([
   'garmin_status', 'garmin_activities', 'garmin_activity_detail', 'garmin_activity_route',
-  'garmin_training_readiness', 'garmin_sleep', 'garmin_hrv', 'garmin_body_battery', 'garmin_daily_summary',
+  // Garmin: el día (sueño, VFC, readiness…) y la forma (carga, Load Focus, VO2máx, umbrales).
+  'garmin_dia', 'garmin_forma',
   'app_leer', 'app_guardar',
   // El entrenador: el semáforo y las reglas del plan viven en el conector,
   // así la web y tu Claude deciden con el mismo método.
@@ -28,11 +29,9 @@ export const TOOLS = new Set([
   'intervals_estado', 'intervals_conectar', 'intervals_desconectar',
   'intervals_actividades', 'intervals_actividad', 'intervals_bienestar', 'intervals_curvas',
   // Fuerza: el entreno del día, su histórico y mandarlo al reloj (con confirmación en la app).
-  'fuerza_dia', 'fuerza_historial', 'fuerza_enviar_garmin',
+  'fuerza_dia', 'fuerza_historial',
   // La librería de entrenos: verlos, editarlos y añadir ejercicios del catálogo de Garmin.
-  'fuerza_entrenos', 'fuerza_entreno_guardar', 'fuerza_ejercicios_garmin',
-  // Entrenos de bici y correr para el reloj.
-  'cardio_entrenos', 'cardio_enviar_garmin', 'peso_historico',
+  'entrenos', 'fuerza_entreno_guardar', 'fuerza_ejercicios_garmin', 'entreno_enviar_garmin', 'peso_historico',
   // Solo lectura: tus rutas guardadas en Garmin (Plan) y las comidas que registra tu Claude (Comer).
   'garmin_courses', 'comidas',
 ]);

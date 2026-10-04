@@ -48,12 +48,18 @@ function bloqueDecision(c, s) {
 function bloqueDatos(c) {
   const datos = c?.semaforo?.datos || [];
   const sentir = resumenSentir();
+  // Sin datos de descanso (solo un Edge, o un reloj que no se lleva de noche): no se enseñan huecos;
+  // el entrenador decide con la carga y con lo que cuentes, así que eso pasa a ir primero.
+  const sinDescanso = !!(c && (c.fuentes?.sin_descanso || c.semaforo?.sin_descanso));
   const filas = datos.length ? datos.map(d => { const [tono, ico, pal] = TONO_EST[d.estado] || TONO_EST.normal; const nombre = NOMBRE_CORTO[d.clave] || d.nombre; const v = valorCorto(d.valor);
       const m = String(v).match(/^(.*?)\s(ms|ppm)$/);
       return `<button class="met2" type="button" data-a="met" data-v="${esc(d.clave)}" aria-label="${esc(nombre)}: ${esc(v)}, ${pal}. Ver qué es">
         <span class="n">${esc(nombre)}</span><b class="v">${m ? `${esc(m[1])}<small>${m[2]}</small>` : esc(v)}</b>
-        ${d.normal ? `<span class="nm">Tu normal: ${esc(d.normal)}</span>` : ''}${tag(tono, ico, pal)}</button>`; }).join('')
+        ${d.normal ? `<span class="nm">${d.clave === 'carga_garmin' ? 'Tu franja' : 'Tu normal'}: ${esc(d.normal)}</span>` : ''}${tag(tono, ico, pal)}</button>`; }).join('')
     : `<p class="muted" style="padding:8px 0">${LIVE === undefined ? 'Abriendo tu myCoach…' : 'Garmin aún no tiene tus datos de esta noche. Necesita que duermas con el reloj puesto.'}</p>`;
+  if (sinDescanso) return blk(`${blkH('Cómo llegas hoy', info('datos', 'Cómo llegas hoy', 'Tu Garmin no mide el sueño ni la VFC (pasa con un Edge, o si no duermes con el reloj). Tu entrenador decide con tu carga y con lo que le cuentes, así que lo que digas pesa más. Si te pones un reloj por la noche, aquí saldrán también tus datos de descanso.'))}
+    <div class="sentir"><span class="grow">${sentir ? esc(sentir) : '<b>¿Cómo te encuentras hoy?</b> Sin datos de descanso, es lo que más pesa.'}</span>${sentir ? '<button class="link" type="button" data-a="coach-sentir-hoja">Cambiar</button>' : '<button class="btn tonal" type="button" data-a="coach-sentir-hoja">Contármelo</button>'}</div>
+    ${datos.length ? `<div class="mets2">${filas}</div>` : ''}`);
   return blk(`${blkH('Tus datos de esta noche', info('datos', 'Tus datos de esta noche', 'Salen de tu Garmin y cada uno se compara con tu normal: tu media de las últimas 4 semanas. Toca uno para ver qué es y cómo lo lee tu entrenador. Con ellos decide el semáforo.'))}
     ${datos.length ? `<div class="mets2">${filas}</div>` : filas}
     <div class="sentir"><span class="grow">${sentir ? esc(sentir) : 'Cómo te encuentras hoy'}</span><button class="link" type="button" data-a="coach-sentir-hoja">${sentir ? 'Cambiar' : 'Cuéntamelo'}</button></div>`);

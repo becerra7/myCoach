@@ -1,5 +1,5 @@
 /* ===== Series de bici y correr: el entreno guiado de un día =====
-   Los crea Claude con cardio_enviar_garmin y quedan enlazados al día del plan (entreno_cardio).
+   Los crea Claude con entreno_enviar_garmin (tipo cardio) y quedan enlazados al día del plan (entreno_cardio).
    La app enseña los pasos y deja volver a mandarlo al reloj. */
 const CZ = {}; // id → undefined (sin pedir) · 'cargando' · null (no está) · entreno con resumen
 
@@ -10,7 +10,7 @@ async function cargarCardio(id, fresco) {
   const fuente = fuenteDatos(); if (fuente === 'espera') { cuandoHayaConector(); return; }
   if (fuente === 'demo') return; // en el modo demo no hay series guardadas
   CZ[id] = 'cargando';
-  try { CZ[id] = await coachCall('cardio_entrenos', { id }, fresco); } catch (e) { CZ[id] = null; }
+  try { CZ[id] = await coachCall('entrenos', { tipo: 'cardio', id }, fresco); } catch (e) { CZ[id] = null; }
   render(); if (sheetState && (sheetState.id === 'dia' || sheetState.id === 'cent')) fillSheet();
 }
 
@@ -55,7 +55,7 @@ function enviarCardioAlReloj(f) {
     text: e.garmin && e.garmin.workout_id ? `Se actualiza "${e.nombre}" en tu Garmin Connect (el mismo entreno, no otro) y se programa para el ${fDia(f)}.` : `Se crea "${e.nombre}" en tu Garmin Connect, paso a paso, y se programa para el ${fDia(f)}.`,
     actions: [
       { label: 'Enviar al reloj', kind: 'fill', fn: async () => {
-        try { const r = await coachCall('cardio_enviar_garmin', { id: e.id, fecha: f, confirm: true }, true); toast(r.programado ? 'En tu reloj: sincronízalo' : 'En Garmin, pero no en el calendario'); CZ[e.id] = undefined; cargarCardio(e.id, true); }
+        try { const r = await coachCall('entreno_enviar_garmin', { tipo: 'cardio', id: e.id, fecha: f, confirm: true }, true); toast(r.programado ? 'En tu reloj: sincronízalo' : 'En Garmin, pero no en el calendario'); CZ[e.id] = undefined; cargarCardio(e.id, true); }
         catch (err) { toast('No he podido enviarlo: ' + (err.message || 'error')); }
       } },
       { label: 'Cancelar' },

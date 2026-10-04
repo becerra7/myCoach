@@ -44,7 +44,7 @@ _Septiembre 2026. Complementa `ARCHITECTURE.md`._
 |---|---|---|
 | Plan conversacional | Onboarding con pasos y `generarSemana()` con reglas. Chat en el artifact (`sample`) con la herramienta `proponer_cambios`. | Onboarding que se puede **hablar o tocar**. El plan sale de un motor determinista y el LLM solo propone cambios dentro de sus límites (ya se hace con `validarPropuesta`). |
 | Ajuste diario | Mover una sesión, límites por semana, aviso si la semana está sin plan. | **Replanificar solo** tras cada actividad o cambio de readiness, en un cron diario del Worker. Mensaje proactivo del tipo "he movido X porque Y". |
-| Adaptación a VFC, sueño y readiness | Se leen (`garmin_hrv`, `garmin_sleep`, `garmin_training_readiness`) y se aplica "nada intenso con readiness < 40". | Regla de semáforo para cada sesión (verde, ámbar, rojo) con **la razón en una frase**. Y aprender del usuario: si dice "estaba reventado", ajustar su umbral. |
+| Adaptación a VFC, sueño y readiness | Se leen (`garmin_dia`: sueño, VFC y readiness) y se aplica "nada intenso con readiness < 40". | Regla de semáforo para cada sesión (verde, ámbar, rojo) con **la razón en una frase**. Y aprender del usuario: si dice "estaba reventado", ajustar su umbral. |
 | Nivel sin test | W/kg estimado por física de las subidas, test de 20 min, VO2máx y Endurance de Garmin. | Añadir la curva de potencia (si hay potenciómetro) y umbrales de pulso y ritmo por deporte a partir del historial. |
 | Periodización | Objetivo por "modo" y semanas sueltas. | **Temporada**: fecha del objetivo, bloques de base, construcción, pico y descarga, y descarga cada 3 o 4 semanas. Motor en `packages/domain`. |
 | Carga multideporte | Horas, zonas de pulso y resumen semanal. | **Un modelo de carga para todo** (TRIMP por pulso → forma, fatiga y frescura) que incluya el esquí de montaña, la montaña, el pádel y la fuerza. **Es vuestra ventaja**: NUA es de bici. |
@@ -194,6 +194,17 @@ Objetivo: que funcione sin ti delante y aprender qué enamora.
 5. **Un solo bloque en Hoy**: el semáforo junto con los datos que lo explican (lo que antes era "Cómo estás hoy").
 6. **Siguiente gran pieza: myCoach dentro de Claude** con MCP Apps (pantallas interactivas servidas por el conector).
 7. **Cuenta propia de myCoach; Garmin es una fuente que se vincula.** Entras en myCoach (y conectas tu Claude) con email y contraseña de myCoach. Garmin e Intervals.icu se vinculan en Ajustes › Conexiones. Motivo: Garmin empezó a pedir captcha al login desde nuestro servidor y eso dejaba sin poder reconectar Claude. Así solo falla la fuente, no la app ni Claude, y el día que haya API oficial de Garmin solo cambia cómo se vincula. Más adelante: passkeys y "Entrar con Google".
+
+### Decisiones del 4 de octubre: todo lo de Garmin, en el motor
+8. **El entrenador usa todo lo que Garmin calcula y ayuda a decidir.** En el semáforo entran tres señales nuevas, leves (suman 1):
+   - la carga de 7 días de Garmin por encima de su franja óptima (o el ratio aguda/crónica "muy alto");
+   - el estado de entreno "sobrecargado" o "en sobreesfuerzo";
+   - el estrés medio de ayer por encima de 50.
+   Son otro modelo distinto de la frescura (TSB), por eso suman aparte. `coach_semana` avisa de qué tipo de trabajo falta según el Load Focus y de si la carga se sale de la franja.
+9. **Sin datos de descanso, no se enseñan huecos.** Si en dos semanas no llega sueño, VFC ni pulso (solo un Edge):
+   - el semáforo decide con la carga y con lo que el usuario cuente;
+   - la app y Claude le preguntan cómo se encuentra.
+10. **Claude no está ciego:** lo que myCoach no tenga se pide a Garmin con `garmin_api` (solo lectura, con catálogo). Ver `docs/GARMIN-API.md`.
 
 ## 10. Próximos pasos concretos (2 semanas)
 1. Sacar `packages/domain` con carga TRIMP, semáforo y tests.

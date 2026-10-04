@@ -79,16 +79,54 @@ function progDep(dep) {
   return `${bloqueMismaRuta(dep)}<div class="grid2">${out.join('')}</div>`;
 }
 
+/* ¿Me estoy pasando o me quedo corto? La carga de 7 días de Garmin frente a su franja óptima y el Load Focus
+   de 4 semanas. Lo calcula Garmin y lo trae el conector: coach_hoy (de hoy) o, si no, la última sincronización. */
+function cargaGarmin() {
+  const c = coachHoy(); if (c && c.garmin) return c.garmin;
+  const f = M.forma; return f && (f.carga || f.enfoque) ? { estado: f.estado, carga: f.carga, enfoque_carga: f.enfoque } : null;
+}
+const FOCO = [['anaerobica', 'Anaeróbico'], ['aerobica_alta', 'Aeróbico intenso'], ['aerobica_baja', 'Aeróbico suave']];
+function filaFoco(nombre, v, [lo, hi]) {
+  const max = Math.max(hi * 1.25, v, 1), estado = v < lo ? `↓ Faltan ${Math.round(lo - v)}` : v > hi ? `↑ ${Math.round(v - hi)} de más` : '✓ En objetivo';
+  return `<div><div class="l"><b>${nombre}</b><span>${estado}</span></div>
+    <div class="t" role="img" aria-label="${nombre}: ${Math.round(v)}; objetivo de ${Math.round(lo)} a ${Math.round(hi)}"><span class="zona" style="left:${lo / max * 100}%;width:${(hi - lo) / max * 100}%"></span><span class="ya" style="width:${Math.min(100, v / max * 100)}%"></span></div></div>`;
+}
+function progCarga() {
+  const g = cargaGarmin(); const cg = g && g.carga, ef = g && g.enfoque_carga;
+  const hayCarga = cg && cg.aguda_7d != null && Array.isArray(cg.franja_optima_cronica);
+  const hayFoco = ef && FOCO.some(([k]) => ef[k] && Array.isArray(ef[k].objetivo) && ef[k].objetivo[1] != null);
+  if (!hayCarga && !hayFoco) return '';
+  let carga = '';
+  if (hayCarga) {
+    const [lo, hi] = cg.franja_optima_cronica, v = cg.aguda_7d, max = Math.max(hi * 1.35, v * 1.1), x = n => Math.round(Math.min(100, n / max * 100) * 10) / 10;
+    const [lectura, txt] = v > hi ? [tag('warn', '!', 'Por encima de tu franja'), 'Cargas más de lo que asimilas bien: toca bajar unos días.']
+      : v < lo ? [tag('neutral', '↓', 'Por debajo de tu franja'), 'Hay margen para cargar más sin riesgo.'] : [tag('good', '✓', 'En tu franja'), 'Cargas lo justo para mejorar.'];
+    const estado = g.estado && g.estado.estado && g.estado.estado !== 'Sin estado' ? ` Garmin te ve en <b>${esc(g.estado.estado.toLowerCase())}</b>.` : '';
+    carga = `<p><b style="font-size:44px;font-stretch:72%;font-weight:800;line-height:1">${Math.round(v)}</b> ${lectura}</p><p style="margin-top:8px">${txt}${estado}</p>
+      <div class="fr-bar" role="img" aria-label="Carga de 7 días ${Math.round(v)}; tu franja va de ${Math.round(lo)} a ${Math.round(hi)}"><div class="fr-rail"></div><div class="fr-ok" style="left:${x(lo)}%;width:${x(hi) - x(lo)}%"></div><div class="fr-mark" style="left:${x(v)}%"></div></div>
+      <p class="xs muted">Tu franja: ${Math.round(lo)}-${Math.round(hi)}.</p>`;
+  }
+  const foco = hayFoco ? `<h3 class="met-h" style="margin-top:${hayCarga ? 20 : 0}px">En qué has cargado (4 semanas)</h3>
+    <div class="foco">${FOCO.filter(([k]) => ef[k] && ef[k].objetivo && ef[k].objetivo[1] != null).map(([k, n]) => filaFoco(n, ef[k].carga || 0, ef[k].objetivo)).join('')}</div>
+    ${ef.que_hacer ? `<p style="margin-top:12px">${esc(ef.que_hacer)}</p>` : ef.veredicto ? `<p class="small muted" style="margin-top:12px">Garmin: ${esc(ef.veredicto.toLowerCase())}.</p>` : ''}` : '';
+  return blk(`${blkH('Tu carga, según Garmin', info('cargag', 'Tu carga, según Garmin', 'Cada actividad suma su carga (Exercise Load, la estima Garmin por lo que te saca de tu equilibrio). La de los últimos 7 días se compara con una franja que sale de lo que vienes haciendo en 4 semanas: por debajo pierdes forma, por encima te arriesgas. Abajo, cómo se reparte la carga de 4 semanas (Load Focus) frente a lo que necesitas: anaeróbico, aeróbico intenso y aeróbico suave.'))}
+    ${carga}${foco}`);
+}
+
 function progForma() {
   const c = coachHoy(), f = c && (c.forma || (c.demo ? { forma_ctl: 48, fatiga_atl: 56, frescura_tsb: -8 } : null)), P = M.perfil || {}, g = S.goal || {}, m = MODOS[g.modo] || MODOS.forma;
   const tsb = f && f.frescura_tsb != null ? Math.round(f.frescura_tsb) : null;
   const zona = tsb == null ? null : tsb < -30 ? ['bad', '!', 'Muy cargado', 'Llevas mucha carga: unos días suaves te harán bien.'] : tsb < -10 ? ['good', '↑', 'Cargado, ganando forma', 'Entrenas lo suficiente para mejorar. Cargado no quiere decir fresco: antes de una prueba, toca bajar.'] : tsb <= 10 ? ['neutral', '=', 'En equilibrio', 'Ni cargado ni fresco: buena base para meter una semana fuerte.'] : ['good', '✓', 'Fresco', 'Llegas descansado: buen momento para una prueba o una salida exigente.'];
-  const gar = [['VO2máx', P.vo2, v => nf(v, 0)], ['Endurance Score', P.es, v => nf(v, 0)], ['Hill Score', P.hill, v => nf(v, 0)]].filter(x => x[1] != null);
-  return `${blk(`${blkH('Tu frescura', info('fres', 'Tu frescura', 'Es tu forma (la carga media de las últimas 6 semanas) menos tu fatiga (la de los últimos 7 días). La carga de cada actividad sale de su pulso y su duración. Más negativo, más cargado.'))}
+  const gar = [[P.vo2bici != null ? 'VO2máx correr' : 'VO2máx', P.vo2, v => nf(v, 0)], ['VO2máx bici', P.vo2bici, v => nf(v, 0)], ['Endurance Score', P.es, v => nf(v, 0), P.esNivel], ['Hill Score', P.hill, v => nf(v, 0)]].filter(x => x[1] != null);
+  const carga = progCarga();
+  const fresc = blk(`${blkH('Tu frescura', info('fres', 'Tu frescura', 'Es tu forma (la carga media de las últimas 6 semanas) menos tu fatiga (la de los últimos 7 días). La carga de cada actividad sale de su pulso y su duración. Más negativo, más cargado.'))}
       ${tsb == null ? '<p class="muted">Aún no tengo tu frescura: la calcula el entrenador con tus actividades.</p>' : `<p><b style="font-size:44px;font-stretch:72%;font-weight:800;line-height:1">${tsb > 0 ? '+' : tsb < 0 ? '−' : ''}${Math.abs(tsb)}</b> ${tag(zona[0], zona[1], zona[2])}</p><p style="margin-top:8px">${zona[3]}</p>
-      <div style="margin-top:12px">${escalaFrescura(tsb)}</div><p class="xs muted" style="margin-top:8px">${Math.round(f.forma_ctl)} de forma menos ${Math.round(f.fatiga_atl)} de fatiga.</p>`}`, 'first')}
+      <div style="margin-top:12px">${escalaFrescura(tsb)}</div><p class="xs muted" style="margin-top:8px">${Math.round(f.forma_ctl)} de forma menos ${Math.round(f.fatiga_atl)} de fatiga.</p>`}`, 'first');
+  // Frescura y carga responden a lo mismo (¿cómo llego?): en escritorio van juntas, en móvil una tras otra.
+  return `${carga ? `<div class="grid2">${fresc}${carga}</div>` : fresc}
     <div class="grid2">
-    ${blk(`${blkH('Lo que dice Garmin', '<button class="link" type="button" data-a="push" data-v="evo">Ver evolución</button>')}${gar.length ? `<div class="tot">${gar.map(([n, v, fmt]) => `<div><span class="n">${n}</span><b>${fmt(v)}</b></div>`).join('')}</div>` : '<p class="muted">Aún no hay datos de Garmin.</p>'}`)}
+    ${blk(`${blkH('Lo que dice Garmin', '<button class="link" type="button" data-a="push" data-v="evo">Ver evolución</button>')}${gar.length ? `<div class="tot">${gar.map(([n, v, fmt, d]) => `<div><span class="n">${n}</span><b>${fmt(v)}</b>${d ? `<span class="d">${esc(d)}</span>` : ''}</div>`).join('')}</div>` : '<p class="muted">Aún no hay datos de Garmin.</p>'}
+      <div class="btns"><button class="link" type="button" data-a="push" data-v="numeros">Tus umbrales y predicciones</button></div>`)}
     ${blk(`${blkH('Tu objetivo', '<button class="link" type="button" data-a="push" data-v="objetivo">Cambiar</button>')}<p><b>${esc(g.titulo || m.n)}</b>${g.fecha ? `, ${fDia(g.fecha)}` : ''}</p><p class="small muted" style="margin-top:4px">${(() => { const o = objetivos(); return `${o.h[0]}-${o.h[1]} h por semana, ${o.int[0]}-${o.int[1]} sesiones intensas y ${o.fuerza} de fuerza.`; })()}</p>`)}
     </div>`;
 }
@@ -102,3 +140,24 @@ function tabProgresoV1() {
     ${V.prog === 'forma' ? progForma() : progDep(V.prog)}</div>` };
 }
 Object.assign(ACTIONS, { 'v-sync': () => sync(true) });
+
+/* ===== Tus números: lo que Garmin calcula de ti y no cambia cada día =====
+   Umbral, FTP, predicciones de carrera, edad física y aclimatación. Es de consulta: se llega desde Progreso. */
+function scrNumeros() {
+  const f = M.forma || {}, P = M.perfil || {};
+  const campo = (l, v, u) => v == null ? '' : `<div class="field"><span class="l">${l}</span><span class="v">${v}${u ? ` <small>${u}</small>` : ''}</span></div>`;
+  const tarjeta = (id, t, cuerpo, nota) => cuerpo ? `<section class="card" aria-labelledby="num-${id}"><h2 class="card-t" id="num-${id}">${t}</h2><div class="fields">${cuerpo}</div>${nota ? `<p class="xs muted" style="margin-top:8px">${nota}</p>` : ''}</section>` : '';
+  const u = f.umbral || {}, ftp = f.ftp || {}, pr = f.predicciones || {}, ed = f.edad || {}, ac = f.aclimatacion || {};
+  const umbral = campo('Pulso de umbral', u.ppm ?? P.lthr, 'ppm') + campo('Ritmo de umbral', u.ritmo_min_km, 'min/km') + campo('FTP', ftp.vatios, 'W') + campo('FTP por kilo', ftp.w_kg != null ? nf(ftp.w_kg, 2) : null, 'W/kg');
+  const pred = campo('5 km', pr['5k']) + campo('10 km', pr['10k']) + campo('Media maratón', pr.media) + campo('Maratón', pr.maraton);
+  const edad = campo('Según tu forma', ed.edad_fisica != null ? nf(ed.edad_fisica, 0) : null, 'años') + campo('Edad real', ed.edad_real, 'años') + campo('Alcanzable', ed.alcanzable != null ? nf(ed.alcanzable, 0) : null, 'años');
+  const acl = campo('Al calor', ac.calor_pct, '%') + campo('A la altitud', ac.altitud_m, 'm');
+  const html = [
+    tarjeta('umb', 'Umbrales', umbral, 'Tus zonas de pulso y de potencia salen de aquí. Si no cuadran, haz un test de umbral con el reloj.'),
+    tarjeta('pred', 'Si corrieras hoy', pred, 'Predicción de Garmin con tu VO2máx y tus carreras recientes.'),
+    tarjeta('edad', 'Edad física', edad, 'La calcula Garmin con tu VO2máx, tu pulso en reposo y tu actividad.'),
+    tarjeta('acl', 'Aclimatación', acl, 'Cuánto te has adaptado al calor y a la altitud con lo que has entrenado allí.'),
+  ].join('');
+  return { title: 'Tus números', html: head('Tus números', 'Lo que Garmin calcula de ti') + `<div class="content" style="max-width:760px">${html ||
+    `${pendiente('Aún no tengo tus números', 'Salen de tu Garmin: umbral, FTP, predicciones de carrera y edad física. Actualiza para traerlos.')}<div class="btns"><button class="btn fill" type="button" data-a="v-sync">Actualizar con Garmin</button></div>`}</div>` };
+}

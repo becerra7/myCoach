@@ -44,7 +44,7 @@ function construir(ds) {
     if (!tipo) { if (SPORTS[dep].cardio) { tipo = GARMIN_MAP[a.te] || 'fondo'; if (tipo === 'int' && a.fc && a.fc < 135) tipo = 'fondo'; } else tipo = 'otros'; }
     const sub = d.sub ? { km: d.sub[0], desn: d.sub[1], min: d.sub[2], fc: d.sub[3], vam: Math.round(d.sub[1] / (d.sub[2] / 60)), wkg: dep === 'bici' ? wkgFisica(d.sub[0], d.sub[1], d.sub[2], peso) : null } : null;
     if (sub && sub.vam > 1800 && sub.fc < 110) sub.remonte = true;
-    return { id: String(a.id), dep, f: a.d, km: a.km, min: a.min, fc: a.fc, g: a.te, lugar: (String(a.n || '').replace(/ (Road )?(Cycling|Running|Backcountry Skiing|Hiking|Walking|Resort Skiing|Strength Training)$/, '').replace(/^[\s\-–·.]*$/, '') || SPORTS[dep].n), tipo, z, desn: d.desn, sub, llano: d.llano ? { km: d.llano[0], kmh: d.llano[1], fc: d.llano[2] } : null, analizada: !!z, nuevos: [] };
+    return { id: String(a.id), dep, f: a.d, km: a.km, min: a.min, fc: a.fc, g: a.te, cg: a.cg ?? null, lugar: (String(a.n || '').replace(/ (Road )?(Cycling|Running|Backcountry Skiing|Hiking|Walking|Resort Skiing|Strength Training)$/, '').replace(/^[\s\-–·.]*$/, '') || SPORTS[dep].n), tipo, z, desn: d.desn, sub, llano: d.llano ? { km: d.llano[0], kmh: d.llano[1], fc: d.llano[2] } : null, analizada: !!z, nuevos: [] };
   }).sort((a, b) => b.f.localeCompare(a.f));
   // Pueblos y países desde los trazados
   const towns = {}, paises = new Set(), geo = ds.geo || (ds.geo = {});
@@ -60,7 +60,7 @@ function construir(ds) {
   // Comunidad principal (donde más km)
   const porCcaa = {}; for (const t of Object.values(towns)) { const c = PROV_CCAA[t.id.slice(0, 2)]; if (c) porCcaa[c] = (porCcaa[c] || 0) + t.km; }
   const ccaa = Object.entries(porCcaa).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
-  M = { fuente: ds.fuente, hoy: HOYD, perfil: P, acts, towns, paises: [...paises].map(p => PAIS_ES[p] || p), paisesId: [...paises], weeks, ccaa, evo: (ds.evo || []).map(([f, vo2, es, hill]) => ({ f, vo2, es, hill })), sincro: ds.at || null };
+  M = { fuente: ds.fuente, hoy: HOYD, perfil: P, acts, towns, paises: [...paises].map(p => PAIS_ES[p] || p), paisesId: [...paises], weeks, ccaa, evo: (ds.evo || []).map(([f, vo2, es, hill, vo2b]) => ({ f, vo2, es, hill, vo2b: vo2b ?? null })), forma: ds.forma || null, sincro: ds.at || null };
   M.ind = indicadores(); return M;
 }
 /* Indicadores derivados (notas 1-10 con su porqué), sin textos fijos */

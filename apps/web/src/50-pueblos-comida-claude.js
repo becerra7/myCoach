@@ -204,15 +204,18 @@ async function sync(manual, live = !!LIVE && S.modo === 'vivo') {
   const ds = (DSET && DSET.fuente === 'vivo') ? DSET : { fuente: 'vivo', perfil: {}, acts: [], det: {}, rutas: {}, evo: [], geo: {} };
   const errs = []; let nuevas = 0;
   try {
-    msg('Leyendo tu readiness…');
-    const rd = await call('garmin_training_readiness', {}, true); const pg = rd.perfil_garmin || {}, pe = pg.persona || {};
-    ds.perfil = { edad: pe.edad, sexo: pe.sexo, peso: pe.peso_kg, lthr: pe.umbral_lactato_ppm, vo2: pg.vo2max, es: pg.endurance?.puntos, hill: pg.hill_score, balance: pg.balance_carga_mes, ready: { score: rd.score, level: rd.level, sleep: rd.sleep_score, hrv: rd.hrv_factor, rec: rd.recovery_time_hours, fecha: rd.date } };
+    msg('Leyendo tu forma en Garmin…');
+    // Una llamada: persona, carga (Training Load y Load Focus), estado, umbrales y la evolución de 52 semanas.
+    const fm = await call('garmin_forma', { semanas: 52 }, true); const pe = fm.persona || {};
+    ds.perfil = { edad: pe.edad, sexo: pe.sexo, peso: pe.peso_kg, lthr: pe.umbral_lactato_ppm, vo2: fm.vo2max?.correr ?? null, vo2bici: fm.vo2max?.bici ?? null, es: fm.endurance_score?.actual ?? null, esNivel: fm.endurance_score?.nivel ?? null, hill: fm.hill_score?.actual ?? null, balance: fm.enfoque_carga || null };
+    ds.forma = { fecha: fm.hasta, estado: fm.estado, carga: fm.carga, enfoque: fm.enfoque_carga, semanas: fm.carga_por_semana, predicciones: fm.predicciones_carrera, umbral: fm.umbral_lactato, ftp: fm.ftp, edad: fm.edad_fisica, aclimatacion: fm.aclimatacion };
+    ds.evo = evoDeForma(fm, ds.evo || []);
     S.readiness = null;
   } catch (e) { errs.push(e); }
   try {
     msg('Leyendo tu histórico…');
     const list = await call('garmin_activities', { limit: 300 }, manual || !ds.acts.length);
-    if (Array.isArray(list)) { const prev = new Set(ds.acts.map(a => String(a.id))); ds.acts = list.map(x => ({ id: String(x.id), t: x.t, d: x.d, km: x.km, min: x.min, fc: x.fc, te: x.te, n: x.n })); nuevas = ds.acts.filter(a => !prev.has(a.id)).length; }
+    if (Array.isArray(list)) { const prev = new Set(ds.acts.map(a => String(a.id))); ds.acts = list.map(x => ({ id: String(x.id), t: x.t, d: x.d, km: x.km, min: x.min, fc: x.fc, te: x.te, cg: x.cg ?? null, n: x.n })); nuevas = ds.acts.filter(a => !prev.has(a.id)).length; }
   } catch (e) { errs.push(e); }
   // Detalle (pulso, subidas, llano) de lo reciente y del skimo; trazados para pueblos. Por tandas.
   const d60 = addDays(HOY, -60);
@@ -220,18 +223,24 @@ async function sync(manual, live = !!LIVE && S.modo === 'vivo') {
   let i = 0; await pool(needDet, 4, async a => { msg(`Analizando actividades (${++i}/${needDet.length})…`); try { ds.det[a.id] = detalleDe(await call('garmin_activity_detail', { activity_id: a.id })); } catch (e) { ds.det[a.id] = { err: e.code || 'error' }; } });
   const needRuta = ds.acts.filter(a => !(a.id in ds.rutas) && a.km > 0.5 && ['bici', 'correr', 'skimo', 'montana', 'esqui', 'caminar'].includes(FAM[a.t])).slice(0, 25);
   i = 0; await pool(needRuta, 4, async a => { msg(`Buscando pueblos (${++i}/${needRuta.length})…`); try { const r = await call('garmin_activity_route', { activity_id: a.id, puntos: 5 }); ds.rutas[a.id] = r.polilinea || null; } catch (e) { ds.rutas[a.id] = null; } });
-  // Evolución mensual (VO2máx, Endurance, Hill): un punto por mes; el mes en curso se refresca
-  if (ds.acts.length) { const first = ds.acts.reduce((m, a) => a.d < m ? a.d : m, HOY); let f = first.slice(0, 8) + '15'; const have = new Set(ds.evo.map(e => e[0])); const pend = [];
-    while (f <= HOY) { if (!have.has(f)) pend.push(f); f = addDays(f.slice(0, 8) + '01', 32).slice(0, 8) + '15'; }
-    const hoyKey = HOY; ds.evo = ds.evo.filter(e => e[0] !== hoyKey); pend.push(hoyKey);
-    i = 0; await pool(pend.slice(-13), 4, async d => { msg(`Tu evolución (${++i}/${Math.min(13, pend.length)})…`); try { const r = await call('garmin_training_readiness', { date: d }, d === hoyKey); const g = r.perfil_garmin || {}; ds.evo.push([d, g.vo2max ?? null, g.endurance?.puntos ?? null, g.hill_score ?? null]); } catch (e) { } });
-    ds.evo.sort((a, b) => a[0].localeCompare(b[0])); }
   fin(); ds.at = Date.now(); construir(ds); guardarCache(ds);
   if (!S.sports.length) S.sports = Object.keys(horasPorDeporte()).filter(k => ENTRENABLES.includes(k));
   S.lastSync = Date.now(); S.liveOk = errs.length < 2; save(); render(); markFlow('sync'); cargarCoach(manual);
   const pendientes = ds.acts.filter(a => !ds.det[a.id] && a.d > d60 && ['bici', 'correr', 'skimo'].includes(FAM[a.t])).length + ds.acts.filter(a => !(a.id in ds.rutas) && a.km > 0.5 && FAM[a.t] && FAM[a.t] !== 'fuerza' && FAM[a.t] !== 'raqueta').length;
   if (!errs.length) toast(`${nuevas ? `${nuevas} actividad${nuevas === 1 ? '' : 'es'} nueva${nuevas === 1 ? '' : 's'}. ` : ''}${pendientes ? `Faltan ${pendientes} por analizar: vuelve a actualizar.` : 'Todo al día con Garmin.'}`, { ms: 6000 });
   else { const e = errs[0] || {}; const m = { needs_reauth: 'Vuelve a conectar Garmin en claude.ai → Ajustes → Conectores', server_not_connected: 'Añade el conector de Garmin en claude.ai → Conectores', not_in_manifest: 'No has dado permiso a esta página para usar Garmin', selection_required: 'Elige qué conector de Garmin usar', server_unavailable: 'Garmin no responde ahora; prueba en un rato' + (e.message && e.message !== 'error' ? ` (${e.message})` : ''), tool_error: 'Garmin ha devuelto un error: ' + (e.message || '') }[e.code] || 'No he podido leer Garmin (' + (e.code || 'error') + ')'; toast(m, { ms: 8000 }); }
+}
+
+/** Evolución mensual (VO2máx de correr, Endurance, Hill y VO2máx de bici) a partir de las series semanales
+   de garmin_forma: el último valor de cada mes. Los meses anteriores a esas 52 semanas se conservan. */
+function evoDeForma(fm, previa) {
+  const mes = f => `${String(f).slice(0, 7)}-15`, por = new Map();
+  const poner = (f, i, v) => { if (v == null) return; const k = mes(f); const e = por.get(k) || [k, null, null, null, null]; e[i] = v; por.set(k, e); };
+  (fm.vo2max?.semanas || []).forEach(p => { poner(p.fecha, 1, p.correr); poner(p.fecha, 4, p.bici); });
+  (fm.endurance_score?.semanas || []).forEach(p => poner(p.semana, 2, p.puntos));
+  (fm.hill_score?.semanas || []).forEach(p => poner(p.fecha, 3, p.puntos));
+  const desde = fm.desde ? mes(fm.desde) : '9999';
+  return [...previa.filter(e => e[0] < desde), ...por.values()].sort((a, b) => a[0].localeCompare(b[0]));
 }
 
 /** Lo que la app guarda del detalle de una actividad (pulso por zonas, desnivel, subida y llano). */
@@ -384,7 +393,7 @@ function renderOnboarding() {
 // Pantallas del rediseño v1 (63-67). Las de la versión anterior que sigan haciendo falta se usan desde ellas.
 const TABSCR = { hoy: () => tabHoyV1(), plan: () => tabPlanV1(), comer: () => tabComerV1(), progreso: () => tabProgresoV1(), pueblos: () => tabPueblosV1() };
 if (!['hoy', 'plan', 'comer', 'progreso', 'pueblos'].includes(S.tab)) S.tab = S.tab === 'forma' ? 'progreso' : 'hoy';
-const SCREENS = { entrenos: scrEntrenos, entreno: scrEntreno, actividad: scrActividad, objetivo: scrObjetivo, ajustes: scrAjustes, evo: scrEvo };
+const SCREENS = { entrenos: scrEntrenos, entreno: scrEntreno, actividad: scrActividad, objetivo: scrObjetivo, ajustes: scrAjustes, evo: scrEvo, numeros: scrNumeros };
 S.stack = (S.stack || []).filter(x => SCREENS[x.s]);
 
 /* ===== Panel de prototipo ===== */
