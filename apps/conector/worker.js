@@ -2430,7 +2430,10 @@ function readAuthorizeParams(source) {
 
 	// PKCE obligatorio y solo S256: "plain" anula el sentido del challenge.
 	if (!clientId || !redirectUri || !codeChallenge || method !== "S256") return null;
-	return { clientId, redirectUri, state: source.get("state") ?? "", codeChallenge };
+	// Solo se reconoce el permiso reducido de compartir el plan. Cualquier otro
+	// scope (o ninguno) es el acceso de siempre: asi Claude entra igual que hoy.
+	const scope = source.get("scope") === SCOPE_PLAN ? SCOPE_PLAN : undefined;
+	return { clientId, redirectUri, state: source.get("state") ?? "", codeChallenge, ...(scope ? { scope } : {}) };
 }
 
 async function clientAllows(env, clientId, redirectUri) {
@@ -2447,6 +2450,7 @@ async function issueCodeAndRedirect(env, params, userId) {
 		userId,
 		redirectUri: params.redirectUri,
 		codeChallenge: params.codeChallenge,
+		...(params.scope ? { sc: params.scope } : {}),
 		// Por el mismo motivo que el token: ademas, la marca de "ya usado" se
 		// indexa por el hash del codigo, y dos codigos iguales la compartirian.
 		nonce: randomToken(),
@@ -2702,7 +2706,7 @@ async function handleToken(request, env) {
 
 		// Rotacion: un refresh token se usa una sola vez.
 		await env.GARMIN.delete(refreshKey(hash));
-		return json(await issueTokens(env, record.clientId, record.userId));
+		return json(await issueTokens(env, record.clientId, record.userId, record.sc));
 	}
 
 	if (grantType !== "authorization_code") return json({ error: "unsupported_grant_type" }, 400);
@@ -2730,7 +2734,7 @@ async function handleToken(request, env) {
 	if ((await sha256Base64Url(verifier)) !== record.codeChallenge)
 		return json({ error: "invalid_grant" }, 400);
 
-	return json(await issueTokens(env, clientId, record.userId));
+	return json(await issueTokens(env, clientId, record.userId, record.sc));
 }
 
 /**
@@ -2738,18 +2742,19 @@ async function handleToken(request, env) {
  * guarda, porque se usa horas mas tarde y para entonces ha propagado de
  * sobra — y a cambio se puede revocar.
  */
-async function issueTokens(env, clientId, userId) {
+async function issueTokens(env, clientId, userId, sc) {
 	// El `nonce` no es decorativo: sin el, el token es una funcion pura de
 	// (usuario, caducidad), y dos emitidos en el mismo milisegundo salen
 	// identicos. Cada token emitido debe ser un artefacto distinto.
 	const accessToken = await signBlob(env, {
 		userId,
+		...(sc ? { sc } : {}),
 		nonce: randomToken(),
 		exp: Date.now() + ACCESS_TTL * 1000,
 	});
 	const refreshToken = randomToken("gmn_r_");
 
-	await env.GARMIN.put(refreshKey(await sha256Hex(refreshToken)), JSON.stringify({ userId, clientId }), {
+	await env.GARMIN.put(refreshKey(await sha256Hex(refreshToken)), JSON.stringify({ userId, clientId, ...(sc ? { sc } : {}) }), {
 		expirationTtl: REFRESH_TTL,
 	});
 
@@ -2758,6 +2763,8 @@ async function issueTokens(env, clientId, userId) {
 		token_type: "Bearer",
 		expires_in: ACCESS_TTL,
 		refresh_token: refreshToken,
+		// Quien pidio el permiso reducido comprueba que es el que le han dado.
+		...(sc ? { scope: sc } : {}),
 	};
 }
 
@@ -2768,7 +2775,46 @@ async function userForRequest(request, env) {
 	const payload = await readBlob(env, header.slice(7));
 	// El codigo de autorizacion tambien lleva userId, pero no es un token.
 	if (payload?.codeChallenge) return null;
+	// Un token con permiso reducido (sc) solo vale para lo suyo (/compartido/plan):
+	// ni el conector, ni la cuenta, ni la app.
+	if (payload?.sc) return null;
 	return payload?.userId ?? null;
+}
+
+// ───────────────────── Plan compartido (myLuv) ─────────────────────
+//
+// myLuv, la app de pareja, enseña los entrenos planificados de cada uno a su
+// pareja, sin detalle. Se vincula con OAuth como cualquier cliente, pidiendo
+// scope=plan:leer: ese token no abre el conector ni nada mas, solo esta ruta,
+// y esta ruta solo devuelve dia, deporte, tipo y minutos. Nada de salud,
+// sueño, peso, comida ni la descripcion de la sesion. No es una herramienta
+// MCP: Claude (el tuyo o el de nadie) no ve nada nuevo.
+
+const SCOPE_PLAN = "plan:leer";
+const INTRO_PLAN_COMPARTIDO =
+	"myLuv quiere ver tus entrenos planificados: el día, el deporte, el tipo y la duración. Nada más: ni salud, ni sueño, ni peso, ni comida. Lo quitas desde myLuv cuando quieras.";
+
+async function handleCompartidoPlan(request, env) {
+	if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+	const header = request.headers.get("Authorization") || "";
+	const payload = header.startsWith("Bearer ") ? await readBlob(env, header.slice(7)) : null;
+	if (!payload?.userId || payload.codeChallenge || payload.sc !== SCOPE_PLAN) return json({ error: "unauthorized" }, 401);
+
+	const url = new URL(request.url);
+	const hoy = fechaLocal();
+	const desde = /^\d{4}-\d{2}-\d{2}$/.test(url.searchParams.get("desde") || "") ? url.searchParams.get("desde") : hoy;
+	const dias = Math.min(21, Math.max(1, Math.round(Number(url.searchParams.get("dias")) || 7)));
+	const plan = planCompleto(await leerDoc(env, payload.userId, "estado/app"));
+	return json({
+		dias: Array.from({ length: dias }, (_, i) => {
+			const fecha = sumaDias(desde, i);
+			const s = plan[fecha];
+			const sesiones = s && s.t !== "descanso" && DEPORTES_APP.has(s.dep)
+				? [{ deporte: s.dep, tipo: s.t, ...(Number(s.min) > 0 ? { minutos: Math.round(Number(s.min)) } : {}) }]
+				: [];
+			return { fecha, sesiones };
+		}),
+	});
 }
 
 // ──────────────────────────────── Paginas ────────────────────────────────
@@ -2815,6 +2861,7 @@ const hiddenFields = (params, extra = {}) =>
 		state: params.state,
 		code_challenge: params.codeChallenge,
 		code_challenge_method: "S256",
+		...(params.scope ? { scope: params.scope } : {}),
 		...extra,
 	})
 		.map(([k, v]) => `<input type="hidden" name="${k}" value="${escapeHtml(v)}">`)
@@ -2838,6 +2885,7 @@ const enlaceModo = (params, modo) =>
 			response_type: "code", client_id: params.clientId, redirect_uri: params.redirectUri,
 			code_challenge: params.codeChallenge, code_challenge_method: "S256", modo,
 			...(params.state ? { state: params.state } : {}),
+			...(params.scope ? { scope: params.scope } : {}),
 		}).toString(),
 	)}`;
 
@@ -2866,7 +2914,9 @@ const TEXTOS_LOGIN = {
 };
 
 const loginPage = (params, error, modo = "entrar") => {
-	const t = TEXTOS_LOGIN[modo] || TEXTOS_LOGIN.entrar;
+	const base = TEXTOS_LOGIN[modo] || TEXTOS_LOGIN.entrar;
+	// Con el permiso reducido, la pantalla dice exactamente lo que se comparte.
+	const t = params.scope === SCOPE_PLAN ? { ...base, intro: INTRO_PLAN_COMPARTIDO } : base;
 	return page(
 		t.titulo,
 		`<h1>${t.titulo}</h1>
@@ -7359,6 +7409,7 @@ export default {
 			if (pathname === "/oauth/token" && request.method === "POST") return handleToken(request, env);
 
 			if (pathname === "/cuenta" || pathname.startsWith("/cuenta/")) return handleCuenta(request, env, pathname);
+			if (pathname === "/compartido/plan") return handleCompartidoPlan(request, env);
 
 			// Descarga del GPX. El id es un token aleatorio, asi que hace de
 			// credencial: permite importar la ruta a mano sin exponer nada mas.

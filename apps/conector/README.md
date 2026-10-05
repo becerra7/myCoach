@@ -111,6 +111,17 @@ entrenador tiene el nombre que le ponga cada usuario (por defecto myCoach) y
 solo planifica bici, correr y skimo, con la fuerza como complemento. Cada
 mañana el cron deja `coach/hoy` calculado para quien usa myCoach.
 
+## Plan compartido con myLuv (`/compartido/plan`)
+
+myLuv, la app de pareja, enseña a cada uno los entrenos planificados del otro, sin detalle. Se vincula desde myLuv con OAuth pidiendo `scope=plan:leer`:
+
+- la pantalla de login dice exactamente qué se comparte;
+- el token lleva el permiso (`sc` en la firma, `scope` en la respuesta) y el refresh lo conserva;
+- con ese permiso solo vale `GET /compartido/plan?desde=YYYY-MM-DD&dias=N` (máx. 21): `{ dias: [{ fecha, sesiones: [{ deporte, tipo, minutos }] }] }`;
+- no abre `/mcp`, `/cuenta` ni la app. Sin `scope`, todo es como antes.
+
+No es una herramienta: Claude no ve nada nuevo. Tests: "plan compartido" en `test.mjs`.
+
 ## Fuerza (`fuerza_*`)
 
 Entrenos de fuerza con nombre, liderados por Claude: `entrenos` (los de fuerza y los de bici y correr), `fuerza_entreno_guardar`, `fuerza_registrar`, `fuerza_historial`, `fuerza_ejercicios_garmin` (busca en el catálogo de Garmin, en castellano; va en `ejercicios-garmin.js`), `entreno_enviar_garmin` con `tipo: fuerza` (crea el entreno de fuerza guiado en Garmin Connect y lo programa; escribe, pide confirmación), `fuerza_desde_garmin` (cierra la sesión con las series que contó el reloj) y `fuerza_dia` (solo la app). Se guarda en `app:<id>:fuerza/entrenos` y `app:<id>:fuerza/registro`; la plantilla y lo hecho van separados.

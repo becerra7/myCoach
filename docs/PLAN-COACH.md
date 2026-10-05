@@ -215,6 +215,12 @@ Objetivo: que funcione sin ti delante y aprender qué enamora.
    - La skill `primeros-pasos` lleva el criterio de cómo hacerlo; el conector, qué falta y dónde se guarda.
 13. **Las instrucciones del conector, por debajo de 4.096 caracteres** (Claude corta a partir de ahí). Lo importante va primero (voz, tirar de la persona, preguntar antes de recomendar, método) y lo de cada herramienta, en su descripción. Un test vigila que no vuelvan a crecer y que no se pierda ninguna regla.
 
+### Decisiones del 5 de octubre: myLuv ve los entrenos planificados, sin detalle
+
+- myLuv (la app de pareja) se vincula con OAuth pidiendo `scope=plan:leer`. Ese token solo abre `GET /compartido/plan`: día, deporte, tipo y minutos. Ni descripción de la sesión, ni salud, ni sueño, ni peso, ni comida.
+- Un token con ese permiso no abre `/mcp`, `/cuenta` ni la app. Sin permiso (o con otro), el OAuth es el de siempre: Claude entra igual que antes.
+- No es una herramienta MCP: el conector sigue con sus 43 herramientas y nadie ve nada de myLuv.
+
 ## 10. Próximos pasos concretos (2 semanas)
 1. Sacar `packages/domain` con carga TRIMP, semáforo y tests.
 2. Documento `atleta/perfil` más registro de decisiones.

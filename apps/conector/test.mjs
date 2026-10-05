@@ -2540,6 +2540,42 @@ const rpc = async (env, token, message) => {
 	globalThis.fetch = base;
 }
 
+// ── Plan compartido con myLuv: permiso reducido plan:leer ──
+{
+	const env = makeEnv();
+	const { tokens: full } = await connect(env, "pareja@x.com", "clavepareja1", null, { modo: "crear" });
+	const hoy = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Madrid" });
+	await rpc(env, full.access_token, { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "app_guardar", arguments: {
+		doc: "estado/app", datos: { plan: { [hoy]: { dep: "bici", t: "fondo", d: "Rodaje suave por el valle con 3 subidas", min: 90 } } } } } });
+
+	const sinScope = await (await get(env, "/compartido/plan", { Authorization: `Bearer ${full.access_token}` })).json().catch(() => null);
+	check("plan compartido: un token normal no vale", sinScope?.error === "unauthorized");
+
+	const pagina = await (await get(env, `/oauth/authorize?${new URLSearchParams({
+		response_type: "code", client_id: (await (await postJson(env, "/oauth/register", { redirect_uris: [REDIRECT] })).json()).client_id,
+		redirect_uri: REDIRECT, code_challenge: CHALLENGE, code_challenge_method: "S256", scope: "plan:leer",
+	})}`)).text();
+	check("plan compartido: la pantalla dice lo que se comparte y lo que no", pagina.includes("Nada más") && pagina.includes('name="scope" value="plan:leer"'));
+
+	const { tokens: plan } = await connect(env, "pareja@x.com", "clavepareja1", null, { modo: "entrar", scope: "plan:leer" });
+	check("plan compartido: el token dice su permiso", plan.scope === "plan:leer");
+	const leido = await (await get(env, `/compartido/plan?desde=${hoy}&dias=2`, { Authorization: `Bearer ${plan.access_token}` })).json();
+	const s0 = leido.dias?.[0]?.sesiones?.[0];
+	check("plan compartido: dia, deporte, tipo y minutos", s0?.deporte === "bici" && s0?.tipo === "fondo" && s0?.minutos === 90 && leido.dias.length === 2, JSON.stringify(leido));
+	check("plan compartido: sin la descripcion de la sesion", !JSON.stringify(leido).includes("valle"));
+
+	const mcp = await rpc(env, plan.access_token, { jsonrpc: "2.0", id: 1, method: "tools/list" });
+	check("plan compartido: el token reducido no abre el conector", mcp.status === 401);
+	check("plan compartido: ni la cuenta", (await get(env, "/cuenta", { Authorization: `Bearer ${plan.access_token}` })).status === 401);
+
+	const refrescado = await (await postForm(env, "/oauth/token", { grant_type: "refresh_token", refresh_token: plan.refresh_token })).json();
+	check("plan compartido: el refresh mantiene el permiso reducido", refrescado.scope === "plan:leer");
+	check("plan compartido: y sigue sin abrir el conector", (await rpc(env, refrescado.access_token, { jsonrpc: "2.0", id: 1, method: "tools/list" })).status === 401);
+
+	const listaNormal = await rpc(env, full.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
+	check("plan compartido: Claude no ve ninguna herramienta nueva", listaNormal.body.result.tools.length === 43);
+}
+
 /** Firma un token como lo hace el worker, para poder fabricar uno en un test. */
 async function signForTest(secret, payload) {
 	const b64 = (bytes) =>
