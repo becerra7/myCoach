@@ -15,6 +15,7 @@ function tabComerV1() {
         <h1 id="com-t" style="font-size:clamp(34px,9.5cqi,56px)">${titular}</h1><p class="porque">${porque}</p>
         <div class="btns"><button class="btn fill" type="button" data-a="v-encargo" data-v="1">Registrar con Claude</button><button class="link" type="button" data-a="meal-add">Añadir a mano</button></div></section>
       ${bloqueDia(false)}
+      ${bloqueMenus()}
       ${blk(`${blkH('Durante el entreno', info('durante', 'Comer durante el entreno', 'En salidas de más de 90 minutos, a partir de la segunda hora conviene tomar 60-90 g de hidrato por hora. Lo que tomas de verdad en cada salida lo guardará tu Claude al analizarla, y saldrá en Progreso como combustible.'))}<p>${durante}</p>`)}
     </div><div class="col">
       ${historicoComida()}

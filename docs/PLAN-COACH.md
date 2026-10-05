@@ -215,6 +215,13 @@ Objetivo: que funcione sin ti delante y aprender qué enamora.
    - La skill `primeros-pasos` lleva el criterio de cómo hacerlo; el conector, qué falta y dónde se guarda.
 13. **Las instrucciones del conector, por debajo de 4.096 caracteres** (Claude corta a partir de ahí). Lo importante va primero (voz, tirar de la persona, preguntar antes de recomendar, método) y lo de cada herramienta, en su descripción. Un test vigila que no vuelvan a crecer y que no se pierda ninguna regla.
 
+### Decisiones del 5 de octubre: plan de comidas
+14. **Plan semanal de comidas, como el de entrenos.** Cambia la decisión del 4 de octubre ("sin plan semanal por ahora"), a petición del usuario. Se hace todo lo de la fase "Comidas I" de `docs/PROPUESTA-AGENDA-COMIDA-HOGAR.md` **menos la base de datos de alimentos** (CIQUAL/BEDCA): los nutrientes de un plato los estima Claude o los da el usuario, y lo que no se sabe queda como **desconocido**, nunca inventado.
+    - El motor (conector) pone la carga de cada día a partir del plan de entrenos y el **código de hidrato** de cada comida: alto el día duro (2 h o más, o series), medio el moderado (1 h o más), bajo el suave; la cena de la víspera de un día duro, alta; la merienda, un punto por debajo. En cuartos de plato, sin calorías.
+    - Herramientas: `comida_plan` (la semana, con `lista_compra`), `comida_proponer` (sin guardar por defecto; guarda con su sí), `comida_platos`, `comida_plato_guardar`. `comida_registrar` acepta `plato_id`, `del_plan` y `guardar_como_plato`. El perfil gana `nutricion` (alergias, no_gustos, gustos, tiempo_min, para_cuantos, quien_cocina, tupper).
+    - Reglas: una alergia o algo que no le gusta **no se guarda**; si un plato no dice lo que lleva y hay alergias, se avisa para confirmarlo. Avisos: hidrato fuera del código, mismo plato en menos de tres días (las sobras de tupper al día siguiente, no), menos de 2 legumbres o 2 pescados con la semana casi planeada, y comidas que caen fuera de casa según la agenda.
+    - Web: en Comer, "Menús de esta semana" (y la que viene) con la hoja de cada día y la lista de la compra; en Hoy, "Tu día" enseña lo previsto y el hidrato del motor. Los menús los propone tu Claude.
+
 ## 10. Próximos pasos concretos (2 semanas)
 1. Sacar `packages/domain` con carga TRIMP, semáforo y tests.
 2. Documento `atleta/perfil` más registro de decisiones.

@@ -1041,6 +1041,14 @@ button.hp-encaje{cursor:pointer;align-items:center;min-height:44px}
 .dias .t b::before{content:"";display:inline-block;width:10px;height:10px;margin-right:8px;border-radius:2px;background:var(--c,var(--fill));vertical-align:1px}
 .dias .st{font-size:13px;font-weight:650;white-space:nowrap}
 .dias li.es-hoy>button{background:var(--surface)}
+/* Menús de la semana: el código de hidrato va en texto, sin marca de color */
+.dias .t b.sin-marca::before{display:none}
+.menu-c{display:grid;gap:2px}
+.menu-h{display:flex;align-items:baseline;flex-wrap:wrap;gap:0 2px}
+.menu-h .nivel{margin-left:8px}
+.avisos-menu{display:grid;gap:6px;margin-top:12px}
+.avisos-menu p{display:flex;gap:8px;align-items:flex-start;margin:0;color:var(--label-2)}
+.avisos-menu svg{flex:none;margin-top:2px}
 .filas{list-style:none;margin:0;padding:0}
 .filas>li{padding:12px 0;border-bottom:1px solid var(--rule)}
 .filas>li:first-child{border-top:1px solid var(--rule)}

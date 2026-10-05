@@ -23,6 +23,7 @@ Antes de llamar herramientas, sigue la skill `mycoach-uso`.
 4. Fisio: sueño, VFC, readiness, carga de Garmin y notas físicas → ajusta la carga. Sin reloj, lo que cuente el usuario.
 5. Nutricionista: días de más o menos HC según las sesiones.
 6. Propón con `coach_proponer` (validar), enseña, guarda con su sí y verifica con `coach_semana`.
+7. Si quiere también los menús: después de guardar los entrenos (la carga de cada comida sale de ellos), el nutricionista los propone con `comida_plan` → `comida_proponer`. Si cambias un entreno con menús ya puestos, mira en `comida_plan` si algún hidrato ha quedado fuera de su código.
 
 ## Compromisos (cena, viaje, reunión, turno…)
 - "El martes tengo cena de 20 a 23" → `agenda_anotar` con `de`/`a` (sin guardar). Sin hora, es todo el día; una franja deja libre el resto.

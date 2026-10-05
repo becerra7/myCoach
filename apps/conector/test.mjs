@@ -556,7 +556,7 @@ const rpc = async (env, token, message) => {
 	check("un navegador en la raiz sigue viendo la pagina", (await (await get(env, "/")).text()).includes("<h1>"));
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("tools/list devuelve 43 herramientas", list.body.result.tools.length === 43);
+	check("tools/list devuelve 47 herramientas", list.body.result.tools.length === 47);
 	check("app_guardar se anuncia como escritura", anot0(list).app_guardar.readOnlyHint === false);
 	{
 		const call = (name, args) => rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name, arguments: args } });
@@ -1245,7 +1245,7 @@ const rpc = async (env, token, message) => {
 	check("el token de acceso vale sin leer del KV", init.body.result?.serverInfo?.name === "garmin");
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("las herramientas se listan igualmente", list.body.result.tools.length === 43);
+	check("las herramientas se listan igualmente", list.body.result.tools.length === 47);
 
 	// Y el dato que si vive en KV avisa en vez de mentir
 	const call = await rpc(env, tokens.access_token, {
@@ -2086,7 +2086,7 @@ const rpc = async (env, token, message) => {
 	const viejas = ["garmin_sleep", "garmin_hrv", "garmin_daily_summary", "garmin_body_battery", "garmin_training_readiness", "garmin_course_detail", "fuerza_entrenos", "cardio_entrenos", "fuerza_enviar_garmin", "cardio_enviar_garmin"];
 	check("las herramientas juntadas ya no existen", !tools.some((t) => viejas.includes(t.name)));
 	const visibles = tools.filter((t) => !t._meta?.ui?.visibility || t._meta.ui.visibility.includes("model"));
-	check("Claude ve 38 herramientas", visibles.length === 38, String(visibles.length));
+	check("Claude ve 42 herramientas", visibles.length === 42, String(visibles.length));
 }
 
 // ── 13. Intervals.icu: clave cifrada, actividades, series, bienestar y curvas ──
@@ -2538,6 +2538,115 @@ const rpc = async (env, token, message) => {
 	const otra = await llamar("entrenos_desde_garmin");
 	check("importar otra vez no duplica", otra.nuevos.length === 0);
 	globalThis.fetch = base;
+}
+
+// ── 19. Plan de comidas: la semana de comidas va como la de entrenos ──
+{
+	const fechaMadrid = (d = new Date()) =>
+		new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+	const HOY_C = fechaMadrid();
+	const mas = (f, n) => { const d = new Date(`${f}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+	const lunes = (() => { const d = new Date(`${HOY_C}T12:00:00Z`); return mas(HOY_C, -((d.getUTCDay() + 6) % 7)); })();
+	const L = mas(lunes, 7); // la semana que viene: entera por delante
+	mockGarmin({ "ana@x.com": { password: "a", data: { displayName: "ana", hrv: 50 } }, "bob@x.com": { password: "b", data: { displayName: "bob", hrv: 60 } } });
+	const env = makeEnv();
+	const ana = (await connect(env, "ana@x.com", "a")).tokens.access_token;
+	const bob = (await connect(env, "bob@x.com", "b")).tokens.access_token;
+	const llamar = async (token, name, args = {}) => {
+		const res = (await rpc(env, token, { jsonrpc: "2.0", id: 50, method: "tools/call", params: { name, arguments: args } })).body.result;
+		return res.isError ? { error: res.content[0].text } : JSON.parse(res.content[0].text);
+	};
+	// Semana que viene: series el martes y fondo de 3 h el sábado.
+	const next = { [mas(L, 1)]: { dep: "bici", t: "int", d: "Series 5 x 4 min", min: 60 }, [mas(L, 5)]: { dep: "bici", t: "fondo", d: "Fondo largo", min: 180 }, [mas(L, 3)]: { dep: "correr", t: "rec", d: "Rodaje", min: 40 } };
+	await llamar(ana, "app_guardar", { doc: "estado/app", datos: { plan: {}, next, goal: { modo: "forma" }, sports: ["bici", "correr"] } });
+
+	const vacio = await llamar(ana, "comida_plan", { semana: "siguiente" });
+	check("comida_plan: siete días con la carga sacada del plan de entrenos",
+		vacio.lunes === L && vacio.dias.length === 7 && vacio.dias[5].carga.nivel === "duro" && vacio.dias[1].carga.nivel === "duro" && vacio.dias[3].carga.nivel === "suave", JSON.stringify(vacio.dias.map((d) => d.carga)));
+	check("comida_plan: hidrato alto el día duro y en la cena de la víspera del fondo",
+		vacio.dias[5].comidas.comida.hidrato === "alto" && vacio.dias[4].comidas.cena.hidrato === "alto" && vacio.dias[4].comidas.comida.hidrato === "bajo"
+		&& vacio.dias[4].comidas.cena.por_que.includes("3 h") && vacio.dias[3].comidas.cena.cuartos_hidrato === "1", JSON.stringify(vacio.dias[4].comidas));
+	check("comida_plan: sin preferencias, pregunta antes de proponer", vacio.antes_de_proponer.length === 4 && vacio.planeadas === "0 de 28 comidas");
+
+	// El perfil de comida se mezcla por dentro.
+	await llamar(ana, "coach_perfil_guardar", { cambios: { nutricion: { alergias: ["marisco"], no_gustos: ["coliflor"] } } });
+	const perf = await llamar(ana, "coach_perfil_guardar", { cambios: { nutricion: { tiempo_min: 30, para_cuantos: 2 } } });
+	check("perfil: nutricion se mezcla y no borra las alergias", perf.perfil.nutricion.alergias[0] === "marisco" && perf.perfil.nutricion.tiempo_min === 30, JSON.stringify(perf.perfil.nutricion));
+	check("perfil: nutricion valida las listas", Boolean((await llamar(ana, "coach_perfil_guardar", { cambios: { nutricion: { alergias: "marisco" } } })).error));
+
+	// Platos: lo que no se sabe queda como desconocido.
+	const lent = await llamar(ana, "comida_plato_guardar", {
+		nombre: "Lentejas con verduras", carbohidrato: 2, proteina: 1, verdura: 1, grupo: "legumbre", tupper: true, momentos: ["comida", "cena"],
+		ingredientes: [{ nombre: "Lentejas", cantidad: "80 g", pasillo: "despensa" }, { nombre: "Zanahoria", cantidad: "1", pasillo: "fruta y verdura" }],
+		nutrientes: { hc_g: 48, prot_g: 19, sal_g: "desconocido" },
+	});
+	check("plato: se guarda con id y los nutrientes que faltan como desconocido",
+		lent.guardado && lent.plato.id === "lentejas-con-verduras" && lent.plato.nutrientes.hc_g === 48 && lent.plato.nutrientes.sal_g === "desconocido" && lent.plato.nutrientes.kcal === "desconocido" && lent.plato.nutrientes_son === "estimados por Claude", JSON.stringify(lent.plato));
+	const corr = await llamar(ana, "comida_plato_guardar", { id: "lentejas-con-verduras", nutrientes: { kcal: 420 }, nutrientes_origen: "usuario" });
+	check("plato: corregir conserva lo que no se pasa", corr.corregido && corr.plato.nutrientes.hc_g === 48 && corr.plato.nutrientes.kcal === 420 && corr.plato.ingredientes.length === 2, JSON.stringify(corr.plato));
+	check("plato: los cuartos no pasan de 4", Boolean((await llamar(ana, "comida_plato_guardar", { nombre: "Raro", carbohidrato: 3, proteina: 2, verdura: 0 })).error));
+	check("plato: un nutriente tiene que ser número o desconocido", Boolean((await llamar(ana, "comida_plato_guardar", { nombre: "Raro", carbohidrato: 1, proteina: 1, verdura: 1, nutrientes: { hc_g: "mucho" } })).error));
+	await llamar(ana, "comida_plato_guardar", { nombre: "Paella de marisco", carbohidrato: 2, proteina: 1, verdura: 1, grupo: "pescado", ingredientes: [{ nombre: "Arroz" }, { nombre: "Gambas" }], alergenos: ["marisco", "crustaceos"] });
+	const lista = await llamar(ana, "comida_platos", { momento: "comida" });
+	check("comida_platos: lista con cuartos y cuántos nutrientes se conocen", lista.total === 2 && lista.platos[0].nombre === "Lentejas con verduras" && lista.platos[0].nutrientes_conocidos === "3 de 6", JSON.stringify(lista));
+	check("comida_platos: con id, el detalle", (await llamar(ana, "comida_platos", { id: "Lentejas con verduras" })).ingredientes.length === 2);
+	check("los platos son de cada uno", (await llamar(bob, "comida_platos")).total === 0);
+
+	// Proponer: sin guardar, el antes y después; las alergias no se guardan.
+	const prop = await llamar(ana, "comida_proponer", {
+		porque: "Semana con fondo el sábado",
+		cambios: {
+			[mas(L, 4)]: { cena: { descripcion: "Ensalada de pollo", carbohidrato: 0, proteina: 2, verdura: 2 } },
+			[mas(L, 2)]: { comida: { plato_id: "lentejas-con-verduras" } },
+			[mas(L, 3)]: { comida: { plato_id: "lentejas-con-verduras" } },
+		},
+	});
+	check("comida_proponer: sin guardar devuelve antes y después", prop.guardado === false && prop.valido && prop.cambios.length === 3 && prop.cambios.every((c) => c.antes === null), JSON.stringify(prop));
+	const av = prop.semanas[0].avisos;
+	check("comida_proponer: avisa del hidrato bajo en la víspera del fondo", av.some((a) => a.regla === "hidrato" && a.fecha === mas(L, 4) && a.momento === "cena"), JSON.stringify(av));
+	check("comida_proponer: las sobras de un plato de tupper al día siguiente no cuentan como repetir", !av.some((a) => a.regla === "repetido"), JSON.stringify(av));
+	check("comida_proponer: no guarda sin el sí", (await llamar(ana, "comida_plan", { semana: "siguiente" })).planeadas === "0 de 28 comidas");
+	const alergia = await llamar(ana, "comida_proponer", { porque: "x", guardar: true, cambios: { [mas(L, 6)]: { comida: { plato_id: "paella-de-marisco" } } } });
+	check("comida_proponer: un plato con su alergia no se guarda", alergia.guardado === false && alergia.semanas[0].errores.some((e) => e.regla === "alergia"), JSON.stringify(alergia));
+	const noGusta = await llamar(ana, "comida_proponer", { porque: "x", cambios: { [mas(L, 6)]: { cena: { descripcion: "Coliflor gratinada", carbohidrato: 1, proteina: 1, verdura: 2 } } } });
+	check("comida_proponer: lo que no le gusta tampoco", noGusta.valido === false && noGusta.semanas[0].errores[0].regla === "no_le_gusta");
+	const sinSaber = await llamar(ana, "comida_proponer", { porque: "x", cambios: { [mas(L, 6)]: { cena: { descripcion: "Arroz tres delicias", carbohidrato: 2, proteina: 1, verdura: 1 } } } });
+	check("comida_proponer: si no sabe lo que lleva, pide confirmarlo", sinSaber.valido && sinSaber.semanas[0].avisos.some((a) => a.regla === "alergia_sin_saber"), JSON.stringify(sinSaber.semanas[0].avisos));
+	check("comida_proponer: un plato que no existe da error", Boolean((await llamar(ana, "comida_proponer", { porque: "x", cambios: { [mas(L, 6)]: { cena: { plato_id: "no-existe" } } } })).error));
+	check("comida_proponer: sin cuartos ni plato da error", Boolean((await llamar(ana, "comida_proponer", { porque: "x", cambios: { [mas(L, 6)]: { cena: { descripcion: "Algo" } } } })).error));
+	check("comida_proponer: nada de días pasados", Boolean((await llamar(ana, "comida_proponer", { porque: "x", cambios: { [mas(lunes, -1)]: { cena: null } } })).error));
+
+	const guardado = await llamar(ana, "comida_proponer", {
+		porque: "Semana con fondo el sábado", guardar: true,
+		cambios: { [mas(L, 4)]: { cena: { descripcion: "Pasta con atún", carbohidrato: 2, proteina: 1, verdura: 1 } }, [mas(L, 2)]: { comida: { plato_id: "lentejas-con-verduras" } } },
+	});
+	check("comida_proponer: con el sí se guarda", guardado.guardado === true && guardado.cambios.length === 2, JSON.stringify(guardado));
+	const plan = await llamar(ana, "comida_plan", { semana: mas(L, 3), lista_compra: true });
+	check("comida_plan: lo guardado sale en su día", plan.planeadas === "2 de 28 comidas" && plan.dias[4].comidas.cena.plan.descripcion === "Pasta con atún" && plan.dias[2].comidas.comida.plan.plato_id === "lentejas-con-verduras", JSON.stringify(plan.dias[4].comidas.cena));
+	const compra = plan.lista_compra;
+	check("lista de la compra: por pasillo, y lo que no tiene ingredientes aparte",
+		compra.pasillos.some((p) => p.pasillo === "despensa" && p.ingredientes[0].nombre === "Lentejas" && p.ingredientes[0].cantidades[0] === "80 g") && compra.sin_ingredientes.some((x) => x.includes("Pasta con atún")), JSON.stringify(compra));
+	const dec = await llamar(ana, "app_leer", { doc: "coach/decisiones" });
+	check("el cambio queda en las decisiones con su porqué", JSON.stringify(dec).includes("Semana con fondo el sábado") && JSON.stringify(dec).includes("\"comida\""));
+
+	// La agenda dice qué comidas son fuera de casa.
+	await llamar(ana, "agenda_anotar", { fecha: mas(L, 6), de: "21:00", a: "23:30", titulo: "Cena con amigos", tipo: "social", guardar: true });
+	const conAgenda = await llamar(ana, "comida_plan", { semana: "siguiente" });
+	check("comida_plan: la cena con amigos sale como comida fuera", conAgenda.dias[6].comidas.cena.fuera === "Cena con amigos" && !conAgenda.dias[6].comidas.comida.fuera, JSON.stringify(conAgenda.dias[6].comidas));
+
+	// Registrar: con un plato guardado, y guardar una comida como plato.
+	const reg = await llamar(ana, "comida_registrar", { tipo: "comida", plato_id: "lentejas-con-verduras", hora: "14:00" });
+	check("comida_registrar con plato_id toma sus cuartos y su nombre", reg.comida.carbohidrato === 2 && reg.comida.descripcion === "Lentejas con verduras", JSON.stringify(reg));
+	const reg2 = await llamar(ana, "comida_registrar", { tipo: "cena", carbohidrato: 1, proteina: 2, verdura: 1, descripcion: "Tortilla de patatas", guardar_como_plato: true });
+	check("comida_registrar puede guardarla como plato", reg2.plato_guardado?.id === "tortilla-de-patatas" && (await llamar(ana, "comida_platos", { id: "tortilla-de-patatas" })).momentos[0] === "cena", JSON.stringify(reg2));
+	await llamar(ana, "comida_proponer", { porque: "x", guardar: true, cambios: { [HOY_C]: { merienda: { descripcion: "Yogur con fruta", carbohidrato: 1, proteina: 1, verdura: 0 } } } });
+	const prev = await llamar(ana, "comida_registrar", { tipo: "merienda", del_plan: true });
+	check("comida_registrar del_plan registra lo previsto", prev.comida?.descripcion === "Yogur con fruta" && prev.comida.proteina === 1, JSON.stringify(prev));
+	check("comida_registrar del_plan sin nada previsto da error", Boolean((await llamar(ana, "comida_registrar", { tipo: "cena", del_plan: true })).error));
+
+	// Borrar un plato
+	const borr = await llamar(ana, "comida_plato_guardar", { id: "paella-de-marisco", borrar: true });
+	check("plato: borrar lo quita", borr.borrado && (await llamar(ana, "comida_platos")).total === 2);
 }
 
 /** Firma un token como lo hace el worker, para poder fabricar uno en un test. */

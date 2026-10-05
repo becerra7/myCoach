@@ -81,6 +81,7 @@ const ENCARGOS = [
   ['Trázame una ruta de bici', 'Trázame una ruta de bici de unos 80 km y 1.000 m saliendo de donde suelo salir. Mira antes mis rutas guardadas y no la guardes en Garmin sin preguntarme.'],
   ['¿Cómo me ha ido la última salida?', 'Analiza mi última actividad con myCoach: cómo fue, si cuadró con el plan y qué comí durante. Compárala con la misma ruta si la he hecho antes.'],
   ['¿Estoy mejorando?', 'Con coach_progreso, dime si estoy mejorando en bici: motor aeróbico, desacople, disciplina en los fondos, durabilidad y combustible en ruta.'],
+  ['Prepárame los menús de la semana', 'Prepárame los menús de la semana que viene con myCoach: mira comida_plan (la carga de cada día, el hidrato que toca en cada comida y lo que aún no sabes de mí), usa mis platos guardados y propónmelos con comida_proponer. Enséñamelos antes de guardarlos.'],
 ];
 function hojaClaude() {
   if (typeof claudeReal === 'function' && claudeReal()) { openClaude(); return; }

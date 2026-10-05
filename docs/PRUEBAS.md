@@ -106,6 +106,15 @@ Web myCoach (mycoach / mycoach-pruebas) ─────────────�
    - **Hablarlo con Claude** copia un encargo para pegarlo en Claude.
 4. **Intervals.icu** (opcional): en intervals.icu, *Settings → Connections* conecta tu Garmin. Luego, en *Settings → Developer Settings*, copia el **Athlete ID** y crea la **API Key**. En la web de pruebas: **Ajustes → Conexiones → Intervals.icu**, pega los dos y pulsa *Conectar*. El conector comprueba la clave con Intervals.icu antes de guardarla.
 
+### C. Plan de comidas (unos 10 minutos)
+
+1. En tu Claude: "Prepárame los menús de la semana que viene". Debe leer `comida_plan`, preguntarte lo que falte (alergias, lo que no te gusta, tiempo para cocinar, para cuántos) de una en una y enseñarte el antes y después **sin guardar**.
+2. Comprueba que la cena de la víspera del fondo lleva hidrato alto y que, si le pides un plato con algo a lo que eres alérgico, no lo guarda.
+3. Dile "sí" y abre la web: en Comer sale "Menús de la semana que viene" (flecha a la derecha). Toca un día: cada comida con su hidrato y lo previsto.
+4. "Guárdame las lentejas como plato, con sus ingredientes": `comida_plato_guardar`. Lo que no sepa estimar sale como desconocido.
+5. En la web, "Lista de la compra": por pasillo, solo con los platos que tienen ingredientes.
+6. Hoy, en "Tu día": lo previsto sale en cada comida sin registrar; "Me lo he comido" en la hoja del día lo registra (y se puede deshacer).
+
 ## 4. Cuidado con esto
 
 - **Los datos son los reales.** Los Workers de pruebas comparten KV y D1 con producción: misma cuenta de Garmin, mismo plan. Si desde pruebas guardas un cambio de plan, se ve también en la web de siempre. Es a propósito (así pruebas con tus datos), pero tenlo en cuenta.

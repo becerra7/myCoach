@@ -4330,18 +4330,22 @@ const COACH_TOOLS = {
 		description:
 			"Mezcla campos en el perfil del deportista: objetivo { evento, fecha, tipo }, disponibilidad { dias, horas_semana, " +
 			"franjas }, lesiones (lista completa de { zona, desde, estado: activa|mejorando|curada }; [] si ninguna), experiencia " +
-			"(por deporte, con sus palabras), preferencias, material, notas, entrenador { nombre, tono: { estilo, humor 0-3, emojis } } " +
-			"y no_le_gusta (lista completa de { ejercicio, motivo, alternativa }). Guarde lo que el usuario cuente y deba recordarse, diciendole que lo guarda.",
+			"(por deporte, con sus palabras), preferencias, material, notas, entrenador { nombre, tono: { estilo, humor 0-3, emojis } }, " +
+			"no_le_gusta (lista completa de { ejercicio, motivo, alternativa }) y nutricion { alergias, no_gustos, gustos (listas completas), " +
+			"tiempo_min, para_cuantos, quien_cocina, tupper }. Guarde lo que el usuario cuente y deba recordarse, diciendole que lo guarda.",
 		schema: {
 			type: "object",
 			properties: {
-				cambios: { type: "object", description: "Campos a mezclar: objetivo, disponibilidad, lesiones, experiencia, preferencias, material, notas, entrenador, no_le_gusta." },
+				cambios: { type: "object", description: "Campos a mezclar: objetivo, disponibilidad, lesiones, experiencia, preferencias, material, notas, entrenador, no_le_gusta, nutricion." },
 			},
 			required: ["cambios"],
 		},
 		run: async (env, userId, { cambios } = {}) => {
 			if (!cambios || typeof cambios !== "object" || Array.isArray(cambios)) throw new HttpError(400, "cambios debe ser un objeto");
-			const permitidos = ["objetivo", "disponibilidad", "lesiones", "experiencia", "preferencias", "material", "notas", "entrenador", "no_le_gusta"];
+			const permitidos = ["objetivo", "disponibilidad", "lesiones", "experiencia", "preferencias", "material", "notas", "entrenador", "no_le_gusta", "nutricion"];
+			if (cambios.nutricion !== undefined && (!cambios.nutricion || typeof cambios.nutricion !== "object" || Array.isArray(cambios.nutricion)
+				|| ["alergias", "no_gustos", "gustos"].some((k) => cambios.nutricion[k] !== undefined && !Array.isArray(cambios.nutricion[k]))))
+				throw new HttpError(400, "nutricion debe ser { alergias, no_gustos, gustos (listas completas), tiempo_min, para_cuantos, quien_cocina, tupper }");
 			if (limpio_entrenador_invalido(cambios)) throw new HttpError(400, "entrenador debe ser { nombre (hasta 24 letras), tono: { estilo, humor 0-3, emojis } }");
 			if (cambios.no_le_gusta !== undefined && (!Array.isArray(cambios.no_le_gusta) || cambios.no_le_gusta.length > 40 || cambios.no_le_gusta.some((x) => !String(x?.ejercicio || "").trim())))
 				throw new HttpError(400, "no_le_gusta debe ser la lista completa de { ejercicio, motivo, alternativa }");
@@ -4353,6 +4357,8 @@ const COACH_TOOLS = {
 				...actual.entrenador, ...limpio.entrenador,
 				...(limpio.entrenador.tono || actual.entrenador?.tono ? { tono: { ...actual.entrenador?.tono, ...limpio.entrenador.tono } } : {}),
 			};
+			// La comida tambien se mezcla por dentro: guardar las alergias no borra el tiempo para cocinar.
+			if (limpio.nutricion) limpio.nutricion = { ...actual.nutricion, ...limpio.nutricion };
 			const nuevo = { ...actual, ...limpio };
 			if (JSON.stringify(nuevo).length > 50_000) throw new HttpError(413, "Perfil demasiado grande");
 			return { guardado: true, perfil: await guardarDoc(env, userId, "atleta/perfil", nuevo) };
@@ -4875,6 +4881,7 @@ const instruccionesCoach = (nombre = NOMBRE_COACH) =>
 	"solo con su si; si insiste en algo que el motor rechaza, dile que puede hacerlo pero que no se lo recomiendas y por que. Planifica solo bici, correr y " +
 	"skimo, y fuerza como complemento; el resto cuenta como carga. Como se encuentra o un dolor: coach_anotar. Ante dolor o sintomas raros, baja la carga y " +
 	"recomienda un profesional; nunca diagnostiques." +
+	" COMIDA: la semana de comidas va igual: comida_plan (codigo de hidrato por dia) y comida_proponer sin guardar; usa sus platos (comida_platos)." +
 	" AGENDA: si cuenta algo que le ocupa tiempo (cena, viaje, reunion, recoger a los ninos), anotalo con agenda_anotar, primero sin guardar " +
 	"para ensenar como queda el plan. Su calendario y sus compromisos ya vienen en coach_semana y agenda: no le preguntes lo que ya esta ahi. " +
 	"Nunca pongas una sesion en un dia sin hueco sin preguntarle; si entrena igualmente, coach_proponer con entrena_igualmente=true." +
@@ -7003,7 +7010,9 @@ Object.assign(TOOLS, {
 			"Guarda en myCoach una comida en cuartos de plato (carbohidrato, proteina y verdura, de 0 a 4 cada uno, que suman 4 como mucho), " +
 			"sin calorias. Desayuno, comida, merienda y cena son una por dia: registrarla otra vez ese dia la corrige. Tentempie y durante " +
 			"(el entreno) se acumulan; para corregir uno, pase su id (comidas lo da). borrar=true con id, o con tipo y fecha, la quita. " +
-			"La app la enseña al momento. Si le pasa una foto o le cuenta lo que ha comido, estime los cuartos, digaselo en una frase y guardelo.",
+			"La app la enseña al momento. Si le pasa una foto o le cuenta lo que ha comido, estime los cuartos, digaselo en una frase y guardelo. " +
+			"Con plato_id (comida_platos) toma los cuartos y el nombre de ese plato; con del_plan=true, los de lo previsto ese dia (comida_plan). " +
+			"guardar_como_plato=true la guarda ademas como plato para reutilizarla.",
 		schema: {
 			type: "object",
 			properties: {
@@ -7016,13 +7025,30 @@ Object.assign(TOOLS, {
 				hora: { type: "string", description: "HH:MM; por defecto ahora (hora de España)." },
 				id: { type: "string", description: "Para corregir o borrar una ya guardada." },
 				borrar: { type: "boolean" },
+				plato_id: { type: "string", description: "Un plato guardado: sus cuartos y su nombre, salvo lo que pase aparte." },
+				del_plan: { type: "boolean", description: "true: lo que estaba previsto en el plan de comidas para ese dia y esa comida." },
+				guardar_como_plato: { type: "boolean", description: "true: ademas la guarda como plato (con sus cuartos; lo demas, desconocido)." },
 			},
 			required: ["tipo"],
 		},
-		run: async (env, userId, args = {}) => {
+		run: async (env, userId, entrada = {}) => {
+			let args = entrada;
 			const tipo = TIPOS_COMIDA[claveTipoComida(args.tipo)];
 			if (!tipo && !args.id) throw new HttpError(400, `tipo: ${Object.keys(TIPOS_COMIDA).join(", ")}`);
 			const fecha = /^\d{4}-\d{2}-\d{2}$/.test(args.fecha || "") ? args.fecha : fechaLocal();
+			// Un plato guardado o lo previsto en el plan ponen los cuartos y el nombre; lo que se pase aparte manda.
+			if (args.plato_id || args.del_plan === true) {
+				let base;
+				if (args.plato_id) {
+					const p = (await leerPlatos(env, userId))[slugFuerza(args.plato_id)];
+					if (!p) throw new HttpError(404, `No hay ningun plato "${args.plato_id}".`);
+					base = { c: p.cuartos.c, p: p.cuartos.p, v: p.cuartos.v, txt: p.nombre };
+				} else {
+					base = (await leerPlanComida(env, userId))[fecha]?.[claveTipoComida(args.tipo)];
+					if (!base) throw new HttpError(404, `No hay nada previsto para ${claveTipoComida(args.tipo)} el ${fecha}.`);
+				}
+				args = { ...args, carbohidrato: args.carbohidrato ?? base.c, proteina: args.proteina ?? base.p, verdura: args.verdura ?? base.v, descripcion: args.descripcion ?? base.txt };
+			}
 			const estado = (await leerDoc(env, userId, "estado/app")) || {};
 			const meals = Array.isArray(estado.meals) ? estado.meals : [];
 			const previa = args.id ? meals.find((m) => m.id === args.id)
@@ -7054,9 +7080,18 @@ Object.assign(TOOLS, {
 			}
 			// Sello de tiempo: la app ve que hay cambios y los carga.
 			await guardarDoc(env, userId, "estado/app", { ...estado, meals: lista.slice(-400), at: Date.now() });
+			let plato = null;
+			if (guardada && args.guardar_como_plato === true && guardada.c + guardada.p + guardada.v > 0) {
+				const momento = claveTipoComida(guardada.tipo);
+				plato = (await TOOLS.comida_plato_guardar.run(env, userId, {
+					nombre: guardada.txt, carbohidrato: guardada.c, proteina: guardada.p, verdura: guardada.v,
+					...(MOMENTOS.includes(momento) ? { momentos: [momento] } : {}),
+				})).plato;
+			}
 			return {
 				guardado: true, borrado: args.borrar === true, corregida: Boolean(previa) && args.borrar !== true,
 				...(guardada ? { comida: comidaParaFuera(guardada) } : {}),
+				...(plato ? { plato_guardado: { id: plato.id, nombre: plato.nombre } } : {}),
 			};
 		},
 	},
@@ -7071,6 +7106,487 @@ Object.assign(TOOLS, {
 			const desde = sumaDias(hasta, -(n - 1));
 			const meals = ((await leerDoc(env, userId, "estado/app"))?.meals || []).filter((m) => m && m.f >= desde && m.f <= hasta);
 			return { desde, hasta, comidas: meals.sort((a, b) => (a.f + a.h).localeCompare(b.f + b.h)).map(comidaParaFuera) };
+		},
+	},
+});
+
+// ──────────────────────────── Plan de comidas y platos ────────────────────────────
+// La semana de comidas va como la de entrenos: el motor pone la carga de cada día y
+// el código de hidrato de cada comida (alto, medio o bajo), Claude propone los platos
+// y se guarda solo con el sí del usuario (comida_proponer, como coach_proponer).
+// Sin base de datos de alimentos: lo que lleva un plato lo estima Claude o lo dice el
+// usuario, y el valor que nadie sabe se queda como "desconocido", nunca inventado.
+//   nutricion/platos  { platos: { id: plato } }   tus platos guardados
+//   nutricion/plan    { dias: { fecha: { desayuno, comida, merienda, cena } } }
+
+const PLATOS_DOC = "nutricion/platos";
+const PLAN_COMIDA_DOC = "nutricion/plan";
+const MOMENTOS = ["desayuno", "comida", "merienda", "cena"];
+const NUTRIENTES = ["hc_g", "prot_g", "grasa_g", "fibra_g", "sal_g", "kcal"];
+const GRUPOS_PLATO = ["legumbre", "pescado", "carne", "huevo", "lacteo", "cereal", "verdura", "otros"];
+const PASILLOS = ["fruta y verdura", "carne y pescado", "lacteos y huevos", "despensa", "pan", "congelados", "otros"];
+const DEPORTES_CARDIO_DIA = new Set(["bici", "correr", "skimo", "montana"]);
+const NIVEL_HIDRATO = { alto: "Hidrato alto", medio: "Hidrato medio", bajo: "Hidrato bajo" };
+const sinAcentos = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
+
+/** La carga del día según la sesión del plan: la misma regla que la comida de la app (2 h o series, duro; 1 h, moderado). */
+function cargaDelDia(s) {
+	const cardio = s && s.t !== "descanso" && DEPORTES_CARDIO_DIA.has(s.dep) ? s : null;
+	const min = cardio ? Math.round(Number(cardio.min) || 60) : 0;
+	if (cardio && (min >= 120 || cardio.t === "int")) return { nivel: "duro", texto: min >= 120 ? `${textoMin(min)} de entreno` : "sesión intensa" };
+	if (min >= 60) return { nivel: "moderado", texto: `${textoMin(min)} de entreno` };
+	return { nivel: "suave", texto: min ? `${textoMin(min)} suaves` : s?.dep === "fuerza" ? "fuerza" : "descanso" };
+}
+
+/**
+ * Código de hidrato de cada comida. Día duro: alto en las principales, también antes y
+ * después de la sesión. Víspera de un día duro: cena alta. La merienda va un punto por debajo.
+ */
+function codigosDelDia(fecha, plan) {
+	const carga = cargaDelDia(plan[fecha]), manana = cargaDelDia(plan[sumaDias(fecha, 1)]);
+	const base = { duro: "alto", moderado: "medio", suave: "bajo" }[carga.nivel];
+	const codigos = { desayuno: base, comida: base, merienda: carga.nivel === "duro" ? "medio" : "bajo", cena: base };
+	const porque = Object.fromEntries(MOMENTOS.map((m) => [m, `día ${carga.nivel} (${carga.texto})`]));
+	if (manana.nivel === "duro" && codigos.cena !== "alto") {
+		codigos.cena = "alto";
+		porque.cena = `mañana tienes ${manana.texto}`;
+	}
+	return { carga, codigos, porque };
+}
+
+/** Cuartos de hidrato que pide cada código: alto 2, medio 1-2, bajo 1 (la merienda, 0-1). */
+const cuartosHidrato = (momento, codigo) =>
+	momento === "merienda" ? (codigo === "bajo" ? [0, 1] : [1, 2]) : codigo === "alto" ? [2, 2] : codigo === "medio" ? [1, 2] : [1, 1];
+
+const cuartoEntero = (v, nombre) => {
+	const n = Math.round(Number(v));
+	if (!(n >= 0 && n <= 4)) throw new HttpError(400, `${nombre}: de 0 a 4 cuartos.`);
+	return n;
+};
+
+/** Un plato tal y como se guarda. Lo que no se pasa se queda como estaba; un nutriente sin dato es null (desconocido). */
+function normalizarPlato(p, previo) {
+	const nombre = String(p.nombre ?? previo?.nombre ?? "").trim().slice(0, 60);
+	if (!nombre) throw new HttpError(400, "El plato necesita nombre.");
+	const id = previo?.id || slugFuerza(nombre);
+	if (!id) throw new HttpError(400, "Ese nombre no vale para un plato.");
+	const cuartos = {};
+	for (const [k, arg, n] of [["c", "carbohidrato", "Carbohidrato"], ["p", "proteina", "Proteina"], ["v", "verdura", "Verdura"]])
+		cuartos[k] = p[arg] != null ? cuartoEntero(p[arg], n) : previo?.cuartos?.[k] ?? null;
+	if (Object.values(cuartos).some((x) => x == null)) throw new HttpError(400, "Di los cuartos de plato del plato: carbohidrato, proteina y verdura (0-4).");
+	if (cuartos.c + cuartos.p + cuartos.v > 4) throw new HttpError(400, `Son cuartos de un plato: suman ${cuartos.c + cuartos.p + cuartos.v} y el maximo es 4.`);
+	const lista = (v, max) => (Array.isArray(v) ? v : []).slice(0, max);
+	const momentos = p.momentos !== undefined ? lista(p.momentos, 4).map(sinAcentos).filter((m) => MOMENTOS.includes(m)) : previo?.momentos;
+	const ingredientes = p.ingredientes !== undefined
+		? lista(p.ingredientes, 30).map((x) => (typeof x === "string" ? { nombre: x } : x || {})).filter((x) => String(x.nombre || "").trim()).map((x) => ({
+			nombre: String(x.nombre).trim().slice(0, 40),
+			...(x.cantidad != null && String(x.cantidad).trim() ? { cantidad: String(x.cantidad).trim().slice(0, 24) } : {}),
+			pasillo: PASILLOS.includes(sinAcentos(x.pasillo)) ? sinAcentos(x.pasillo) : "otros",
+		}))
+		: previo?.ingredientes || [];
+	const nutrientes = { ...Object.fromEntries(NUTRIENTES.map((k) => [k, null])), ...previo?.nutrientes };
+	const dados = p.nutrientes && typeof p.nutrientes === "object" ? p.nutrientes : {};
+	for (const k of NUTRIENTES) {
+		if (!(k in dados)) continue;
+		const v = dados[k];
+		const n = v == null || v === "" || sinAcentos(v) === "desconocido" ? null : Number(v);
+		if (n != null && !(n >= 0 && n < 5000)) throw new HttpError(400, `nutrientes.${k}: un numero o "desconocido".`);
+		nutrientes[k] = n == null ? null : Math.round(n * 10) / 10;
+	}
+	const origen = ["claude", "usuario"].includes(p.nutrientes_origen) ? p.nutrientes_origen : Object.keys(dados).length ? "claude" : previo?.nutrientes_origen || "claude";
+	const grupo = p.grupo !== undefined ? (GRUPOS_PLATO.includes(sinAcentos(p.grupo)) ? sinAcentos(p.grupo) : "otros") : previo?.grupo || "otros";
+	const alergenos = p.alergenos !== undefined ? lista(p.alergenos, 14).map((a) => sinAcentos(a).slice(0, 30)).filter(Boolean) : previo?.alergenos || [];
+	const entero = (v, lo, hi) => (v == null ? undefined : Math.min(hi, Math.max(lo, Math.round(Number(v)) || lo)));
+	const raciones = entero(p.raciones, 1, 12) ?? previo?.raciones, prepMin = entero(p.prep_min, 0, 600) ?? previo?.prep_min;
+	return {
+		id, nombre, cuartos, grupo,
+		momentos: momentos?.length ? momentos : ["comida", "cena"],
+		ingredientes, nutrientes, nutrientes_origen: origen, alergenos,
+		...(raciones ? { raciones } : {}),
+		...(prepMin != null ? { prep_min: prepMin } : {}),
+		tupper: typeof p.tupper === "boolean" ? p.tupper : Boolean(previo?.tupper),
+		...(p.notas != null || previo?.notas ? { notas: String(p.notas ?? previo.notas).slice(0, 200) } : {}),
+		actualizado: fechaLocal(),
+	};
+}
+
+/** Un plato para Claude: los nutrientes sin dato se dicen "desconocido" y se avisa de que son estimados. */
+const platoParaFuera = (p) => ({
+	...p,
+	nutrientes: Object.fromEntries(NUTRIENTES.map((k) => [k, p.nutrientes?.[k] ?? "desconocido"])),
+	nutrientes_son: p.nutrientes_origen === "usuario" ? "los que dio el usuario" : "estimados por Claude",
+});
+const platoResumido = (p) => ({
+	id: p.id, nombre: p.nombre, momentos: p.momentos, grupo: p.grupo,
+	carbohidrato: p.cuartos.c, proteina: p.cuartos.p, verdura: p.cuartos.v,
+	nutrientes_conocidos: `${NUTRIENTES.filter((k) => p.nutrientes?.[k] != null).length} de ${NUTRIENTES.length}`,
+	...(p.tupper ? { tupper: true } : {}), ...(p.prep_min != null ? { prep_min: p.prep_min } : {}),
+});
+
+async function leerPlatos(env, userId) {
+	const d = await leerDoc(env, userId, PLATOS_DOC);
+	return d?.platos && typeof d.platos === "object" ? d.platos : {};
+}
+async function leerPlanComida(env, userId) {
+	const d = await leerDoc(env, userId, PLAN_COMIDA_DOC);
+	return d?.dias && typeof d.dias === "object" ? d.dias : {};
+}
+
+/** Una comida del plan: un plato guardado (con sus cuartos) o una descripcion con cuartos. */
+function normalizarComidaPlan(x, platos, donde) {
+	if (x == null) return null;
+	const item = typeof x === "string" ? { descripcion: x } : x;
+	let plato = null;
+	if (item.plato_id || item.plato) {
+		plato = platos[slugFuerza(item.plato_id || item.plato)];
+		if (!plato) throw new HttpError(400, `${donde}: no hay ningun plato "${item.plato_id || item.plato}". Guardalo antes con comida_plato_guardar o pon descripcion y cuartos.`);
+	}
+	const q = (arg, k, n) => (item[arg] != null ? cuartoEntero(item[arg], `${donde}, ${n}`) : plato ? plato.cuartos[k] : null);
+	const c = q("carbohidrato", "c", "carbohidrato"), p = q("proteina", "p", "proteina"), v = q("verdura", "v", "verdura");
+	if (c == null || p == null || v == null) throw new HttpError(400, `${donde}: pon un plato guardado (plato_id) o la descripcion con sus cuartos (carbohidrato, proteina, verdura).`);
+	if (c + p + v > 4) throw new HttpError(400, `${donde}: son cuartos de un plato y suman ${c + p + v}; el maximo es 4.`);
+	const txt = String(item.descripcion ?? plato?.nombre ?? "").trim().slice(0, 80);
+	if (!txt) throw new HttpError(400, `${donde}: di que es.`);
+	return { ...(plato ? { plato_id: plato.id } : {}), txt, c, p, v };
+}
+const comidaPlanParaFuera = (x) => x && { ...(x.plato_id ? { plato_id: x.plato_id } : {}), descripcion: x.txt, carbohidrato: x.c, proteina: x.p, verdura: x.v };
+
+/** ¿Choca con una alergia o algo que no le gusta? Si el plato no dice lo que lleva, no se puede saber. */
+function choquesConGustos(x, platos, nutri) {
+	const plato = x.plato_id ? platos[x.plato_id] : null;
+	const textos = [x.txt, plato?.nombre, ...(plato?.ingredientes || []).map((i) => i.nombre), ...(plato?.alergenos || [])].map(sinAcentos).filter(Boolean);
+	const lleva = (cosa) => { const c = sinAcentos(cosa); return c.length > 1 && textos.some((t) => t.includes(c)); };
+	const alergias = (Array.isArray(nutri.alergias) ? nutri.alergias : []).filter((a) => String(a || "").trim());
+	const noGustos = (Array.isArray(nutri.no_gustos) ? nutri.no_gustos : []).filter((a) => String(a || "").trim());
+	return {
+		alergias: alergias.filter(lleva),
+		no_gustos: noGustos.filter(lleva),
+		sin_saber: alergias.length && !plato?.ingredientes?.length && !plato?.alergenos?.length ? alergias.filter((a) => !lleva(a)) : [],
+	};
+}
+
+/** Lo que conviene saber antes de proponer menus. */
+function nutricionPorConocer(nutri = {}) {
+	const falta = [];
+	if (!Array.isArray(nutri.alergias)) falta.push("¿Tienes alguna alergia o intolerancia? (nutricion.alergias; [] si ninguna)");
+	if (!Array.isArray(nutri.no_gustos)) falta.push("¿Hay algo que no te guste nada? (nutricion.no_gustos)");
+	if (nutri.tiempo_min == null) falta.push("¿Cuanto tiempo tienes para cocinar entre semana? (nutricion.tiempo_min)");
+	if (nutri.para_cuantos == null) falta.push("¿Para cuantas personas cocinas? (nutricion.para_cuantos)");
+	return falta;
+}
+
+/** Los compromisos que caen a la hora de una comida ("cena con amigos", un viaje): esa comida es fuera de casa. */
+const FRANJA_COMIDA = { desayuno: ["07:00", "10:00"], comida: ["13:00", "16:00"], merienda: ["17:00", "19:00"], cena: ["20:00", "23:00"] };
+const COMIDA_FUERA = /cena|comida|almuerzo|desayuno|restaurante|boda|cumple|aperitivo/;
+function compromisoEnComida(eventos = [], momento) {
+	const [de, a] = FRANJA_COMIDA[momento];
+	return eventos.find((e) => (e.todo_dia
+		? e.tipo === "viaje" && momento !== "desayuno"
+		: COMIDA_FUERA.test(sinAcentos(e.titulo)) && e.de < a && (e.a || "24:00") > de)) || null;
+}
+
+/**
+ * La semana de comidas: cada día con su carga y el código de cada comida, lo planeado y
+ * lo que el motor ve (alergias y no gustos, hidrato fuera del código, platos repetidos,
+ * legumbre y pescado de la semana, comidas fuera de casa).
+ */
+function revisarSemanaComida(lunes, { dias, planEntreno, platos, nutri, porDia = {}, meals = [], fechasCambio = null }) {
+	const errores = [], avisos = [];
+	const semana = semanaDe(lunes);
+	const clave = (x) => x && (x.plato_id || sinAcentos(x.txt));
+	const salida = semana.map((f) => {
+		const { carga, codigos, porque } = codigosDelDia(f, planEntreno);
+		const comidas = {};
+		for (const m of MOMENTOS) {
+			const x = dias[f]?.[m] || null;
+			const [lo, hi] = cuartosHidrato(m, codigos[m]);
+			const fuera = compromisoEnComida(porDia[f], m);
+			const hecha = meals.find((r) => r.f === f && claveTipoComida(r.tipo) === m);
+			comidas[m] = {
+				hidrato: codigos[m], texto: NIVEL_HIDRATO[codigos[m]], cuartos_hidrato: lo === hi ? `${lo}` : `${lo}-${hi}`, por_que: porque[m],
+				plan: comidaPlanParaFuera(x),
+				...(fuera ? { fuera: fuera.titulo } : {}),
+				...(hecha ? { registrada: hecha.txt } : {}),
+			};
+			if (!x) continue;
+			const donde = `${diaDe(f)} ${f}, ${m}`;
+			const g = choquesConGustos(x, platos, nutri);
+			const esCambio = !fechasCambio || fechasCambio.includes(f);
+			for (const a of g.alergias) (esCambio ? errores : avisos).push({ regla: "alergia", fecha: f, momento: m, texto: `${donde}: "${x.txt}" lleva ${a} y tiene alergia o intolerancia.` });
+			for (const a of g.no_gustos) (esCambio ? errores : avisos).push({ regla: "no_le_gusta", fecha: f, momento: m, texto: `${donde}: "${x.txt}" lleva ${a}, que no le gusta.` });
+			if (g.sin_saber.length && esCambio) avisos.push({ regla: "alergia_sin_saber", fecha: f, momento: m, texto: `${donde}: no se si "${x.txt}" lleva ${g.sin_saber.join(" o ")}; confirmalo antes (o guarda el plato con sus ingredientes).` });
+			if (x.c < lo || x.c > hi)
+				avisos.push({ regla: "hidrato", fecha: f, momento: m, texto: `${donde}: lleva ${x.c} ${x.c === 1 ? "cuarto" : "cuartos"} de hidrato y toca ${NIVEL_HIDRATO[codigos[m]].toLowerCase()} (${comidas[m].cuartos_hidrato}) porque ${porque[m]}.` });
+			if (fuera && esCambio) avisos.push({ regla: "fuera", fecha: f, momento: m, texto: `${donde}: tiene "${fuera.titulo}" en la agenda; ¿come fuera?` });
+			// Repetir en menos de 3 días cansa; las sobras de un plato de tupper al día siguiente, no.
+			if (m === "comida" || m === "cena") {
+				const k = clave(x);
+				const antes = [-2, -1].flatMap((d) => ["comida", "cena"].map((mm) => ({ d, x: dias[sumaDias(f, d)]?.[mm] }))).filter((r) => r.x && clave(r.x) === k);
+				const sobras = antes.every((r) => r.d === -1) && x.plato_id && platos[x.plato_id]?.tupper;
+				if (antes.length && !sobras && esCambio) avisos.push({ regla: "repetido", fecha: f, momento: m, texto: `${donde}: "${x.txt}" se repite en menos de tres dias.` });
+			}
+		}
+		return { fecha: f, dia: diaDe(f), carga, sesion: planEntreno[f] ? planEntreno[f].d || null : null, comidas };
+	});
+	// Legumbre y pescado: 2 o más a la semana. Solo se mira con la semana casi planeada.
+	const principales = semana.flatMap((f) => ["comida", "cena"].map((m) => dias[f]?.[m]).filter(Boolean));
+	if (principales.length >= 10) {
+		const cuenta = (grupo, re) => principales.filter((x) => (x.plato_id && platos[x.plato_id]?.grupo === grupo) || re.test(sinAcentos(x.txt))).length;
+		const leg = cuenta("legumbre", /lenteja|garbanzo|alubia|judion|habas|fabada|hummus|soja/), pes = cuenta("pescado", /pescado|merluza|salmon|atun|bacalao|sardina|caballa|dorada|lubina|gamba|calamar|pulpo|mejillon/);
+		if (leg < 2) avisos.push({ regla: "legumbre", texto: `Solo hay ${leg} de legumbre en la semana; mejor 2 o 3.` });
+		if (pes < 2) avisos.push({ regla: "pescado", texto: `Solo hay ${pes} de pescado en la semana; mejor 2 o más.` });
+	}
+	return { dias: salida, errores, avisos };
+}
+
+/** La lista de la compra de lo que queda de la semana, por pasillo, con lo que sale de cada plato. */
+function listaCompra(fechas, dias, platos) {
+	const porIng = new Map(), sinIngredientes = [];
+	for (const f of fechas)
+		for (const m of MOMENTOS) {
+			const x = dias[f]?.[m];
+			if (!x) continue;
+			const plato = x.plato_id ? platos[x.plato_id] : null;
+			if (!plato?.ingredientes?.length) { sinIngredientes.push(`${diaDe(f)}, ${m}: ${x.txt}`); continue; }
+			for (const i of plato.ingredientes) {
+				const k = sinAcentos(i.nombre);
+				const e = porIng.get(k) || { nombre: i.nombre, pasillo: i.pasillo || "otros", veces: 0, cantidades: [], platos: new Set() };
+				e.veces += 1;
+				if (i.cantidad) e.cantidades.push(i.cantidad);
+				e.platos.add(plato.nombre);
+				porIng.set(k, e);
+			}
+		}
+	const pasillos = PASILLOS.map((p) => ({
+		pasillo: p,
+		ingredientes: [...porIng.values()].filter((e) => e.pasillo === p).sort((a, b) => a.nombre.localeCompare(b.nombre, "es"))
+			.map((e) => ({ nombre: e.nombre, veces: e.veces, ...(e.cantidades.length ? { cantidades: e.cantidades } : {}), platos: [...e.platos] })),
+	})).filter((p) => p.ingredientes.length);
+	return { pasillos, sin_ingredientes: sinIngredientes };
+}
+
+/** Semana pedida: 'actual', 'siguiente' o una fecha de esa semana. */
+const lunesPedido = (semana, hoy) =>
+	lunesDe(semana === "siguiente" ? sumaDias(hoy, 7) : semana === "anterior" ? sumaDias(hoy, -7) : /^\d{4}-\d{2}-\d{2}$/.test(semana || "") ? semana : hoy);
+
+const esquemaComidaPlan = {
+	type: ["object", "string", "null"],
+	description: "Un plato guardado ({ plato_id }) o { descripcion, carbohidrato, proteina, verdura } en cuartos; null la deja sin plan.",
+	properties: {
+		plato_id: { type: "string" },
+		descripcion: { type: "string" },
+		carbohidrato: { type: "integer", minimum: 0, maximum: 4 },
+		proteina: { type: "integer", minimum: 0, maximum: 4 },
+		verdura: { type: "integer", minimum: 0, maximum: 4 },
+	},
+};
+
+Object.assign(TOOLS, {
+	comida_plan: {
+		title: "Comida: la semana de comidas",
+		description:
+			"Plan de comidas de la semana dia a dia: la carga de cada dia (sale del plan de entrenos), el codigo de hidrato de cada comida " +
+			"(alto, medio o bajo, con los cuartos de plato que pide y por que), lo planeado, lo ya registrado, las comidas que caen fuera de casa " +
+			"segun la agenda y los avisos del motor (alergias, lo que no le gusta, hidrato fuera del codigo, platos repetidos, legumbre y pescado). " +
+			"Trae preferencias (perfil.nutricion) y antes_de_proponer: si falta algo, preguntelo antes de proponer menus. Con lista_compra=true " +
+			"devuelve tambien la lista de la compra de lo que queda de esa semana, por pasillo. Sin calorias: hable en cuartos de plato.",
+		schema: {
+			type: "object",
+			properties: {
+				semana: { type: "string", description: "'actual' (por defecto), 'siguiente' o una fecha YYYY-MM-DD de esa semana." },
+				lista_compra: { type: "boolean", description: "true para la lista de la compra de lo que queda de esa semana." },
+			},
+		},
+		run: async (env, userId, { semana, lista_compra = false } = {}) => {
+			const hoy = fechaLocal();
+			const lunes = lunesPedido(semana, hoy);
+			const [estadoApp, perfil, dias, platos, agenda] = await Promise.all([
+				leerDoc(env, userId, "estado/app"),
+				leerDoc(env, userId, "atleta/perfil"),
+				leerPlanComida(env, userId),
+				leerPlatos(env, userId),
+				leerAgenda(env, userId, lunes, 7).catch(() => ({ porDia: {} })),
+			]);
+			const nutri = perfil?.nutricion || {};
+			const r = revisarSemanaComida(lunes, { dias, planEntreno: planCompleto(estadoApp), platos, nutri, porDia: agenda.porDia, meals: estadoApp?.meals || [] });
+			const planeadas = r.dias.reduce((n, d) => n + MOMENTOS.filter((m) => d.comidas[m].plan).length, 0);
+			return {
+				lunes, planeadas: `${planeadas} de 28 comidas`,
+				dias: r.dias,
+				avisos: [...r.errores, ...r.avisos],
+				preferencias: nutri,
+				antes_de_proponer: nutricionPorConocer(nutri),
+				platos_guardados: Object.keys(platos).length,
+				...(lista_compra ? { lista_compra: listaCompra(semanaDe(lunes).filter((f) => f >= hoy), dias, platos) } : {}),
+			};
+		},
+	},
+
+	comida_proponer: {
+		title: "Comida: cambiar el plan de comidas",
+		write: true,
+		description:
+			"Propone comidas para esta semana o la siguiente y el motor las revisa: alergias y lo que no le gusta (no se guarda), " +
+			"hidrato frente al codigo del dia, platos repetidos, legumbre y pescado, comidas fuera de casa. Con guardar=false (por defecto) " +
+			"solo revisa y devuelve el antes y despues de cada comida. Enseñelo y, cuando diga que si, llame otra vez con guardar=true. " +
+			"Use platos guardados (comida_platos) cuando encajen; si propone uno nuevo que le guste, guardelo antes con comida_plato_guardar.",
+		schema: {
+			type: "object",
+			properties: {
+				cambios: {
+					type: "object",
+					description: "Mapa fecha YYYY-MM-DD -> { desayuno, comida, merienda, cena } (las que cambian), o null para vaciar el dia.",
+					additionalProperties: {
+						type: ["object", "null"],
+						properties: Object.fromEntries(MOMENTOS.map((m) => [m, esquemaComidaPlan])),
+					},
+				},
+				porque: { type: "string", description: "Motivo en una frase, p. ej. 'Semana con fondo el sabado: cena del viernes con pasta'." },
+				guardar: { type: "boolean", description: "true solo cuando el usuario ya ha dicho que si." },
+			},
+			required: ["cambios", "porque"],
+		},
+		run: async (env, userId, { cambios, porque, guardar = false } = {}) => {
+			if (!cambios || typeof cambios !== "object" || Array.isArray(cambios)) throw new HttpError(400, "cambios debe ser un objeto fecha -> comidas");
+			const hoy = fechaLocal();
+			const actual = lunesDe(hoy), siguiente = sumaDias(actual, 7);
+			const fechas = Object.keys(cambios);
+			for (const f of fechas) {
+				if (!/^\d{4}-\d{2}-\d{2}$/.test(f)) throw new HttpError(400, `Fecha no valida: ${f}`);
+				if (f < hoy) throw new HttpError(400, `El ${f} ya ha pasado: el plan de comidas solo se cambia de hoy en adelante.`);
+				if (![actual, siguiente].includes(lunesDe(f))) throw new HttpError(400, `El ${f} no es de esta semana ni de la siguiente.`);
+				const v = cambios[f];
+				if (v != null && (typeof v !== "object" || Array.isArray(v) || Object.keys(v).some((m) => !MOMENTOS.includes(m))))
+					throw new HttpError(400, `${f}: pon { desayuno, comida, merienda, cena } o null.`);
+			}
+			const [estadoApp, perfil, dias, platos, agenda] = await Promise.all([
+				leerDoc(env, userId, "estado/app"),
+				leerDoc(env, userId, "atleta/perfil"),
+				leerPlanComida(env, userId),
+				leerPlatos(env, userId),
+				agendaDelPlan(env, userId, hoy),
+			]);
+			const nuevo = { ...dias };
+			const antesDespues = [];
+			for (const [f, v] of Object.entries(cambios)) {
+				const dia = v == null ? {} : { ...dias[f] };
+				for (const m of v == null ? MOMENTOS : Object.keys(v)) {
+					const antes = dias[f]?.[m] || null;
+					const despues = v == null ? null : normalizarComidaPlan(v[m], platos, `${f}, ${m}`);
+					if (despues) dia[m] = despues; else delete dia[m];
+					if (JSON.stringify(antes) !== JSON.stringify(despues)) antesDespues.push({ fecha: f, dia: diaDe(f), momento: m, antes: antes?.txt ?? null, despues: despues?.txt ?? null });
+				}
+				if (Object.keys(dia).length) nuevo[f] = dia; else delete nuevo[f];
+			}
+			const nutri = perfil?.nutricion || {};
+			const planEntreno = planCompleto(estadoApp);
+			const semanas = [...new Set(fechas.map(lunesDe))].sort().map((l) => {
+				const r = revisarSemanaComida(l, { dias: nuevo, planEntreno, platos, nutri, porDia: agenda.porDia, fechasCambio: fechas });
+				return { semana: l, errores: r.errores, avisos: r.avisos };
+			});
+			const errores = semanas.flatMap((s) => s.errores);
+			if (!guardar || errores.length) {
+				return {
+					guardado: false, valido: errores.length === 0, cambios: antesDespues, semanas,
+					...(nutricionPorConocer(nutri).length ? { antes_de_proponer: nutricionPorConocer(nutri) } : {}),
+					siguiente_paso: errores.length
+						? "No se puede guardar: choca con una alergia o con algo que no le gusta. Cambie esas comidas."
+						: "Valido. Enseñe el antes y despues y, si el usuario dice que si, llame de nuevo con guardar=true.",
+				};
+			}
+			// Se guardan las cuatro últimas semanas y lo que viene: lo de antes ya no sirve para planear.
+			const desde = sumaDias(actual, -28);
+			await guardarDoc(env, userId, PLAN_COMIDA_DOC, { dias: Object.fromEntries(Object.entries(nuevo).filter(([f]) => f >= desde)), at: Date.now() });
+			await anadirADoc(env, userId, "coach/decisiones", { at: new Date().toISOString(), fecha: hoy, tipo: "comida", cambios: antesDespues, porque: String(porque || "").slice(0, 200) });
+			return { guardado: true, cambios: antesDespues, avisos: semanas.flatMap((s) => s.avisos) };
+		},
+	},
+
+	comida_platos: {
+		title: "Comida: tus platos",
+		description:
+			"Los platos guardados del usuario (lo que suele comer y le gusta), con sus cuartos de plato y para que comidas sirven. " +
+			"Con id, el detalle: ingredientes, alergenos, tiempo, tupper y nutrientes por racion (hc_g, prot_g, grasa_g, fibra_g, sal_g, kcal), " +
+			"estimados por Claude o dados por el usuario; los que no se saben salen como desconocido. No hable de calorias salvo que las pida. " +
+			"Uselo antes de proponer menus y para registrar una comida que ya tiene guardada.",
+		schema: {
+			type: "object",
+			properties: {
+				id: { type: "string", description: "Id o nombre de un plato para ver su detalle." },
+				buscar: { type: "string", description: "Texto para filtrar por nombre o ingrediente." },
+				momento: { type: "string", enum: MOMENTOS },
+			},
+		},
+		run: async (env, userId, { id, buscar, momento } = {}) => {
+			const platos = await leerPlatos(env, userId);
+			if (id) {
+				const p = platos[slugFuerza(id)];
+				if (!p) throw new HttpError(404, `No hay ningun plato "${id}". Los que hay: ${Object.keys(platos).join(", ") || "ninguno"}.`);
+				return platoParaFuera(p);
+			}
+			const q = sinAcentos(buscar);
+			const lista = Object.values(platos)
+				.filter((p) => !momento || p.momentos?.includes(momento))
+				.filter((p) => !q || sinAcentos(p.nombre).includes(q) || p.ingredientes?.some((i) => sinAcentos(i.nombre).includes(q)))
+				.sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
+			return { total: Object.keys(platos).length, platos: lista.map(platoResumido) };
+		},
+	},
+
+	comida_plato_guardar: {
+		title: "Comida: guardar un plato",
+		write: true,
+		description:
+			"Guarda (o corrige) un plato del usuario para reutilizarlo: nombre, cuartos de plato (carbohidrato, proteina, verdura), momentos " +
+			"(desayuno, comida, merienda, cena), grupo (legumbre, pescado, carne, huevo, lacteo, cereal, verdura, otros), ingredientes por racion " +
+			"({ nombre, cantidad, pasillo }), alergenos, raciones, prep_min, tupper y nutrientes por racion. Los nutrientes los estima usted si " +
+			"puede; si no, pongalos como desconocido: nunca los invente. Corregir: mismo nombre o id; lo que no pase se queda. borrar=true lo quita. " +
+			"Guardelo cuando el usuario diga que algo lo come a menudo o le ha gustado, diciendoselo.",
+		schema: {
+			type: "object",
+			properties: {
+				id: { type: "string", description: "Para corregir o borrar uno que ya existe." },
+				nombre: { type: "string" },
+				carbohidrato: { type: "integer", minimum: 0, maximum: 4 },
+				proteina: { type: "integer", minimum: 0, maximum: 4 },
+				verdura: { type: "integer", minimum: 0, maximum: 4 },
+				momentos: { type: "array", items: { type: "string", enum: MOMENTOS } },
+				grupo: { type: "string", enum: GRUPOS_PLATO },
+				ingredientes: {
+					type: "array",
+					items: { type: "object", properties: { nombre: { type: "string" }, cantidad: { type: "string", description: "Por racion, p. ej. '80 g' o '1 lata'." }, pasillo: { type: "string", enum: PASILLOS } }, required: ["nombre"] },
+				},
+				nutrientes: {
+					type: "object",
+					description: "Por racion. Numero, o \"desconocido\" si no se sabe.",
+					properties: Object.fromEntries(NUTRIENTES.map((k) => [k, { type: ["number", "string", "null"] }])),
+				},
+				nutrientes_origen: { type: "string", enum: ["claude", "usuario"], description: "claude si los estima usted; usuario si los da el (etiqueta, receta)." },
+				alergenos: { type: "array", items: { type: "string" }, description: "De los 14 de la UE que lleve: gluten, lacteos, huevo, pescado, frutos secos..." },
+				raciones: { type: "integer", minimum: 1, maximum: 12, description: "Para cuantas raciones son los ingredientes guardados." },
+				prep_min: { type: "integer", minimum: 0 },
+				tupper: { type: "boolean", description: "Aguanta bien de un dia para otro." },
+				notas: { type: "string" },
+				borrar: { type: "boolean" },
+			},
+		},
+		run: async (env, userId, args = {}) => {
+			const doc = (await leerDoc(env, userId, PLATOS_DOC)) || {};
+			const platos = doc.platos && typeof doc.platos === "object" ? { ...doc.platos } : {};
+			const id = slugFuerza(args.id || args.nombre);
+			const previo = platos[id] || null;
+			if (args.borrar === true) {
+				if (!previo) throw new HttpError(404, `No hay ningun plato "${args.id || args.nombre}".`);
+				delete platos[id];
+				await guardarDoc(env, userId, PLATOS_DOC, { platos });
+				return { guardado: true, borrado: true, id };
+			}
+			if (args.id && !previo) throw new HttpError(404, `No hay ningun plato "${args.id}".`);
+			if (!previo && Object.keys(platos).length >= 300) throw new HttpError(413, "Ya hay 300 platos guardados: borra alguno antes.");
+			const plato = normalizarPlato(args, previo);
+			platos[plato.id] = plato;
+			await guardarDoc(env, userId, PLATOS_DOC, { platos });
+			return { guardado: true, corregido: Boolean(previo), plato: platoParaFuera(plato) };
 		},
 	},
 });
