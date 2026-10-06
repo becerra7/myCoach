@@ -222,6 +222,9 @@ Objetivo: que funcione sin ti delante y aprender qué enamora.
     - Reglas: una alergia o algo que no le gusta **no se guarda**; si un plato no dice lo que lleva y hay alergias, se avisa para confirmarlo. Avisos: hidrato fuera del código, mismo plato en menos de tres días (las sobras de tupper al día siguiente, no), menos de 2 legumbres o 2 pescados con la semana casi planeada, y comidas que caen fuera de casa según la agenda.
     - Web: en Comer, "Menús de esta semana" (y la que viene) con la hoja de cada día y la lista de la compra; en Hoy, "Tu día" enseña lo previsto y el hidrato del motor. Los menús los propone tu Claude.
 
+### Decisiones del 6 de octubre: el conector, también en ChatGPT
+15. **El conector funciona en cualquier cliente MCP, no solo en Claude.** `server/discover` (MCP 2026-07-28) no se implementa y contesta -32601, como antes del 29 de septiembre: así Claude y ChatGPT van por `initialize`. Motivo: contestarlo anunciando solo versiones viejas hacía que ChatGPT se parara tras el login sin ver las herramientas; anunciar 2026-07-28 hacía que Claude rechazara las respuestas. Se vuelve a implementar cuando el servidor cumpla 2026-07-28 entero y se pruebe en los dos.
+
 ## 10. Próximos pasos concretos (2 semanas)
 1. Sacar `packages/domain` con carga TRIMP, semáforo y tests.
 2. Documento `atleta/perfil` más registro de decisiones.

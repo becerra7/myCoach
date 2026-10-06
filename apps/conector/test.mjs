@@ -2204,12 +2204,19 @@ const rpc = async (env, token, message) => {
 	check("la pantalla no se cachea (ttlMs 0)", leido.body.result.ttlMs === 0 && leido.body.result.resultType === "complete");
 	const lista2 = (await rpc(env, tok, { jsonrpc: "2.0", id: 7, method: "tools/list" })).body.result;
 	check("la lista de herramientas se cachea como mucho un minuto", lista2.ttlMs === 60000 && lista2.cacheScope === "public");
-	const desc = (await rpc(env, tok, { jsonrpc: "2.0", id: 8, method: "server/discover", params: { _meta: { "io.modelcontextprotocol/protocolVersion": "2026-07-28" } } })).body.result;
-	check("server/discover responde con versiones, capacidades e instrucciones",
-		desc.supportedVersions.includes("2025-06-18") && !desc.supportedVersions.includes("2026-07-28") && Boolean(desc.capabilities.resources) &&
-		desc.instructions.includes("mycoach_abrir") && desc.cacheScope === "private");
+	// server/discover no se implementa: el -32601 manda al cliente (Claude y ChatGPT)
+	// por initialize. Contestarlo sin 2026-07-28 dejaba a ChatGPT sin herramientas.
+	const desc = await rpc(env, tok, { jsonrpc: "2.0", id: 8, method: "server/discover", params: { _meta: { "io.modelcontextprotocol/protocolVersion": "2026-07-28" } } });
+	check("server/discover da metodo no soportado (-32601), como un servidor de initialize",
+		desc.status === 200 && desc.body.error?.code === -32601 && desc.body.result === undefined);
+	const ini = (await rpc(env, tok, { jsonrpc: "2.0", id: 10, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "openai-mcp", version: "1.0.0" } } })).body.result;
+	check("tras el -32601, initialize da version, capacidades e instrucciones",
+		ini.protocolVersion === "2025-06-18" && Boolean(ini.capabilities.tools) && Boolean(ini.capabilities.resources) &&
+		ini.instructions.includes("mycoach_abrir"));
+	const iniNuevo = (await rpc(env, tok, { jsonrpc: "2.0", id: 11, method: "initialize", params: { protocolVersion: "2099-01-01", capabilities: {} } })).body.result;
+	check("un cliente con una version desconocida recibe la de por defecto", iniNuevo.protocolVersion === "2025-06-18");
 	check("la version del servidor lleva la huella de las herramientas (Claude ve que han cambiado)",
-		/^1\.1\.0\+[0-9a-f]{8}$/.test(desc._meta["io.modelcontextprotocol/serverInfo"].version));
+		/^1\.1\.0\+[0-9a-f]{8}$/.test(ini.serverInfo.version));
 	const bien = env.MYCOACH.fetch;
 	env.MYCOACH = { fetch: async () => new Response("caida", { status: 503 }) };
 	const caida = await rpc(env, tok, { jsonrpc: "2.0", id: 6, method: "resources/read", params: { uri: "ui://mycoach/app" } });

@@ -2158,10 +2158,6 @@ const SUPPORTED_PROTOCOLS = ["2026-07-28", "2025-06-18", "2025-03-26", "2024-11-
 // resultType lo exige la revision 2026-07-28 en todos los resultados; para las
 // anteriores es un campo mas. Sin el, un cliente nuevo rechaza la respuesta.
 const rpcResult = (id, result) => ({ jsonrpc: "2.0", id, result: { resultType: "complete", ...result } });
-// Versiones que se anuncian en server/discover: solo las que el servidor cumple
-// entero. Anunciar 2026-07-28 hizo que Claude validara con sus reglas y
-// rechazara las respuestas; con estas, el cliente sigue con initialize.
-const VERSIONES_DESCUBRIMIENTO = SUPPORTED_PROTOCOLS.filter((v) => v !== "2026-07-28");
 // Cache de MCP (2026-07-28): sin ttlMs, cada cliente decide y Claude guardaba
 // la lista y la pantalla hasta reconectar. Un minuto basta para no repetir
 // peticiones y deja ver un despliegue enseguida.
@@ -2187,18 +2183,11 @@ async function handleRpc(message, env, userId) {
 		});
 	}
 
-	// MCP 2026-07-28: descubrimiento sin sesion. Las instrucciones llevan el
-	// nombre del entrenador de cada usuario: privado.
-	if (method === "server/discover")
-		return rpcResult(id, {
-			resultType: "complete",
-			supportedVersions: VERSIONES_DESCUBRIMIENTO,
-			capabilities: capacidades,
-			_meta: { "io.modelcontextprotocol/serverInfo": serverInfo() },
-			instructions: await instrucciones(),
-			...CACHE_LISTA,
-			cacheScope: "private",
-		});
+	// server/discover (MCP 2026-07-28) no se implementa: el -32601 del final le dice
+	// al cliente que este servidor es de los de initialize, y todos lo saben tratar.
+	// Contestarlo anunciando solo versiones viejas era contradictorio: Claude lo
+	// ignoraba y seguia con initialize, pero ChatGPT se paraba ahi y no veia las
+	// herramientas. Anunciar 2026-07-28 tampoco vale: Claude rechazaba las respuestas.
 
 	if (method === "tools/list") {
 		const ui = await uriApp(env);
