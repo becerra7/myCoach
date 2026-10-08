@@ -105,6 +105,9 @@ function filaMacro(nombre, llevas, [lo, hi]) {
 }
 function bloqueDia(enHoy) {
   const s = sesion(HOY), o = objetivosComida(HOY), sum = sumaComida(HOY);
+  // El código de hidrato y lo previsto de cada comida salen del plan de comidas del conector (comida_plan).
+  if (MENUS.datos[SEM] === undefined) cargarMenus(SEM);
+  const menu = menuDelDia(HOY);
   const items = HUECOS.map(([k, n, h]) => ({ k, n, h, m: sum.ms.find(m => tipoMeal(m) === k) }));
   sum.ms.filter(m => !HUECOS.some(([k]) => k === tipoMeal(m))).forEach(m => items.push({ k: tipoMeal(m), n: cap1(m.tipo), h: m.h || '12:00', m }));
   if (s && s.t !== 'descanso') items.push({ k: 'sesion', h: s.a ? '' : '10:30', s });
@@ -120,9 +123,10 @@ function bloqueDia(enHoy) {
       <button class="c" type="button" data-a="day" data-v="${HOY}"><b>${esc(it.s.a ? `Hecho: ${it.s.a.lugar}` : it.s.d)}</b>${noCabe ? `<span class="agenda-l small">${ic('info', 14)}<span>${noCabe}</span></span>` : durante && !it.s.a ? `<span class="small muted" style="display:block">${durante}</span>` : ''}</button></li>`;
     if (it.k === 'agenda') return `<li><span class="h">${it.e.todo_dia ? '' : esc(it.e.de)}</span><span class="eje"><i></i></span><div class="c"><span class="agenda-l">${ic('lock', 14)}<b>${esc(it.e.titulo)}</b></span>
       <span class="small muted" style="display:block">${it.e.todo_dia ? 'Todo el día' : `Hasta las ${esc(it.e.a === '24:00' ? '00:00' : it.e.a)}`}</span></div></li>`;
-    const m = it.m, merienda = it.k === 'merienda';
-    return `<li><span class="h">${esc(m?.h || it.h)}</span><span class="eje"><i class="${m ? 'ok' : ''}"></i></span><div class="c"><b>${esc(it.n)}</b>${HUECOS.some(([k]) => k === it.k) ? `<span class="nivel">Hidrato ${nivelHidrato(o.cg.c, merienda)}</span>` : ''}
-      <span class="small ${m ? '' : 'muted'}" style="display:block">${m ? `✓ ${esc(m.txt || 'Registrada')}: ${qTxt(+m.c || 0)} de hidrato, ${qTxt(+m.p || 0)} de proteína` : 'Sin registrar'}</span></div></li>`;
+    const m = it.m, merienda = it.k === 'merienda', mc = menu?.comidas[it.k], previsto = mc?.plan;
+    const nivel = mc ? mc.texto : `Hidrato ${nivelHidrato(o.cg.c, merienda)}`;
+    return `<li><span class="h">${esc(m?.h || it.h)}</span><span class="eje"><i class="${m ? 'ok' : ''}"></i></span><div class="c"><b>${esc(it.n)}</b>${HUECOS.some(([k]) => k === it.k) ? `<span class="nivel">${esc(nivel)}</span>` : ''}
+      <span class="small ${m ? '' : 'muted'}" style="display:block">${m ? `✓ ${esc(m.txt || 'Registrada')}: ${qTxt(+m.c || 0)} de hidrato, ${qTxt(+m.p || 0)} de proteína` : previsto ? `Previsto: ${esc(previsto.descripcion)}` : 'Sin registrar'}</span></div></li>`;
   }).join('');
   return blk(`${blkH('Tu día', `${info('dia', 'Tu día', `Hoy es ${o.cg.n.toLowerCase()} (${esc(o.cg.txt)}). El objetivo va en cuartos de plato, la medida en la que registras las comidas con Claude: ${nf(o.hidrato[0])}-${nf(o.hidrato[1])} cuartos de hidrato y ${o.proteina[0]}-${o.proteina[1]} de proteína en el día. Es una estimación, sin calorías.`)}${enHoy ? '<button class="link" type="button" data-a="tab" data-v="comer">Ver Comer</button>' : ''}`)}
     <div class="macro">${filaMacro('Hidrato', sum.c, o.hidrato)}${filaMacro('Proteína', sum.p, o.proteina)}</div>

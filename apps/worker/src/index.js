@@ -35,6 +35,8 @@ export const TOOLS = new Set([
   'entrenos', 'fuerza_entreno_guardar', 'fuerza_ejercicios_garmin', 'entreno_enviar_garmin', 'peso_historico',
   // Solo lectura: tus rutas guardadas en Garmin (Plan) y las comidas que registra tu Claude (Comer).
   'garmin_courses', 'comidas',
+  // El plan de comidas de la semana (lo propone tu Claude; la web lo enseña y saca la lista de la compra).
+  'comida_plan',
   // Tu agenda: lo que te ocupa (compromisos y calendario), anotar algo y conectar el calendario.
   'agenda', 'agenda_anotar', 'agenda_calendario',
 ]);

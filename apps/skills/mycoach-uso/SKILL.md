@@ -26,7 +26,10 @@ description: Cómo y cuándo usar las herramientas de myCoach/Garmin (coach_*, a
 | ¿Me estoy pasando de carga? ¿Estoy en forma? VO2máx, umbral, FTP, predicciones | `garmin_forma` (1). La carga de hoy y su franja ya vienen en `coach_hoy` |
 | ¿Estoy mejorando? | `coach_progreso` (1) |
 | Peso | decirlo = `peso_registrar` confirm=true; comentar = `peso_historico` (tendencia de 7 días, no el dato de un día) |
-| Comida | `comida_registrar`; consultar con `comidas` |
+| Comida | `comida_registrar` (con `plato_id` si ya es un plato guardado, `del_plan=true` si comió lo previsto); consultar con `comidas` |
+| Menús de la semana | `comida_plan` (1: carga, hidrato por comida, preferencias y `antes_de_proponer`) → `comida_platos` (1) → `comida_proponer` sin guardar → con su sí, `guardar=true` (4) |
+| Lista de la compra | `comida_plan lista_compra=true` (1) |
+| Guardar un plato que repite o le gusta | `comida_plato_guardar` (1); nutrientes estimados o `desconocido`, nunca inventados |
 | Fuerza | `entrenos tipo=fuerza` antes de proponer; al reloj, `entreno_enviar_garmin tipo=fuerza`; al acabar `fuerza_desde_garmin` o `fuerza_registrar` |
 | Series de bici o correr para el reloj | `entreno_enviar_garmin tipo=cardio` sin confirm (vista previa) → con su sí, confirm=true |
 | Un dato de Garmin que ninguna herramienta trae (récords, material, zonas, planes de Garmin…) | `garmin_api` sin path (catálogo) → `garmin_api` con la ruta (2). Nunca digas que no lo tienes sin mirarlo |
@@ -42,7 +45,7 @@ Si `coach_hoy` trae `fuentes.sin_descanso: true`, su dispositivo no mide sueño 
 
 ## Escritura
 - Toda escritura (plan, Garmin, perfil) se valida y se confirma con el usuario antes; tras escribir, se relee una vez para verificar.
-- `coach_proponer` siempre con `porque` en una frase: es el registro de decisiones.
+- `coach_proponer` y `comida_proponer` siempre con `porque` en una frase: es el registro de decisiones.
 
 ## Presupuesto
 - Respuesta simple: ≤2 llamadas. Análisis: ≤5. Planificación semanal: ≤8.
