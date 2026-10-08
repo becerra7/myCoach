@@ -5,12 +5,13 @@
 import web from './index.js';
 import conector from '../../conector/worker.js';
 
-/** Lo que contesta el conector: MCP, OAuth, cuenta, panel y GPX. El resto es la web. */
+/** Lo que contesta el conector: MCP, OAuth, cuenta, panel, plan compartido y GPX. El resto es la web. */
 export function esDelConector(pathname, method) {
   return pathname === '/mcp' || pathname === '/mcp/' || (pathname === '/' && method === 'POST')
     || pathname.startsWith('/.well-known/') || pathname.startsWith('/oauth/')
     || pathname === '/cuenta' || pathname.startsWith('/cuenta/')
     || pathname === '/panel' || pathname.startsWith('/panel/')
+    || pathname === '/compartido/plan'
     || (pathname.startsWith('/route/') && pathname.endsWith('.gpx'));
 }
 
