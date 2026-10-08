@@ -208,7 +208,10 @@ async function sync(manual, live = !!LIVE && S.modo === 'vivo') {
     // Una llamada: persona, carga (Training Load y Load Focus), estado, umbrales y la evolución de 52 semanas.
     const fm = await call('garmin_forma', { semanas: 52 }, true); const pe = fm.persona || {};
     ds.perfil = { edad: pe.edad, sexo: pe.sexo, peso: pe.peso_kg, lthr: pe.umbral_lactato_ppm, vo2: fm.vo2max?.correr ?? null, vo2bici: fm.vo2max?.bici ?? null, es: fm.endurance_score?.actual ?? null, esNivel: fm.endurance_score?.nivel ?? null, hill: fm.hill_score?.actual ?? null, balance: fm.enfoque_carga || null };
-    ds.forma = { fecha: fm.hasta, estado: fm.estado, carga: fm.carga, enfoque: fm.enfoque_carga, semanas: fm.carga_por_semana, predicciones: fm.predicciones_carrera, umbral: fm.umbral_lactato, ftp: fm.ftp, edad: fm.edad_fisica, aclimatacion: fm.aclimatacion };
+    // Series semanales para las gráficas de Insights (Endurance, VO2máx y Hill de las últimas 52 semanas).
+    const serie = (xs, f, v) => (xs || []).map(p => [p[f], p[v]]).filter(p => p[0] && p[1] != null);
+    ds.forma = { fecha: fm.hasta, estado: fm.estado, carga: fm.carga, enfoque: fm.enfoque_carga, semanas: fm.carga_por_semana, predicciones: fm.predicciones_carrera, umbral: fm.umbral_lactato, ftp: fm.ftp, edad: fm.edad_fisica, aclimatacion: fm.aclimatacion,
+      series: { es: serie(fm.endurance_score?.semanas, 'semana', 'puntos'), vo2: serie(fm.vo2max?.semanas, 'fecha', 'correr'), vo2b: serie(fm.vo2max?.semanas, 'fecha', 'bici'), hill: serie(fm.hill_score?.semanas, 'fecha', 'puntos') } };
     ds.evo = evoDeForma(fm, ds.evo || []);
     S.readiness = null;
   } catch (e) { errs.push(e); }
@@ -217,16 +220,19 @@ async function sync(manual, live = !!LIVE && S.modo === 'vivo') {
     const list = await call('garmin_activities', { limit: 300 }, manual || !ds.acts.length);
     if (Array.isArray(list)) { const prev = new Set(ds.acts.map(a => String(a.id))); ds.acts = list.map(x => ({ id: String(x.id), t: x.t, d: x.d, km: x.km, min: x.min, fc: x.fc, te: x.te, cg: x.cg ?? null, n: x.n })); nuevas = ds.acts.filter(a => !prev.has(a.id)).length; }
   } catch (e) { errs.push(e); }
-  // Detalle (pulso, subidas, llano) de lo reciente y del skimo; trazados para pueblos. Por tandas.
-  const d60 = addDays(HOY, -60);
-  const needDet = ds.acts.filter(a => !ds.det[a.id] && ((a.d > d60 && ['bici', 'correr', 'skimo', 'montana'].includes(FAM[a.t])) || FAM[a.t] === 'skimo')).slice(0, 15);
+  // Detalle (pulso, terreno, subidas, llano) del último año y del skimo; trazados para pueblos. Por tandas.
+  // Un detalle de una versión anterior se vuelve a pedir: le faltan datos que Insights necesita.
+  const d60 = addDays(HOY, -60), d365 = addDays(HOY, -365);
+  const faltaDet = a => !ds.det[a.id] || (ds.det[a.id].v !== DET_V && !ds.det[a.id].err && ['bici', 'correr', 'skimo'].includes(FAM[a.t]));
+  const quiereDet = a => (a.d > d365 && ['bici', 'correr', 'skimo'].includes(FAM[a.t])) || (a.d > d60 && FAM[a.t] === 'montana') || FAM[a.t] === 'skimo';
+  const needDet = ds.acts.filter(a => faltaDet(a) && quiereDet(a)).slice(0, 15);
   let i = 0; await pool(needDet, 4, async a => { msg(`Analizando actividades (${++i}/${needDet.length})…`); try { ds.det[a.id] = detalleDe(await call('garmin_activity_detail', { activity_id: a.id })); } catch (e) { ds.det[a.id] = { err: e.code || 'error' }; } });
   const needRuta = ds.acts.filter(a => !(a.id in ds.rutas) && a.km > 0.5 && ['bici', 'correr', 'skimo', 'montana', 'esqui', 'caminar'].includes(FAM[a.t])).slice(0, 25);
   i = 0; await pool(needRuta, 4, async a => { msg(`Buscando pueblos (${++i}/${needRuta.length})…`); try { const r = await call('garmin_activity_route', { activity_id: a.id, puntos: 5 }); ds.rutas[a.id] = r.polilinea || null; } catch (e) { ds.rutas[a.id] = null; } });
   fin(); ds.at = Date.now(); construir(ds); guardarCache(ds);
   if (!S.sports.length) S.sports = Object.keys(horasPorDeporte()).filter(k => ENTRENABLES.includes(k));
   S.lastSync = Date.now(); S.liveOk = errs.length < 2; save(); render(); markFlow('sync'); cargarCoach(manual);
-  const pendientes = ds.acts.filter(a => !ds.det[a.id] && a.d > d60 && ['bici', 'correr', 'skimo'].includes(FAM[a.t])).length + ds.acts.filter(a => !(a.id in ds.rutas) && a.km > 0.5 && FAM[a.t] && FAM[a.t] !== 'fuerza' && FAM[a.t] !== 'raqueta').length;
+  const pendientes = ds.acts.filter(a => faltaDet(a) && quiereDet(a) && ['bici', 'correr', 'skimo'].includes(FAM[a.t])).length + ds.acts.filter(a => !(a.id in ds.rutas) && a.km > 0.5 && FAM[a.t] && FAM[a.t] !== 'fuerza' && FAM[a.t] !== 'raqueta').length;
   if (!errs.length) toast(`${nuevas ? `${nuevas} actividad${nuevas === 1 ? '' : 'es'} nueva${nuevas === 1 ? '' : 's'}. ` : ''}${pendientes ? `Faltan ${pendientes} por analizar: vuelve a actualizar.` : 'Todo al día con Garmin.'}`, { ms: 6000 });
   else { const e = errs[0] || {}; const m = { needs_reauth: 'Vuelve a conectar Garmin en claude.ai → Ajustes → Conectores', server_not_connected: 'Añade el conector de Garmin en claude.ai → Conectores', not_in_manifest: 'No has dado permiso a esta página para usar Garmin', selection_required: 'Elige qué conector de Garmin usar', server_unavailable: 'Garmin no responde ahora; prueba en un rato' + (e.message && e.message !== 'error' ? ` (${e.message})` : ''), tool_error: 'Garmin ha devuelto un error: ' + (e.message || '') }[e.code] || 'No he podido leer Garmin (' + (e.code || 'error') + ')'; toast(m, { ms: 8000 }); }
 }
@@ -243,10 +249,15 @@ function evoDeForma(fm, previa) {
   return [...previa.filter(e => e[0] < desde), ...por.values()].sort((a, b) => a[0].localeCompare(b[0]));
 }
 
-/** Lo que la app guarda del detalle de una actividad (pulso por zonas, desnivel, subida y llano). */
+/** Lo que la app guarda del detalle de una actividad: pulso por zonas, desnivel, subida y llano principales,
+   cómo fue en cada terreno (ter: llano, subida y bajada de toda la salida), desacople y pulso máximo sostenido.
+   v marca la versión: si cambia lo que se guarda, la sincronización vuelve a pedir el detalle. */
+const DET_V = 2;
 function detalleDe(r) {
-  const an = r.analisis || {}; const sb = (an.subidas || [])[0];
-  return { h: an.histograma_fc_min || null, desn: r.elevation_gain_m ?? null, sub: sb ? [sb.largo_km, sb.desnivel_m, sb.minutos, sb.fc_media] : null, llano: an.llano ? [an.llano.km, an.llano.vel_media_kmh, an.llano.fc_media] : null };
+  const an = r.analisis || {}; const sb = (an.subidas || [])[0], t = an.por_terreno || {}, fs = an.fc_max_sostenida || {};
+  return { v: DET_V, h: an.histograma_fc_min || null, desn: r.elevation_gain_m ?? null, sub: sb ? [sb.largo_km, sb.desnivel_m, sb.minutos, sb.fc_media] : null, llano: an.llano ? [an.llano.km, an.llano.vel_media_kmh, an.llano.fc_media] : null,
+    ter: { ll: t.llano ? [t.llano.km, t.llano.vel_media_kmh, t.llano.fc_media, t.llano.metros_por_latido] : null, su: t.subida ? [t.subida.km, t.subida.minutos, t.subida.vel_media_kmh, t.subida.fc_media, t.subida.pendiente_pct, t.subida.vam_m_h] : null, ba: t.bajada ? [t.bajada.km, t.bajada.vel_media_kmh, t.bajada.pendiente_pct] : null },
+    dc: an.desacople_pct ?? null, fs: [fs.min5 ?? null, fs.min20 ?? null, fs.min60 ?? null] };
 }
 
 /* Detalle a demanda: al abrir una actividad que este navegador aún no ha analizado (la sincronización

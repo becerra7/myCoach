@@ -776,17 +776,91 @@ function histogramaFc(puntos) {
 	return Object.fromEntries(Object.entries(cubos).filter(([, sg]) => sg >= 30).map(([c, sg]) => [c, round(sg / 60, 1)]));
 }
 
+/**
+ * Bajadas: las mismas reglas que las subidas, con la altitud al revés
+ * (pierden 50 m o más al 3 % o más durante 800 m o más). Solo velocidad:
+ * en bajada el pulso no dice nada de la forma.
+ */
+function detectarBajadas(puntos) {
+	return detectarSubidas(puntos.map((p) => ({ ...p, e: p.e == null ? null : -p.e }))).map((b) => ({
+		km_inicio: b.km_inicio,
+		largo_km: b.largo_km,
+		desnivel_m: b.desnivel_m,
+		pendiente_pct: b.pendiente_pct,
+		minutos: b.minutos,
+		vel_media_kmh: b.minutos > 0 ? round(b.largo_km / (b.minutos / 60), 1) : null,
+	}));
+}
+
+/**
+ * Cómo va en cada terreno, sumando toda la salida y no solo el puerto más
+ * largo: tramos de 500 m clasificados por su pendiente (llano por debajo
+ * del 1,5 %, subida desde el 3 % y bajada desde el −3 %; lo de en medio no
+ * cuenta). Así una salida rompepiernas, sin ningún puerto, también dice a
+ * qué velocidad y con qué pulso sube. Las medias son por tiempo, no por
+ * tramo, para que un tramo lento no pese menos que uno rápido.
+ */
+function porTerreno(puntos) {
+	const e = suavizarAltitud(puntos);
+	const p = puntos.map((x, i) => ({ ...x, es: e[i] })).filter((x) => x.es != null && x.t != null);
+	const acc = { llano: [], subida: [], bajada: [] };
+	let a = 0;
+	for (let i = 1; i < p.length; i++) {
+		const largo = p[i].d - p[a].d;
+		if (largo < 500) continue;
+		const seg = p[i].t - p[a].t;
+		if (seg > 0 && largo / seg < 40) { // 144 km/h: por encima es un salto del GPS
+			const pend = (p[i].es - p[a].es) / largo;
+			const tipo = Math.abs(pend) < 0.015 ? "llano" : pend >= 0.03 ? "subida" : pend <= -0.03 ? "bajada" : null;
+			if (tipo) {
+				const fcs = p.slice(a, i + 1).map((x) => x.fc).filter(Boolean);
+				acc[tipo].push({ m: largo, s: seg, gan: p[i].es - p[a].es, fc: fcs.length ? MEDIA(fcs) : null });
+			}
+		}
+		a = i;
+	}
+	const resumir = (ts, minKm) => {
+		const m = ts.reduce((s, x) => s + x.m, 0);
+		const s = ts.reduce((q, x) => q + x.s, 0);
+		if (m < minKm * 1000 || s <= 0) return null;
+		const conFc = ts.filter((x) => x.fc);
+		const sFc = conFc.reduce((q, x) => q + x.s, 0);
+		const fc = sFc ? conFc.reduce((q, x) => q + x.fc * x.s, 0) / sFc : null;
+		const kmh = (m / s) * 3.6;
+		return { km: round(m / 1000, 1), minutos: round(s / 60, 1), vel_media_kmh: round(kmh, 1), fc_media: fc ? Math.round(fc) : null, _gan: ts.reduce((q, x) => q + x.gan, 0), _m: m, _s: s };
+	};
+	const llano = resumir(acc.llano, 2);
+	const subida = resumir(acc.subida, 1);
+	const bajada = resumir(acc.bajada, 1);
+	const limpio = ({ _gan, _m, _s, ...x }) => x;
+	return {
+		llano: llano && {
+			...limpio(llano),
+			// Metros recorridos por cada latido: la eficiencia sin potenciómetro.
+			metros_por_latido: llano.fc_media ? round((llano._m / (llano._s / 60)) / llano.fc_media, 2) : null,
+		},
+		subida: subida && (() => {
+			const pend = (subida._gan / subida._m) * 100;
+			const vam = subida._gan / (subida._s / 3600);
+			return { ...limpio(subida), pendiente_pct: round(pend, 1), vam_m_h: Math.round(vam), w_kg_estimado: round(vam / (200 + 10 * pend), 2) };
+		})(),
+		bajada: bajada && { ...limpio(bajada), fc_media: undefined, pendiente_pct: round((bajada._gan / bajada._m) * 100, 1) },
+	};
+}
+
 function analizarActividad(details) {
 	const puntos = seriesDeActividad(details);
 	if (puntos.length < 10) return { muestras: puntos.length, nota: "Sin series suficientes." };
 	return {
 		muestras: puntos.length,
 		subidas: detectarSubidas(puntos).slice(0, 8),
+		bajadas: detectarBajadas(puntos).slice(0, 8),
+		por_terreno: porTerreno(puntos),
 		llano: velocidadLlano(puntos),
 		desacople_pct: desacople(puntos),
 		histograma_fc_min: histogramaFc(puntos),
 		fc_max_sostenida: { min5: fcMaxSostenida(puntos, 5), min20: fcMaxSostenida(puntos, 20), min60: fcMaxSostenida(puntos, 60) },
-		nota: "W/kg estimado con la fórmula de Ferrari (VAM / (200 + 10 · pendiente)): orientativo, sin potenciómetro.",
+		nota: "por_terreno suma toda la salida en tramos de 500 m (llano < 1,5 %, subida ≥ 3 %, bajada ≤ −3 %). W/kg estimado con la fórmula de Ferrari (VAM / (200 + 10 · pendiente)): orientativo, sin potenciómetro.",
 	};
 }
 
@@ -1626,7 +1700,8 @@ const TOOLS = {
 			"Todas las metricas de UNA actividad (activity_id de garmin_activities): velocidad, ritmo, potencia, cadencia, pulso, " +
 			"desnivel, velocidad vertical, dinamicas de carrera, temperatura, efecto de entrenamiento y stamina de Garmin cuando " +
 			"existan. 'series' resume cada grafica (min, media, max, inicio, final) y 'perfil' da sus valores a lo largo de la " +
-			"actividad (24 tramos): uselo para contestar sobre graficas (stamina, pulso, potencia...) en vez de pedir capturas.",
+			"actividad (24 tramos): uselo para contestar sobre graficas (stamina, pulso, potencia...) en vez de pedir capturas. " +
+			"'analisis.por_terreno' da velocidad y pulso en llano, subida y bajada de toda la salida.",
 		schema: {
 			type: "object",
 			properties: { activity_id: { type: "string", description: "El activity_id devuelto por garmin_activities." } },

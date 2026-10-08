@@ -15,7 +15,7 @@ Sigue `reglas-coach` y `mycoach-uso`. Para quien no sabe qué es un conector ni 
 - No hace falta acabarlo en una conversación. Lo que quede, en la siguiente (coach_hoy trae la próxima pregunta).
 
 ## Explicarle myCoach (corto, con ejemplos, cuando lo pida o al acabar de conocerle)
-- **La app** (ábrela con `mycoach_abrir`): Hoy dice qué toca y por qué; Plan, la semana; Comer, lo que comes en cuartos de plato; Progreso, si mejoras.
+- **La app** (ábrela con `mycoach_abrir`): Hoy dice qué toca y por qué; Plan, la semana; Comer, lo que comes en cuartos de plato; Insights, dónde estás y si mejoras (por deporte y por terreno: llano, subida y bajada).
 - **Hablar conmigo**: cosas que puede decirte tal cual: "hoy estoy reventado", "muévemelo al jueves", "¿qué desayuno antes de correr?", "mándame la sesión al reloj", "me duele la rodilla".
 - Lo que no hago: no te escribo yo primero; tienes que abrir la conversación o la app.
 

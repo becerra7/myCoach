@@ -1079,6 +1079,58 @@ button.hp-encaje{cursor:pointer;align-items:center;min-height:44px}
 .leyenda{display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:8px;font-size:13px;color:var(--ink-2)}
 .leyenda span{display:inline-flex;align-items:center;gap:6px}
 .leyenda i{width:12px;height:12px;border-radius:2px;display:inline-block}
+
+/* ===== Insights ===== */
+.ins-ctl{display:flex;flex-wrap:wrap;gap:8px 16px}
+/* Dónde estás: una barra de 1 a 10 por dimensión, con las marcas de "medio" (5) y "fuerte" (7) */
+.esc-tot{display:flex;align-items:baseline;gap:8px;margin-bottom:12px}
+.esc-tot b{font-size:44px;line-height:1;font-weight:800;font-stretch:72%;font-variant-numeric:tabular-nums}
+.esc-tot span{color:var(--ink-2)}
+.esc-lista{display:flex;flex-direction:column}
+.esc-f{display:grid;grid-template-columns:minmax(0,1fr) 36px var(--tap);grid-template-areas:"l v i" "b b b";align-items:center;column-gap:8px;padding:10px 0;border-top:1px solid var(--rule)}
+.esc-l{grid-area:l;display:flex;flex-direction:column;min-width:0}
+.esc-l b{font-weight:650}
+.esc-l span{font-size:14px;color:var(--ink-2)}
+.esc-f>.info{grid-area:i;margin:0}
+.esc-v{grid-area:v;text-align:right;font-size:22px;font-stretch:80%;font-variant-numeric:tabular-nums}
+.esc{grid-area:b;position:relative;height:8px;margin:8px 0 4px;background:var(--fill);border-radius:4px}
+.esc-r{position:absolute;top:-4px;width:2px;height:16px;margin-left:-1px;background:var(--ink-2)}
+.esc-m{position:absolute;top:-6px;width:20px;height:20px;margin-left:-10px;border-radius:50%;background:var(--ink);border:3px solid var(--paper)}
+.esc-ej{position:relative;height:18px;margin-top:4px;font-size:13px;color:var(--ink-2)}
+.esc-ej span{position:absolute;transform:translateX(-50%);white-space:nowrap}
+.esc-ej span:first-child{left:0;transform:none}
+.esc-ej span:last-child{transform:translateX(-100%)}
+@container app (min-width:840px){
+  .esc-f{grid-template-columns:minmax(0,1.1fr) minmax(0,1.4fr) 36px var(--tap);grid-template-areas:"l b v i"}
+  .esc{margin:0 8px}
+  .esc-ej{margin-left:calc((100% - 36px - var(--tap) - 24px) * 1.1 / 2.5 + 16px);margin-right:calc(36px + var(--tap) + 24px)}
+}
+/* Tus números por terreno: una fila por terreno, sus cifras en columnas */
+.ter{display:flex;flex-direction:column;border-top:1px solid var(--rule)}
+.ter-f{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px 12px;padding:12px 0;border-bottom:1px solid var(--rule)}
+.ter-n{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px}
+.ter-n b{font-size:17px;font-weight:700}
+.ter-n b i{font-style:normal;margin-right:6px;color:var(--ink-2)}
+.ter-n span{font-size:14px;color:var(--ink-2)}
+.ter-c{display:flex;flex-direction:column;min-width:0}
+.ter-c .n{font-size:13px;color:var(--ink-2);font-weight:600}
+.ter-c b{font-size:26px;line-height:1.1;font-weight:700;font-stretch:75%;font-variant-numeric:tabular-nums;white-space:nowrap}
+.ter-c b small{font-size:13px;font-weight:600;font-stretch:100%;color:var(--ink-2)}
+@container app (min-width:840px){
+  .ter-f{grid-template-columns:minmax(0,1.3fr) repeat(3,minmax(0,1fr));align-items:center}
+  .ter-n{grid-column:auto;flex-direction:column;align-items:flex-start;gap:2px}
+}
+/* Para profundizar: plegado por defecto */
+.mas{border-top:1px solid var(--rule);margin-top:8px}
+.mas>summary{display:flex;flex-direction:column;justify-content:center;min-height:calc(var(--tap) + 16px);padding:12px 0 12px 28px;position:relative;cursor:pointer;list-style:none}
+.mas>summary::-webkit-details-marker{display:none}
+.mas>summary::before{content:"";position:absolute;left:4px;top:50%;width:9px;height:9px;border-right:2px solid var(--ink);border-bottom:2px solid var(--ink);transform:translateY(-75%) rotate(45deg);transition:transform .2s}
+.mas[open]>summary::before{transform:translateY(-25%) rotate(-135deg)}
+.mas>summary span{font-size:20px;font-weight:700}
+.mas>summary small{font-size:14px;color:var(--ink-2)}
+.mas>summary:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.mas[open]>.blk:first-of-type,.mas[open]>.grid2>.blk:first-child{border-top:0}
+@media (prefers-reduced-motion:reduce){.mas>summary::before{transition:none}}
 .leyenda i.ln{height:0;border-top:2px dashed var(--ink);border-radius:0}
 .vtip{position:fixed;z-index:80;pointer-events:none;padding:6px 9px;border-radius:var(--r-ctl);background:var(--ink);color:var(--paper);font-size:13px;line-height:1.3;max-width:240px;opacity:0;transition:opacity .1s}
 .vacio{padding:8px 0}

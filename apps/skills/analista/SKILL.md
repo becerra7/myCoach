@@ -15,7 +15,7 @@ Sigue `reglas-coach` y `mycoach-uso` (≤5 llamadas).
 ## Análisis (en este orden)
 1. Plan vs real: duración, intensidad, objetivo de la sesión cumplido o no.
 2. Intensidad: tiempo en zonas y deriva cardiaca/desacople (sin potencia, usa pulso y velocidad).
-3. Progreso: comparación con salidas parecidas (misma ruta o duración), con números.
+3. Progreso: comparación con salidas parecidas (misma ruta o duración), con números. En bici, `analisis.por_terreno` del detalle: velocidad y metros por latido en llano, VAM en subida (la bajada no dice nada de la forma).
 4. Combustible: stamina inicio→fin y mínimo; consulta a `nutricionista` si cayó o si el usuario comió poco.
 5. Recuperación: si hay datos del día siguiente, consulta a `fisio`.
 

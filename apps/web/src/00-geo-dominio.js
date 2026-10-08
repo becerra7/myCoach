@@ -44,7 +44,11 @@ function construir(ds) {
     if (!tipo) { if (SPORTS[dep].cardio) { tipo = GARMIN_MAP[a.te] || 'fondo'; if (tipo === 'int' && a.fc && a.fc < 135) tipo = 'fondo'; } else tipo = 'otros'; }
     const sub = d.sub ? { km: d.sub[0], desn: d.sub[1], min: d.sub[2], fc: d.sub[3], vam: Math.round(d.sub[1] / (d.sub[2] / 60)), wkg: dep === 'bici' ? wkgFisica(d.sub[0], d.sub[1], d.sub[2], peso) : null } : null;
     if (sub && sub.vam > 1800 && sub.fc < 110) sub.remonte = true;
-    return { id: String(a.id), dep, f: a.d, km: a.km, min: a.min, fc: a.fc, g: a.te, cg: a.cg ?? null, lugar: (String(a.n || '').replace(/ (Road )?(Cycling|Running|Backcountry Skiing|Hiking|Walking|Resort Skiing|Strength Training)$/, '').replace(/^[\s\-–·.]*$/, '') || SPORTS[dep].n), tipo, z, desn: d.desn, sub, llano: d.llano ? { km: d.llano[0], kmh: d.llano[1], fc: d.llano[2] } : null, analizada: !!z, nuevos: [] };
+    const T = d.ter || {}; const ter = d.ter ? {
+      llano: T.ll ? { km: T.ll[0], kmh: T.ll[1], fc: T.ll[2], mpl: T.ll[3] } : null,
+      subida: T.su && !(sub && sub.remonte) ? { km: T.su[0], min: T.su[1], kmh: T.su[2], fc: T.su[3], pend: T.su[4], vam: T.su[5], wkg: dep === 'bici' ? wkgFisica(T.su[0], T.su[0] * T.su[4] * 10, T.su[1], peso) : null } : null,
+      bajada: T.ba ? { km: T.ba[0], kmh: T.ba[1], pend: T.ba[2] } : null } : null;
+    return { id: String(a.id), dep, f: a.d, km: a.km, min: a.min, fc: a.fc, g: a.te, cg: a.cg ?? null, lugar: (String(a.n || '').replace(/ (Road )?(Cycling|Running|Backcountry Skiing|Hiking|Walking|Resort Skiing|Strength Training)$/, '').replace(/^[\s\-–·.]*$/, '') || SPORTS[dep].n), tipo, z, desn: d.desn, sub, llano: d.llano ? { km: d.llano[0], kmh: d.llano[1], fc: d.llano[2] } : null, ter, dc: d.dc ?? null, fs: d.fs || null, analizada: !!z, nuevos: [] };
   }).sort((a, b) => b.f.localeCompare(a.f));
   // Pueblos y países desde los trazados
   const towns = {}, paises = new Set(), geo = ds.geo || (ds.geo = {});

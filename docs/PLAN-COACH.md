@@ -225,6 +225,16 @@ Objetivo: que funcione sin ti delante y aprender qué enamora.
 ### Decisiones del 6 de octubre: el conector, también en ChatGPT
 15. **El conector funciona en cualquier cliente MCP, no solo en Claude.** `server/discover` (MCP 2026-07-28) no se implementa y contesta -32601, como antes del 29 de septiembre: así Claude y ChatGPT van por `initialize`. Motivo: contestarlo anunciando solo versiones viejas hacía que ChatGPT se parara tras el login sin ver las herramientas; anunciar 2026-07-28 hacía que Claude rechazara las respuestas. Se vuelve a implementar cuando el servidor cumpla 2026-07-28 entero y se pruebe en los dos.
 
+### Decisiones del 8 de octubre: Insights
+16. **La pestaña Progreso pasa a llamarse Insights**, a petición del usuario (el nombre en inglés lo eligió él; la clave interna sigue siendo `progreso`, así `mycoach_abrir` no cambia). Responde a "¿dónde estoy y cómo voy?":
+    - **Un solo selector de periodo** (4 semanas, 3 meses, 6 meses, 1 año) para toda la pestaña. No hay tarjetas de "antes → ahora": se enseñan los números del periodo y las gráficas.
+    - **General:** arriba, "Dónde estás", las notas de 1 a 10 que ya existían (VO2máx, Endurance, subida en bici, volumen, equilibrio) en una barra con las marcas de aficionado medio (5) y fuerte (7), para compararse con otra gente; después, la evolución de Endurance Score, VO2máx y Hill Score (semanal, de `garmin_forma`), las horas por semana de todos los deportes, el peso, la frescura y la carga.
+    - **El peso se mueve de Comer a Insights** (un dato, un sitio); Comer deja un enlace.
+    - **Por deporte:** "Tus números" por terreno (llano, subida y bajada: velocidad o ritmo, pulso, metros por latido, VAM, W/kg estimados en bici); arriba, las gráficas fáciles (velocidad en llano, VAM, horas por semana); en "Para profundizar", plegado, lo de los frikis: eficiencia (metros por latido, la idea del EF de Intervals.icu sin potenciómetro), velocidad frente a pulso, desacople (Friel), mejor pulso sostenido 5/20/60 min, bajadas, disciplina en los fondos, zonas y la misma ruta.
+    - **La bajada se enseña pero no se puntúa:** depende de la pendiente, el tráfico y la técnica, no de la forma.
+    - **Sin "Forma bici" combinado todavía.** No se ha encontrado literatura que valide la velocidad a pulso fijo sin potenciómetro; antes de puntuarla hay que probarla con el histórico (o con GoldenCheetah OpenData). Intervals.icu no está conectado, así que todo sale de Garmin.
+17. **El conector calcula el terreno de toda la salida** (`garmin_activity_detail` → `analisis.por_terreno`): tramos de 500 m, llano por debajo del 1,5 %, subida desde el 3 % y bajada desde el −3 %, medias por tiempo; y `analisis.bajadas`, con las mismas reglas que las subidas. Antes solo se medía el puerto más largo, y en salidas rompepiernas no salía ninguna subida. La web guarda el detalle del último año de bici, carrera y skimo (antes, 60 días) y vuelve a pedir el que se guardó con la versión anterior, de 15 en 15 por sincronización.
+
 ## 10. Próximos pasos concretos (2 semanas)
 1. Sacar `packages/domain` con carga TRIMP, semáforo y tests.
 2. Documento `atleta/perfil` más registro de decisiones.

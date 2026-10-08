@@ -997,6 +997,17 @@ const rpc = async (env, token, message) => {
 	check("lleva el pulso de la subida", sub[0]?.fc_media >= 155 && sub[0]?.fc_media <= 160, `(${sub[0]?.fc_media})`);
 	check("encuentra tramos llanos", r.analisis?.llano?.km >= 30 && Math.abs(r.analisis.llano.vel_media_kmh - 30) < 1.5,
 		`(${JSON.stringify(r.analisis?.llano)})`);
+	const baj = r.analisis?.bajadas || [];
+	check("detecta la bajada", baj.length === 1 && Math.abs(baj[0].desnivel_m - 180) <= 15, `(${JSON.stringify(baj)})`);
+	check("mide la velocidad de bajada", Math.abs(baj[0]?.vel_media_kmh - 40) <= 3, `(${baj[0]?.vel_media_kmh})`);
+	const ter = r.analisis?.por_terreno || {};
+	check("por terreno: llano a 30 km/h", ter.llano?.km >= 40 && Math.abs(ter.llano.vel_media_kmh - 30) < 1, `(${JSON.stringify(ter.llano)})`);
+	check("por terreno: metros por latido en llano", ter.llano?.metros_por_latido > 3.4 && ter.llano.metros_por_latido < 3.9, `(${ter.llano?.metros_por_latido})`);
+	check("por terreno: subida a 15 km/h y su VAM", ter.subida && Math.abs(ter.subida.vel_media_kmh - 15) < 1.5 && Math.abs(ter.subida.vam_m_h - 900) <= 120,
+		`(${JSON.stringify(ter.subida)})`);
+	check("por terreno: el pulso de la subida", ter.subida?.fc_media >= 150 && ter.subida.fc_media <= 160, `(${ter.subida?.fc_media})`);
+	check("por terreno: bajada a 40 km/h, sin pulso", ter.bajada && Math.abs(ter.bajada.vel_media_kmh - 40) < 3 && ter.bajada.fc_media === undefined,
+		`(${JSON.stringify(ter.bajada)})`);
 	// El desacople solo tiene sentido en llano: dos horas a 30 km/h con el
 	// pulso subiendo de 130 a 143 en la segunda hora dan 1 - 130/143 ≈ 9 %.
 	const llanas = [];
@@ -1011,6 +1022,7 @@ const rpc = async (env, token, message) => {
 	const plana = await call("garmin_activity_detail", { activity_id: "3" });
 	check("mide el desacople", Math.abs(plana.analisis?.desacople_pct - 9.1) < 1.5, `(${plana.analisis?.desacople_pct})`);
 	check("en llano no ve subidas", plana.analisis?.subidas?.length === 0);
+	check("en llano no hay subida ni bajada por terreno", plana.analisis?.por_terreno?.subida === null && plana.analisis?.por_terreno?.bajada === null);
 	check("pulso máximo sostenido 5 min", r.analisis?.fc_max_sostenida?.min5 === 160, `(${r.analisis?.fc_max_sostenida?.min5})`);
 	check("devuelve las zonas de Garmin", r.zonas_fc?.[1]?.minutos === 50);
 	// 5 km a 30 km/h a 130 ppm son 10 minutos en el cubo de 130.

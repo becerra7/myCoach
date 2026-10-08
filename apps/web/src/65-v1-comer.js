@@ -16,10 +16,10 @@ function tabComerV1() {
         <div class="btns"><button class="btn fill" type="button" data-a="v-encargo" data-v="1">Registrar con Claude</button><button class="link" type="button" data-a="meal-add">Añadir a mano</button></div></section>
       ${bloqueDia(false)}
       ${bloqueMenus()}
-      ${blk(`${blkH('Durante el entreno', info('durante', 'Comer durante el entreno', 'En salidas de más de 90 minutos, a partir de la segunda hora conviene tomar 60-90 g de hidrato por hora. Lo que tomas de verdad en cada salida lo guardará tu Claude al analizarla, y saldrá en Progreso como combustible.'))}<p>${durante}</p>`)}
+      ${blk(`${blkH('Durante el entreno', info('durante', 'Comer durante el entreno', 'En salidas de más de 90 minutos, a partir de la segunda hora conviene tomar 60-90 g de hidrato por hora. Lo que tomas de verdad en cada salida lo guardará tu Claude al analizarla, y saldrá en Insights como combustible.'))}<p>${durante}</p>`)}
     </div><div class="col">
       ${historicoComida()}
-      ${bloquePeso()}
+      ${blk(`${blkH('Peso')}<p>Tu peso y su tendencia están en Insights, junto a tu forma.</p><div class="btns"><button class="link" type="button" data-a="v-prog-ir" data-v="forma">Ver mi peso en Insights</button></div>`)}
     </div></div></div>` };
 }
 
@@ -42,8 +42,8 @@ function historicoComida() {
     <p class="lee">${lee}</p>`);
 }
 
-/* Peso: los pesajes y la media de 7 días (la que cuenta) */
-function bloquePeso() {
+/* Peso: los pesajes y la media de 7 días (la que cuenta). Vive en Insights, que le pasa el inicio de su periodo. */
+function bloquePeso(desdeIns) {
   if (PZ.datos !== undefined && PZ.datos !== 'cargando' && fuenteDatos() !== 'espera' && PZ.fuente !== fuenteDatos()) PZ.datos = undefined;
   if (PZ.datos === undefined) cargarPeso();
   const d = PZ.datos; let cuerpo;
@@ -51,15 +51,14 @@ function bloquePeso() {
   else if (d === null) cuerpo = '<p>No he podido leer tu peso de Garmin.</p><div class="btns"><button class="btn tonal" type="button" data-a="peso-recargar">Volver a probar</button></div>';
   else if (!d.pesajes?.length) cuerpo = '<p class="muted">Aún no hay pesajes. Dile a tu Claude lo que pesas por la mañana y aparecerá aquí.</p>';
   else {
-    const r = d.resumen, rg = S.pesoRango || '90';
-    const desde = rg === 'todo' ? d.pesajes[0].fecha : [addDays(HOY, -(+rg)), d.pesajes[0].fecha].sort()[1], ps = d.pesajes.filter(p => p.fecha >= desde);
+    const r = d.resumen;
+    const desde = [desdeIns, d.pesajes[0].fecha].sort()[1], ps = d.pesajes.filter(p => p.fecha >= desde);
     cuerpo = `<div class="tot" style="margin-bottom:12px"><div><span class="n">Media de 7 días</span><b>${r.media_7_dias ? nf(r.media_7_dias, 1) : nf(r.ultimo.kg, 1)} <small style="font-size:15px">kg</small></b></div>
       <div><span class="n">Cambio</span><b style="font-size:22px">${cambioTxt(r.cambio_30_dias, '30 días') || '—'}</b><span class="xs muted">${cambioTxt(r.cambio_90_dias, '3 meses')}</span></div></div>
-      <div class="seg2" role="group" aria-label="Periodo">${[['90', '3 meses'], ['365', '1 año'], ['todo', 'Todo']].map(([v, l]) => `<button type="button" data-a="peso-rango" data-v="${v}" aria-pressed="${rg === v}">${l}</button>`).join('')}</div>
       <div class="viz">${ps.length >= 2 ? chartPeso(ps, desde) : '<p class="muted">Con dos pesajes en este periodo ya sale la gráfica.</p>'}</div>
       ${r.ultimo.fecha < addDays(HOY, -14) ? '<p class="small muted">Hace más de dos semanas del último pesaje.</p>' : ''}`;
   }
   return blk(`${blkH('Peso', `${d?.demo ? '<span class="demo-tag">Ejemplo</span>' : ''}${info('peso', 'Peso', 'Puntos: cada pesaje. Línea: la media de 7 días, que es la que cuenta, porque el peso de un día sube y baja con el agua y la comida. Sale de Garmin: de tu báscula o de lo que le dices a tu Claude.')}`)}${cuerpo}
     <div class="btns"><button class="link" type="button" data-a="v-peso-claude">Apuntar peso con Claude</button></div>`);
 }
-Object.assign(ACTIONS, { 'v-peso-claude': () => enClaude('Hoy peso X kg en ayunas. Regístralo en myCoach con peso_registrar y dime cómo va la tendencia de la media de 7 días.') });
+Object.assign(ACTIONS, { 'v-prog-ir': el => { V.prog = el.dataset.v; go('progreso'); }, 'v-peso-claude': () => enClaude('Hoy peso X kg en ayunas. Regístralo en myCoach con peso_registrar y dime cómo va la tendencia de la media de 7 días.') });

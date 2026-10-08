@@ -58,7 +58,7 @@ function showPrompt(p) { openSheet({ title: 'Encargo para Claude', size: 'auto',
 function go(tab) { vt(() => { S.tab = tab === 'forma' ? 'progreso' : tab; S.stack = []; save(); render(true); }); }
 function push(screen) { vt(() => { S.stack.push(screen); save(); render(true); }); }
 function pop() { vt(() => { S.stack.pop(); save(); render(true); }); }
-const TABS = [['hoy', 'Hoy'], ['plan', 'Plan'], ['comer', 'Comer'], ['progreso', 'Progreso'], ['pueblos', 'Pueblos']];
+const TABS = [['hoy', 'Hoy'], ['plan', 'Plan'], ['comer', 'Comer'], ['progreso', 'Insights'], ['pueblos', 'Pueblos']];
 // El botón de Ajustes lleva tus iniciales (Ajustes → Tu nombre); sin nombre, un icono de persona.
 function pintarAvatar() {
   const el = $('#avatar .avatar'); if (!el) return;

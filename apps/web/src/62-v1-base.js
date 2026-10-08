@@ -40,13 +40,13 @@ function vBarras({ datos, y0 = 0, y1, ticks, refs = [], h = 180, color = () => '
   return `<svg class="chart2" viewBox="0 0 ${VW} ${h}" role="img" aria-label="${esc(aria)}">${vEjeY(y0, y1, ticks, h, pad, fmt)}${marcas}${rf}</svg>`;
 }
 /* Barras apiladas (p. ej. minutos suaves, medios y duros por semana) */
-function vApiladas({ cols, claves, colores, h = 180, tip, aria, fmt = v => nf(v, 0) }) {
+function vApiladas({ cols, claves, colores, h = 180, tip, aria, fmt = v => nf(v, 0), cada = 1 }) {
   const tot = cols.map(c => claves.reduce((a, k, i) => a + (c[1][i] || 0), 0)); const y1 = niceMax(Math.max(...tot, 1));
   const pad = { t: 12, r: 6, b: 24, l: 34 }, n = cols.length, bw = (VW - pad.l - pad.r) / Math.max(n, 1), gap = Math.max(2, bw * .3);
   const Y = v => pad.t + (1 - v / y1) * (h - pad.t - pad.b);
   const marcas = cols.map((c, i) => { const x = pad.l + i * bw + gap / 2, w = bw - gap; let acc = 0;
     const segs = claves.map((k, j) => { const v = c[1][j] || 0; if (!v) return ''; const y0 = Y(acc), y = Y(acc + v); acc += v; return `<rect x="${x}" y="${y}" width="${w}" height="${Math.max(0, y0 - y - 2)}" rx="2" fill="${colores[j]}"/>`; }).join('');
-    return `<g data-tip="${esc(tip(c))}"><rect class="hit" x="${pad.l + i * bw}" y="${pad.t}" width="${bw}" height="${h - pad.t - pad.b}"/>${segs}</g><text x="${x + w / 2}" y="${h - 8}" text-anchor="middle">${esc(c[0])}</text>`; }).join('');
+    return `<g data-tip="${esc(tip(c))}"><rect class="hit" x="${pad.l + i * bw}" y="${pad.t}" width="${bw}" height="${h - pad.t - pad.b}"/>${segs}</g>${(n - 1 - i) % cada === 0 ? `<text x="${x + w / 2}" y="${h - 8}" text-anchor="middle">${esc(c[0])}</text>` : ''}`; }).join('');
   return `<svg class="chart2" viewBox="0 0 ${VW} ${h}" role="img" aria-label="${esc(aria)}">${vEjeY(0, y1, vTicks(0, y1), h, pad, fmt)}${marcas}</svg>`;
 }
 function vPuntos({ datos, x0, x1, y0, y1, xt, yt, h = 220, xl, yl, r = () => 6, fill, tip, aria, etiquetas = [], fmtX = v => nf(v, 1), fmtY = v => nf(v, 1) }) {
