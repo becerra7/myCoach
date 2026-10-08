@@ -1006,6 +1006,10 @@ const rpc = async (env, token, message) => {
 	check("por terreno: subida a 15 km/h y su VAM", ter.subida && Math.abs(ter.subida.vel_media_kmh - 15) < 1.5 && Math.abs(ter.subida.vam_m_h - 900) <= 120,
 		`(${JSON.stringify(ter.subida)})`);
 	check("por terreno: el pulso de la subida", ter.subida?.fc_media >= 150 && ter.subida.fc_media <= 160, `(${ter.subida?.fc_media})`);
+	const pp = ter.por_pendiente || [];
+	const enBin = (x) => pp.find((b) => b.pendiente_pct === x);
+	check("por pendiente: 30 km/h en el 0 %, 15 en el 6 % y 40 en el −6 %", Math.abs(enBin(0)?.vel_media_kmh - 30) < 1 && Math.abs(enBin(6)?.vel_media_kmh - 15) < 1.5 && Math.abs(enBin(-6)?.vel_media_kmh - 40) < 3,
+		`(${JSON.stringify(pp)})`);
 	check("por terreno: bajada a 40 km/h, sin pulso", ter.bajada && Math.abs(ter.bajada.vel_media_kmh - 40) < 3 && ter.bajada.fc_media === undefined,
 		`(${JSON.stringify(ter.bajada)})`);
 	// El desacople solo tiene sentido en llano: dos horas a 30 km/h con el

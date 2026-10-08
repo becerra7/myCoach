@@ -256,7 +256,7 @@ const DET_V = 2;
 function detalleDe(r) {
   const an = r.analisis || {}; const sb = (an.subidas || [])[0], t = an.por_terreno || {}, fs = an.fc_max_sostenida || {};
   return { v: DET_V, h: an.histograma_fc_min || null, desn: r.elevation_gain_m ?? null, sub: sb ? [sb.largo_km, sb.desnivel_m, sb.minutos, sb.fc_media] : null, llano: an.llano ? [an.llano.km, an.llano.vel_media_kmh, an.llano.fc_media] : null,
-    ter: { ll: t.llano ? [t.llano.km, t.llano.vel_media_kmh, t.llano.fc_media, t.llano.metros_por_latido] : null, su: t.subida ? [t.subida.km, t.subida.minutos, t.subida.vel_media_kmh, t.subida.fc_media, t.subida.pendiente_pct, t.subida.vam_m_h] : null, ba: t.bajada ? [t.bajada.km, t.bajada.vel_media_kmh, t.bajada.pendiente_pct] : null },
+    ter: { ll: t.llano ? [t.llano.km, t.llano.vel_media_kmh, t.llano.fc_media, t.llano.metros_por_latido] : null, su: t.subida ? [t.subida.km, t.subida.minutos, t.subida.vel_media_kmh, t.subida.fc_media, t.subida.pendiente_pct, t.subida.vam_m_h] : null, ba: t.bajada ? [t.bajada.km, t.bajada.vel_media_kmh, t.bajada.pendiente_pct] : null, pp: (t.por_pendiente || []).map(b => [b.pendiente_pct, b.km, b.minutos, b.fc_media]) },
     dc: an.desacople_pct ?? null, fs: [fs.min5 ?? null, fs.min20 ?? null, fs.min60 ?? null] };
 }
 

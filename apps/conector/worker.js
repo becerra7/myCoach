@@ -804,6 +804,8 @@ function porTerreno(puntos) {
 	const e = suavizarAltitud(puntos);
 	const p = puntos.map((x, i) => ({ ...x, es: e[i] })).filter((x) => x.es != null && x.t != null);
 	const acc = { llano: [], subida: [], bajada: [] };
+	// Además, por pendiente en tramos de 2 puntos (−10 % a +12 %): la curva de velocidad según desnivel.
+	const bins = new Map();
 	let a = 0;
 	for (let i = 1; i < p.length; i++) {
 		const largo = p[i].d - p[a].d;
@@ -812,6 +814,12 @@ function porTerreno(puntos) {
 		if (seg > 0 && largo / seg < 40) { // 144 km/h: por encima es un salto del GPS
 			const pend = (p[i].es - p[a].es) / largo;
 			const tipo = Math.abs(pend) < 0.015 ? "llano" : pend >= 0.03 ? "subida" : pend <= -0.03 ? "bajada" : null;
+			const bin = Math.max(-10, Math.min(12, Math.round((pend * 100) / 2) * 2));
+			const fcsB = p.slice(a, i + 1).map((x) => x.fc).filter(Boolean);
+			const b = bins.get(bin) || { m: 0, s: 0, fcs: 0, sfc: 0 };
+			b.m += largo; b.s += seg;
+			if (fcsB.length) { b.fcs += MEDIA(fcsB) * seg; b.sfc += seg; }
+			bins.set(bin, b);
 			if (tipo) {
 				const fcs = p.slice(a, i + 1).map((x) => x.fc).filter(Boolean);
 				acc[tipo].push({ m: largo, s: seg, gan: p[i].es - p[a].es, fc: fcs.length ? MEDIA(fcs) : null });
@@ -845,6 +853,9 @@ function porTerreno(puntos) {
 			return { ...limpio(subida), pendiente_pct: round(pend, 1), vam_m_h: Math.round(vam), w_kg_estimado: round(vam / (200 + 10 * pend), 2) };
 		})(),
 		bajada: bajada && { ...limpio(bajada), fc_media: undefined, pendiente_pct: round((bajada._gan / bajada._m) * 100, 1) },
+		por_pendiente: [...bins.entries()].sort((x, y) => x[0] - y[0]).filter(([, b]) => b.m >= 500 && b.s > 0).map(([pend, b]) => ({
+			pendiente_pct: pend, km: round(b.m / 1000, 1), minutos: round(b.s / 60, 1), vel_media_kmh: round((b.m / b.s) * 3.6, 1), fc_media: b.sfc ? Math.round(b.fcs / b.sfc) : null,
+		})),
 	};
 }
 
@@ -1701,7 +1712,7 @@ const TOOLS = {
 			"desnivel, velocidad vertical, dinamicas de carrera, temperatura, efecto de entrenamiento y stamina de Garmin cuando " +
 			"existan. 'series' resume cada grafica (min, media, max, inicio, final) y 'perfil' da sus valores a lo largo de la " +
 			"actividad (24 tramos): uselo para contestar sobre graficas (stamina, pulso, potencia...) en vez de pedir capturas. " +
-			"'analisis.por_terreno' da velocidad y pulso en llano, subida y bajada de toda la salida.",
+			"'analisis.por_terreno' da velocidad y pulso en llano, subida y bajada de toda la salida, y por_pendiente, la velocidad según el desnivel.",
 		schema: {
 			type: "object",
 			properties: { activity_id: { type: "string", description: "El activity_id devuelto por garmin_activities." } },

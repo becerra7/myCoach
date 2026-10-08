@@ -55,6 +55,30 @@ function vSerie({ pts, desde, hasta = HOY, h = 190, fmt = v => nf(v, 1), color =
 }
 const leyendaSerie = col => `<div class="leyenda"><span><i style="background:color-mix(in srgb,${col} 45%,var(--paper));border-radius:50%"></i>Cada salida</span><span><i class="ln" style="border-top:2.5px solid ${col}"></i>Media de las 3 últimas</span></div>`;
 
+/* ===== Velocidad según la pendiente: este periodo frente al anterior, a igual desnivel ===== */
+function sumaPendiente(as) {
+  const m = new Map(); for (const a of as) for (const [p, km, min] of (a.ter && a.ter.pp) || []) { const x = m.get(p) || { km: 0, min: 0 }; x.km += km; x.min += min; m.set(p, x); }
+  return m;
+}
+/* La diferencia con el periodo anterior, a igual pendiente: en llano (−1 a +1 %) y en subida (+2 % o más),
+   ponderada por los km de ahora. Más de un 2 % se dice como cambio; menos, como "igual". */
+function difPend(A, B) {
+  const dif = f => { let w = 0, s = 0; for (const [p, x] of A) if (f(p) && B.has(p) && B.get(p).km >= 1 && x.km >= 1) { const r = (x.km / x.min) / (B.get(p).km / B.get(p).min) - 1; s += r * x.km; w += x.km; } return w ? s / w * 100 : null; };
+  const txt = (n, d) => d == null ? '' : `${n}, ${Math.abs(d) < 2 ? 'igual que antes' : `un ${nf(Math.abs(d), 0)} % más ${d > 0 ? 'rápido' : 'lento'}`}`;
+  const t = [txt('En llano', dif(p => p === 0)), txt('en subida', dif(p => p >= 2))].filter(Boolean);
+  return t.length ? `${t.join('; ')} que en el periodo anterior, a igual pendiente.` : '';
+}
+function vCurvas({ series, h = 200, fmtY = v => nf(v, 0), aria }) {
+  const pad = { t: 14, r: 10, b: 38, l: 38 }, xs = series.flatMap(s => s.pts.map(p => p[0])), ys = series.flatMap(s => s.pts.map(p => p[1]));
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), [y0, y1] = rango(ys, .12), yt = vTicks(y0, y1, 4).filter(t => t >= y0 && t <= y1);
+  const X = v => pad.l + (v - x0) / Math.max(1, x1 - x0) * (VW - pad.l - pad.r), Y = v => pad.t + (1 - (v - y0) / (y1 - y0)) * (h - pad.t - pad.b);
+  const ejeX = [...new Set(xs)].sort((a, b) => a - b).map(x => `<text x="${X(x)}" y="${h - pad.b + 14}" text-anchor="middle">${x > 0 ? '+' : x < 0 ? '−' : ''}${Math.abs(x)}</text>`).join('');
+  const lineas = series.map(s => `<polyline points="${s.pts.map(p => `${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(' ')}" fill="none" stroke="${s.color}" stroke-width="${s.dash ? 2 : 2.5}"${s.dash ? ' stroke-dasharray="5 4"' : ''} stroke-linejoin="round"/>
+    ${s.pts.map(p => `<g data-tip="${esc(p[2])}"><circle class="hit" cx="${X(p[0])}" cy="${Y(p[1])}" r="14"/><circle cx="${X(p[0])}" cy="${Y(p[1])}" r="${s.dash ? 3 : 4}" fill="${s.dash ? 'var(--paper)' : s.color}" stroke="${s.color}" stroke-width="1.5"/></g>`).join('')}`).join('');
+  return `<svg class="chart2" viewBox="0 0 ${VW} ${h}" role="img" aria-label="${esc(aria)}">${vEjeY(y0, y1, yt, h, pad, fmtY)}${ejeX}
+    <text x="${(pad.l + VW - pad.r) / 2}" y="${h - 4}" text-anchor="middle">Pendiente (%)</text>${lineas}</svg>`;
+}
+
 /* ===== Por terreno: suma del periodo, con medias por tiempo (como hace el conector en cada salida) ===== */
 function sumaTerreno(as, peso) {
   const z = () => ({ n: 0, km: 0, min: 0, fcm: 0, fcmin: 0, desn: 0 }); const L = z(), U = z(), B = z();
@@ -106,6 +130,21 @@ function progDep(dep) {
   if (pSu.length >= 2) top.push(serie('Subidas: metros por hora (VAM)', info(`vam-${dep}`, 'VAM en subida', 'Metros de desnivel que subes por hora en los tramos de subida de cada salida (desde el 3 %). Es la cifra con la que se comparan los escaladores sin potenciómetro, pero depende de la pendiente: en rampas suaves sale más baja que en un puerto duro, así que compara salidas parecidas. Toca un punto para ver la pendiente, el pulso y los vatios estimados.'),
     pSu.map(p => { const s = p.a.ter.subida; return { ...p, tip: `${fDia(p.f)}: ${nf(s.vam, 0)} m/h, ${nf(s.km, 1)} km al ${nf(s.pend, 1)} % a ${s.fc || '—'} ppm${s.wkg ? `, ≈${nf(s.wkg, 1)} W/kg` : ''}` }; }),
     { fmt: v => nf(v, 0), aria: `VAM en subida por actividad en ${INS_TXT[dias]}` }));
+  if (dep !== 'skimo') {
+    const antes = acts().filter(a => a.dep === dep && a.f > addDays(desde, -dias) && a.f <= desde && a.ter), A = sumaPendiente(conTer), B = sumaPendiente(antes);
+    const v = x => x.km / (x.min / 60), fv = dep === 'correr' ? (x => `${ritmo(x)}`) : (x => `${nf(x, 1)} km/h`);
+    const pts = [...A.entries()].filter(([, x]) => x.km >= 1).sort((a, b) => a[0] - b[0]);
+    const prev = [...B.entries()].filter(([p, x]) => x.km >= 1 && A.has(p) && A.get(p).km >= 1).sort((a, b) => a[0] - b[0]);
+    if (pts.length >= 3) {
+      const txt = p => `${p > 0 ? '+' : p < 0 ? '−' : ''}${Math.abs(p)} %`;
+      const series = [{ color: col, pts: pts.map(([p, x]) => [p, v(x), `${txt(p)}: ${fv(v(x))} en ${nf(x.km, 0)} km${B.get(p) && B.get(p).km >= 1 ? ` (antes ${fv(v(B.get(p)))})` : ''}`]) }];
+      if (prev.length >= 2) series.push({ color: 'var(--ink-2)', dash: true, pts: prev.map(([p, x]) => [p, v(x), `${txt(p)}, periodo anterior: ${fv(v(x))} en ${nf(x.km, 0)} km`]) });
+      top.push(blk(`${vizT('Velocidad según la pendiente', info(`vpend-${dep}`, 'Velocidad según la pendiente', `Tu velocidad media en cada pendiente, de bajadas (a la izquierda) a subidas (a la derecha), sumando todos los tramos de 500 m del periodo. La línea discontinua es el periodo anterior, de la misma duración: si la de ahora queda por encima en las mismas pendientes, vas más rápido en el mismo terreno. Así se compara sin que importe si has hecho rutas más llanas o más duras. El viento y el pulso no se descuentan.`))}
+        <div class="viz">${vCurvas({ series, fmtY: dep === 'correr' ? ritmoC : v => nf(v, 0), aria: `${V.n} según la pendiente en ${INS_TXT[dias]}${prev.length >= 2 ? ', frente al periodo anterior' : ''}` })}</div>
+        <div class="leyenda"><span><i class="ln" style="border-top:2.5px solid ${col}"></i>${cap1(INS_TXT[dias])}</span>${prev.length >= 2 ? `<span><i class="ln" style="border-top:2px dashed var(--ink-2)"></i>Periodo anterior</span>` : ''}</div>
+        ${prev.length >= 2 ? `<p class="lee">${difPend(A, B)}</p>` : ''}`));
+    }
+  }
   const nSem = Math.min(52, Math.ceil(dias / 7)), sems = Array.from({ length: nSem }, (_, i) => addDays(SEM, (i - nSem + 1) * 7));
   const vol = sems.map(w => { const wk = (M.weeks || []).find(x => x[0] === w); return [fDia(w), ((wk && wk[1][dep]) || 0) / 60, w === SEM]; });
   const vy = niceMax(Math.max(...vol.map(v => v[1]), 1));
@@ -114,8 +153,9 @@ function progDep(dep) {
       tip: d => `Semana del ${d[0]}: ${nf(d[1])} h${d[2] ? ' (en curso)' : ''}`, etiqueta: nSem <= 13 ? (d => d[1] ? nf(d[1]) : '') : null, aria: 'Horas por semana', fmt: v => nf(v, 1) })}</div>`));
 
   // Para profundizar
-  const pEf = conTer.filter(a => a.ter.llano && a.ter.llano.mpl).map(a => ({ f: a.f, v: a.ter.llano.mpl, a }));
-  if (dep !== 'skimo' && pEf.length >= 2) mas.push(serie('Eficiencia: metros por latido en llano', info(`mpl-${dep}`, 'Metros por latido', 'Los metros que recorres en llano con cada latido: velocidad dividida por pulso. Es la idea del factor de eficiencia de Intervals.icu o TrainingPeaks, pero con velocidad porque no hay potenciómetro. Si sube, tu motor aeróbico mejora. El viento, el calor y el cansancio la mueven: mira la línea, no un punto.'),
+  const fondo = a => ['rec', 'fondo'].includes(tipoAct(a));
+  const pEf = conTer.filter(a => fondo(a) && a.ter.llano && a.ter.llano.mpl).map(a => ({ f: a.f, v: a.ter.llano.mpl, a }));
+  if (dep !== 'skimo' && pEf.length >= 2) mas.push(serie('Eficiencia: metros por latido en llano', info(`mpl-${dep}`, 'Metros por latido', 'Los metros que recorres en llano con cada latido: velocidad dividida por pulso. Es la idea del factor de eficiencia de Intervals.icu o TrainingPeaks, pero con velocidad porque no hay potenciómetro. Si sube, tu motor aeróbico mejora. Solo cuenta las salidas suaves y constantes (fondos): con series o con un grupo, el dato no sirve. En una misma ruta repetida sale casi igual aunque cambie el ritmo, pero entre rutas distintas varía mucho más (viento, tráfico, grupo): mira la línea, no un punto.'),
     pEf.map(p => ({ ...p, tip: `${fDia(p.f)}: ${nf(p.v, 2)} m por latido (${nf(p.a.ter.llano.kmh, 1)} km/h a ${p.a.ter.llano.fc} ppm)` })), { fmt: v => nf(v, 2), aria: 'Metros por latido en llano por actividad' }));
   const pts = todas.map(a => [fDia(a.f), R.fc(a), R.v(a)]).filter(p => p[1] && p[2]);
   if (pts.length >= 3) { const [xa, xb] = rango(pts.map(p => p[1])), [ya, yb] = rango(pts.map(p => p[2])), n = pts.length;
@@ -124,8 +164,8 @@ function progDep(dep) {
       <div class="viz">${vPuntos({ datos: pts, x0: xa, x1: xb, y0: ya, y1: yb, xt: vTicks(xa, xb, 4).filter(t => t >= xa && t <= xb), yt: vTicks(ya, yb, 4).filter(t => t >= ya && t <= yb), xl: 'Pulso medio (ppm)', yl: R.u,
         fill: (d, i) => `color-mix(in srgb,${col} ${30 + i / Math.max(1, n - 1) * 70}%,var(--paper))`, tip: d => `${d[0]}: ${R.tip(d[2])} a ${d[1]} ppm`, aria: `${R.n} frente a pulso medio en ${n} actividades`, etiquetas: [n - 1, mejor], fmtX: v => nf(v, 0), fmtY: v => nf(v, dep === 'skimo' ? 0 : 1) })}</div>
       <p class="lee">Tu mejor relación: ${pts[mejor][0]}, ${R.tip(pts[mejor][2])} a ${pts[mejor][1]} ppm.</p>`)); }
-  const pDc = todas.filter(a => a.dc != null && a.min >= 60).map(a => ({ f: a.f, v: a.dc, a }));
-  if (dep !== 'skimo' && pDc.length >= 2) mas.push(serie('Desacople en las salidas largas', info(`dc-${dep}`, 'Desacople', 'Cuánto empeora la relación entre velocidad y pulso de la primera mitad a la segunda, medido solo en llano (método de Joe Friel, el mismo que usan Intervals.icu y TrainingPeaks). Por debajo del 5 % aguantas bien el ritmo; por encima, te falta fondo para esa duración o fuiste deprisa al principio. Solo salidas de una hora o más.'),
+  const pDc = todas.filter(a => a.dc != null && a.min >= 60 && fondo(a)).map(a => ({ f: a.f, v: a.dc, a }));
+  if (dep !== 'skimo' && pDc.length >= 2) mas.push(serie('Desacople en las salidas largas', info(`dc-${dep}`, 'Desacople', 'Cuánto empeora la relación entre velocidad y pulso de la primera mitad a la segunda, medido solo en llano (método de Joe Friel, el mismo que usan Intervals.icu y TrainingPeaks). Por debajo del 5 % aguantas bien el ritmo; por encima, te falta fondo para esa duración o fuiste deprisa al principio. Solo fondos de una hora o más: en salidas con series, repechos o grupo salen cifras sin sentido (de −15 % a +18 %).'),
     pDc.map(p => ({ ...p, tip: `${fDia(p.f)}: ${p.v > 0 ? '+' : ''}${nf(p.v, 1)} % en ${dur(p.a.min)}` })), { fmt: v => `${nf(v, 0)} %`, tend: false, refs: [{ v: 5, t: 'Límite 5 %', siempre: true }], aria: 'Desacople por salida larga' }));
   const fsMax = i => { const v = todas.map(a => a.fs && a.fs[i]).filter(Boolean); return v.length ? Math.max(...v) : null; };
   const curva = [['5 min', fsMax(0)], ['20 min', fsMax(1)], ['60 min', fsMax(2)]].filter(c => c[1]);
