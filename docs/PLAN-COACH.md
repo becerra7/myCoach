@@ -258,6 +258,8 @@ Objetivo: que funcione sin ti delante y aprender qué enamora.
     - **Filtros:** deporte con botones (cambia la pantalla) y periodo con un desplegable discreto al lado; antes eran dos filas de botones iguales.
     - **Peso a mano** en Insights → Peso → "Apuntar peso": se enseña lo que se guardará y se sube a Garmin con `peso_registrar` (la web ya puede llamarla). Para borrar un error, en Garmin Connect.
 
+22. **Medidas corporales (9 de octubre).** Pecho, cintura, cadera, brazo derecho e izquierdo (cm), entrepierna (cm) y talla de pie (EU). Garmin no guarda perímetros, así que viven en myCoach (`cuerpo/medidas`), un registro por día con solo lo que se midió. Herramientas `medidas` y `medidas_registrar` (vista previa sin confirm, como el resto de escrituras); la web las puede llamar. En Insights → General, junto al peso: cada perímetro con su cifra, su cambio en el periodo y una gráfica; entrepierna y pie, en una línea (casi no cambian). Sin juicios: número y cambio, nunca "bien" o "mal". Cuesta unos 300 tokens más por conversación con Claude (dos herramientas más en la lista).
+
 ## 10. Próximos pasos concretos (2 semanas)
 1. Sacar `packages/domain` con carga TRIMP, semáforo y tests.
 2. Documento `atleta/perfil` más registro de decisiones.

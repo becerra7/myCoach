@@ -43,7 +43,7 @@ function tendencia(pts) {
 /* ===== Gráfica de serie temporal =====
    modo "puntos": un punto por salida, la media del periodo (la misma cifra que la tabla) y la recta de tendencia.
    modo "linea": una línea que une los valores (series de Garmin y desacople). */
-function vSerie({ pts, desde, hasta = HOY, h = 190, fmt = v => nf(v, 1), color = 'var(--ink)', refs = [], aria, modo = 'puntos', media = null, u = '', y0, y1, pasoY }) {
+function vSerie({ pts, desde, hasta = HOY, h = 190, fmt = v => nf(v, 1), color = 'var(--ink)', refs = [], aria, modo = 'puntos', media = null, u = '', y0, y1, pasoY, fin: conFin = true }) {
   const pad = { t: 22, r: 10, b: 24, l: 38 }, t0 = dte(desde).getTime(), t1 = dte(hasta).getTime();
   const X = f => pad.l + (dte(f).getTime() - t0) / Math.max(1, t1 - t0) * (VW - pad.l - pad.r);
   const vals = pts.map(p => p.v), lo = Math.min(...vals), hi = Math.max(...vals), marg = Math.max((hi - lo) * .6, Math.abs(hi) * .03);
@@ -66,7 +66,7 @@ function vSerie({ pts, desde, hasta = HOY, h = 190, fmt = v => nf(v, 1), color =
   const muchos = pts.length > 40;
   const marcas = pts.map(p => `<g data-tip="${esc(p.tip)}"><circle class="hit" cx="${X(p.f)}" cy="${Y(p.v)}" r="14"/>${muchos ? '' : `<circle cx="${X(p.f)}" cy="${Y(p.v)}" r="4" fill="color-mix(in srgb,${color} ${modo === 'puntos' ? 55 : 100}%,var(--paper))" stroke="var(--paper)" stroke-width="1.5"/>`}</g>`).join('');
   const ult = pts[pts.length - 1];
-  const fin = modo === 'linea' && ult ? `<text class="lbl" x="${Math.min(X(ult.f), VW - pad.r - 2)}" y="${Y(ult.v) - 9}" text-anchor="end">${esc(fmt(ult.v))}</text>` : '';
+  const fin = modo === 'linea' && conFin && ult ? `<text class="lbl" x="${Math.min(X(ult.f), VW - pad.r - 2)}" y="${Y(ult.v) - 9}" text-anchor="end">${esc(fmt(ult.v))}</text>` : '';
   return `<svg class="chart2" viewBox="0 0 ${VW} ${h}" role="img" aria-label="${esc(aria)}">${vUnidad(u, pad)}${vEjeY(a, b, yt, h, pad, fmt)}${ejeX}${rf}${linea}${recta}${marcas}${fin}</svg>`;
 }
 const leyendaSerie = (col, media = true) => `<div class="leyenda"><span><i style="background:color-mix(in srgb,${col} 55%,var(--paper));border-radius:50%"></i>Cada actividad</span><span><i class="ln" style="border-top:2.5px solid ${col}"></i>Tendencia</span>${media ? '<span><i class="ln" style="border-top:2px dashed var(--ink-2)"></i>Media del periodo</span>' : ''}</div>`;
@@ -324,7 +324,7 @@ function progForma() {
       ${tsb == null ? '<p class="muted">Aún no tengo tu frescura: la calcula el entrenador con tus actividades.</p>' : `<p><b style="font-size:44px;font-stretch:72%;font-weight:800;line-height:1">${tsb > 0 ? '+' : tsb < 0 ? '−' : ''}${Math.abs(tsb)}</b> ${tag(zona[0], zona[1], zona[2])}</p><p style="margin-top:8px">${zona[3]}</p>
       <div style="margin-top:12px">${escalaFrescura(tsb)}</div><p class="xs muted" style="margin-top:8px">${Math.round(f.forma_ctl)} de forma menos ${Math.round(f.fatiga_atl)} de fatiga.</p>`}`);
   // Frescura y carga responden a lo mismo (¿cómo llego?): en escritorio van juntas, en móvil una tras otra.
-  return `${dondeEstas()}${evolucionGarmin()}<div class="grid2">${horasDeportes()}${bloquePeso(insDesde())}</div>
+  return `${dondeEstas()}${evolucionGarmin()}${horasDeportes()}<div class="grid2">${bloquePeso(insDesde())}${bloqueMedidas(insDesde())}</div>
     ${carga ? `<div class="grid2">${fresc}${carga}</div>` : fresc}
     <div class="btns" style="margin:8px 0 24px"><button class="link" type="button" data-a="push" data-v="numeros">Tus umbrales y predicciones</button></div>`;
 }
@@ -400,3 +400,66 @@ function scrNumeros() {
 }
 /* El periodo es un desplegable nativo: se cambia con el evento change, no con el clic general (que lo anularía). */
 document.addEventListener('change', e => { if (e.target && e.target.id === 'ins-per') { S.insRango = e.target.value; save(); render(); document.getElementById('ins-per')?.focus(); } });
+
+/* ===== Medidas corporales: viven en myCoach (Garmin no guarda perímetros) =====
+   Junto al peso, en General. Una gráfica pequeña por medida para ver su progreso, sin juicios:
+   el número y cuánto ha cambiado, nunca si está bien o mal. */
+const MEDS = [['pecho_cm', 'Pecho'], ['cintura_cm', 'Cintura'], ['cadera_cm', 'Cadera'], ['brazo_derecho_cm', 'Brazo derecho'], ['brazo_izquierdo_cm', 'Brazo izquierdo']];
+const MEDS_FIJAS = [['entrepierna_cm', 'Entrepierna', 'cm'], ['pie_eu', 'Pie', 'EU']];
+const MZ = { datos: undefined, fuente: null };
+function medidasDemo() {
+  const r = []; for (let i = 0; i < 6; i++) { const f = addDays(HOY, -150 + i * 30); r.push({ fecha: f, pecho_cm: 101 - i * .3, cintura_cm: Math.round((88 - i * .8) * 10) / 10, cadera_cm: Math.round((99 - i * .4) * 10) / 10, brazo_derecho_cm: Math.round((32 + i * .2) * 10) / 10, brazo_izquierdo_cm: Math.round((31.6 + i * .2) * 10) / 10, ...(i === 0 ? { entrepierna_cm: 84, pie_eu: 43 } : {}) }); }
+  return { demo: true, registros: r };
+}
+async function cargarMedidas(fresco) {
+  if (MZ.datos === 'cargando') return; const fuente = fuenteDatos(); if (fuente === 'espera') return;
+  MZ.fuente = fuente; if (fuente === 'demo') { MZ.datos = MZ.datos && MZ.datos.demo ? MZ.datos : medidasDemo(); return; }
+  MZ.datos = 'cargando'; try { MZ.datos = await coachCall('medidas', {}, fresco); } catch (e) { MZ.datos = null; } render();
+}
+function bloqueMedidas(desde) {
+  if (MZ.datos !== undefined && MZ.datos !== 'cargando' && fuenteDatos() !== 'espera' && MZ.fuente !== fuenteDatos()) MZ.datos = undefined;
+  if (MZ.datos === undefined) cargarMedidas();
+  const d = MZ.datos, regs = d && d.registros || [], boton = '<div class="btns"><button class="btn tonal" type="button" data-a="medidas-apuntar">Apuntar medidas</button></div>';
+  const cab = blkH('Medidas', `${d && d.demo ? '<span class="demo-tag">Ejemplo</span>' : ''}${info('medidas', 'Medidas', 'Perímetros con cinta métrica, en centímetros: pecho a la altura de los pezones, cintura a la altura del ombligo, cadera por la parte más ancha y brazo relajado por la parte más ancha. Mejor siempre a la misma hora (por la mañana) y en el mismo sitio. Se guardan en myCoach y también te las lee tu Claude.')}`);
+  if (d === undefined || d === 'cargando') return blk(`${cab}<p class="muted" role="status">Leyendo tus medidas…</p>`);
+  if (d === null) return blk(`${cab}<p>No he podido leer tus medidas.</p><div class="btns"><button class="btn tonal" type="button" data-a="medidas-recargar">Volver a probar</button></div>`);
+  if (!regs.length) return blk(`${cab}<p class="muted">Aún no has apuntado medidas. Con una cinta métrica, por la mañana: pecho, cintura, cadera y brazos. Cada vez que las tomes verás cómo cambian.</p>${boton}`);
+  const filas = MEDS.map(([k, n]) => { const todas = regs.filter(r => r[k] != null).map(r => ({ f: r.fecha, v: r[k] })); if (!todas.length) return '';
+    const pts = todas.filter(p => p.f >= desde), ult = todas[todas.length - 1], ref = pts.length >= 2 ? pts[0] : todas.length >= 2 ? todas[0] : null, cambio = ref ? Math.round((ult.v - ref.v) * 10) / 10 : null;
+    const graf = pts.length >= 2 ? `<div class="viz">${vSerie({ pts: pts.map(p => ({ ...p, tip: `${fDia(p.f)}: ${nf(p.v, 1)} cm` })), desde, modo: 'linea', fin: false, h: 110, u: 'cm', fmt: v => nf(v, 1), color: 'var(--ink)', aria: `${n}: de ${nf(pts[0].v, 1)} a ${nf(ult.v, 1)} cm` })}</div>` : '';
+    return `<div class="med-f"><div class="med-l"><b>${n}</b><span>${nf(ult.v, 1)} cm</span>${cambio != null ? `<small>${cambio === 0 ? 'Igual' : `${cambio > 0 ? '+' : '−'}${nf(Math.abs(cambio), 1)} cm`} desde el ${fDia(ref.f)}</small>` : `<small>${fDia(ult.f)}</small>`}</div>${graf}</div>`; }).join('');
+  const fijas = MEDS_FIJAS.map(([k, n, u]) => { const r = [...regs].reverse().find(x => x[k] != null); return r ? `${n} ${nf(r[k], 1)} ${u}` : ''; }).filter(Boolean).join(' · ');
+  return blk(`${cab}<div class="med">${filas}</div>${fijas ? `<p class="small muted" style="margin-top:12px">${fijas}</p>` : ''}${boton}`);
+}
+/* Hoja para apuntar: solo se guardan los campos que escribes; se enseña antes → después. */
+let HMED = null;
+function hojaMedidas() {
+  const regs = (MZ.datos && MZ.datos.registros) || [], ult = k => { const r = [...regs].reverse().find(x => x[k] != null); return r ? r[k] : null; };
+  const campos = [...MEDS.map(([k, n]) => [k, n, 'cm']), ...MEDS_FIJAS];
+  const st = { fecha: HOY, v: {}, guardando: false, error: '' }; HMED = { st, campos, ult };
+  const num = s => { const x = parseFloat(String(s).replace(',', '.')); return Number.isFinite(x) ? Math.round(x * 10) / 10 : null; };
+  HMED.cambios = () => Object.entries(st.v).map(([k, s]) => [k, num(s)]).filter(([, x]) => x != null);
+  const resumen = () => { const c = HMED.cambios(); return c.length ? `Se guardará el ${st.fecha === HOY ? 'día de hoy' : fDia(st.fecha)}: ${c.map(([k, x]) => { const [, n, u] = campos.find(f => f[0] === k), a = ult(k); return `${n.toLowerCase()} ${a != null ? `${nf(a, 1)} → ` : ''}${nf(x, 1)} ${u}`; }).join(', ')}.` : 'Escribe solo las medidas que hayas tomado; las demás no cambian.'; };
+  HMED.resumen = resumen;
+  const boton = () => { const c = HMED.cambios(); return `<button class="btn fill" type="button" data-a="medidas-guardar"${c.length && !st.guardando ? '' : ' disabled'}>${st.guardando ? 'Guardando…' : c.length ? `Guardar ${c.length} medida${c.length === 1 ? '' : 's'}` : 'Guardar'}</button>`; };
+  HMED.boton = boton;
+  openSheet({ title: 'Apuntar medidas', size: 'large', id: 'medidas', onClose: () => { HMED = null; }, body: () => `<form class="stack" style="gap:12px" data-form="medidas">
+    <label class="stack" for="md-f" style="gap:4px"><span class="small">Día</span><input id="md-f" class="search" type="date" max="${HOY}" value="${st.fecha}"></label>
+    <div class="med-campos">${campos.map(([k, n, u]) => `<label class="stack" for="md-${k}" style="gap:4px"><span class="small">${n} (${u})</span><input id="md-${k}" class="search" type="text" inputmode="decimal" autocomplete="off" value="${esc(st.v[k] || '')}" placeholder="${ult(k) != null ? nf(ult(k), 1) : ''}"></label>`).join('')}</div>
+    <p class="small" role="status">${resumen()}</p>${st.error ? `<p class="small" role="alert">${esc(st.error)}</p>` : ''}${boton()}</form>` });
+}
+document.addEventListener('input', e => { if (!HMED || !e.target || !e.target.id) return; const id = e.target.id;
+  if (id === 'md-f') HMED.st.fecha = e.target.value; else if (id.startsWith('md-')) HMED.st.v[id.slice(3)] = e.target.value; else return;
+  HMED.st.error = ''; const f = document.querySelector('[data-form="medidas"]'); if (!f) return;
+  // Solo el resumen y el botón: así no se pierde el foco del campo que escribes.
+  f.querySelector('[role="status"]').textContent = HMED.resumen(); const t = document.createElement('div'); t.innerHTML = HMED.boton(); f.querySelector('[data-a="medidas-guardar"]').replaceWith(t.firstChild); });
+async function guardarMedidas() {
+  if (!HMED) return; const st = HMED.st, c = HMED.cambios(); if (!c.length) return;
+  st.guardando = true; fillSheet();
+  try {
+    if (MZ.fuente === 'demo' || S.modo === 'demo') { const regs = MZ.datos.registros.filter(r => r.fecha !== st.fecha), prev = MZ.datos.registros.find(r => r.fecha === st.fecha) || { fecha: st.fecha }; regs.push({ ...prev, ...Object.fromEntries(c) }); regs.sort((a, b) => a.fecha.localeCompare(b.fecha)); MZ.datos = { ...MZ.datos, registros: regs }; }
+    else { await coachCall('medidas_registrar', { fecha: st.fecha, ...Object.fromEntries(c), confirm: true }, true); MZ.datos = undefined; }
+    closeSheet(); toast(`${c.length} medida${c.length === 1 ? '' : 's'} guardada${c.length === 1 ? '' : 's'}`); render();
+  } catch (e) { st.guardando = false; st.error = /entre/.test(e && e.message || '') ? e.message : 'No he podido guardarlas. Vuelve a probar en un momento.'; fillSheet(); }
+}
+Object.assign(ACTIONS, { 'medidas-apuntar': () => hojaMedidas(), 'medidas-guardar': () => guardarMedidas(), 'medidas-recargar': () => { MZ.datos = undefined; cargarMedidas(true); } });

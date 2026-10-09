@@ -26,6 +26,7 @@ description: Cómo y cuándo usar las herramientas de myCoach/Garmin (coach_*, a
 | ¿Me estoy pasando de carga? ¿Estoy en forma? VO2máx, umbral, FTP, predicciones | `garmin_forma` (1). La carga de hoy y su franja ya vienen en `coach_hoy` |
 | ¿Estoy mejorando? | `coach_progreso` (1) |
 | Peso | decirlo = `peso_registrar` confirm=true; comentar = `peso_historico` (tendencia de 7 días, no el dato de un día) |
+| Medidas corporales (pecho, cintura, cadera, brazos, entrepierna, pie) | decirlas = `medidas_registrar` confirm=true (solo las que dice); comentar = `medidas` (cambio, sin juicios) |
 | Comida | `comida_registrar` (con `plato_id` si ya es un plato guardado, `del_plan=true` si comió lo previsto); consultar con `comidas` |
 | Menús de la semana | `comida_plan` (1: carga, hidrato por comida, preferencias y `antes_de_proponer`) → `comida_platos` (1) → `comida_proponer` sin guardar → con su sí, `guardar=true` (4) |
 | Lista de la compra | `comida_plan lista_compra=true` (1) |

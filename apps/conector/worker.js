@@ -7273,6 +7273,88 @@ Object.assign(TOOLS, {
 	},
 });
 
+// ──────────────────────────── Medidas corporales ────────────────────────────
+// Garmin no guarda perímetros, así que viven en myCoach: un registro por día con las
+// medidas que se tomaron ese día (las demás no se tocan). Sin juicios: se enseñan los
+// números y su cambio, nunca si está "bien" o "mal".
+//   cuerpo/medidas  { registros: [{ fecha, pecho_cm, cintura_cm, ... }] }
+
+const MEDIDAS_DOC = "cuerpo/medidas";
+const MEDIDAS = {
+	pecho_cm: { n: "Pecho", min: 50, max: 200 },
+	cintura_cm: { n: "Cintura", min: 40, max: 200 },
+	cadera_cm: { n: "Cadera", min: 50, max: 200 },
+	brazo_derecho_cm: { n: "Brazo derecho", min: 15, max: 70 },
+	brazo_izquierdo_cm: { n: "Brazo izquierdo", min: 15, max: 70 },
+	entrepierna_cm: { n: "Entrepierna", min: 50, max: 120 },
+	pie_eu: { n: "Talla de pie (EU)", min: 30, max: 52 },
+};
+const MEDIDAS_MAX = 500;
+
+function resumenMedidas(registros) {
+	const ord = [...registros].sort((a, b) => a.fecha.localeCompare(b.fecha));
+	const ultimo = {}, primero = {};
+	for (const r of ord) for (const k of Object.keys(MEDIDAS)) if (r[k] != null) { if (!primero[k]) primero[k] = { fecha: r.fecha, valor: r[k] }; ultimo[k] = { fecha: r.fecha, valor: r[k] }; }
+	return Object.fromEntries(Object.keys(MEDIDAS).filter((k) => ultimo[k]).map((k) => [k, {
+		nombre: MEDIDAS[k].n, ultimo: ultimo[k], primero: primero[k], cambio: Math.round((ultimo[k].valor - primero[k].valor) * 10) / 10,
+	}]));
+}
+
+Object.assign(TOOLS, {
+	medidas: {
+		title: "Medidas corporales",
+		description:
+			"Las medidas corporales guardadas en myCoach (pecho, cintura, cadera, brazos, entrepierna en cm y talla de pie EU) con su historial, " +
+			"la última de cada una y su cambio desde la primera. Sin juicios: tendencia, no culpa. El peso no está aquí: peso_historico.",
+		schema: { type: "object", properties: {} },
+		run: async (env, userId) => {
+			const registros = (await leerDoc(env, userId, MEDIDAS_DOC))?.registros || [];
+			return { registros: [...registros].sort((a, b) => a.fecha.localeCompare(b.fecha)), resumen: resumenMedidas(registros), medidas: Object.fromEntries(Object.entries(MEDIDAS).map(([k, m]) => [k, m.n])) };
+		},
+	},
+	medidas_registrar: {
+		title: "Apuntar medidas corporales",
+		write: true,
+		description:
+			"Guarda en myCoach las medidas de un día (solo las que se tomaron; las demás no se tocan). Centímetros salvo la talla de pie (EU). " +
+			"Sin confirm devuelve la vista previa (antes y después) y NO guarda; con confirm=true guarda. Si el usuario te dice sus medidas, eso ya es su sí. " +
+			"Para borrar una medida de un día, pásala a null con confirm=true.",
+		schema: {
+			type: "object",
+			properties: {
+				fecha: { type: "string", description: "AAAA-MM-DD; por defecto hoy." },
+				...Object.fromEntries(Object.entries(MEDIDAS).map(([k, m]) => [k, { type: ["number", "null"], description: `${m.n} (${m.min}-${m.max}).` }])),
+				confirm: { type: "boolean" },
+			},
+		},
+		run: async (env, userId, args = {}) => {
+			const fecha = /^\d{4}-\d{2}-\d{2}$/.test(args.fecha || "") ? args.fecha : fechaLocal();
+			if (fecha > fechaLocal()) throw new Error("La fecha no puede ser futura.");
+			const cambios = {};
+			for (const [k, m] of Object.entries(MEDIDAS)) {
+				if (!(k in args)) continue;
+				const v = args[k];
+				if (v === null) { cambios[k] = null; continue; }
+				const n = Number(v);
+				if (!Number.isFinite(n) || n < m.min || n > m.max) throw new Error(`${m.n}: tiene que estar entre ${m.min} y ${m.max}.`);
+				cambios[k] = Math.round(n * 10) / 10;
+			}
+			if (!Object.keys(cambios).length) throw new Error("No hay ninguna medida que guardar.");
+			const doc = (await leerDoc(env, userId, MEDIDAS_DOC)) || { registros: [] };
+			const previo = doc.registros.find((r) => r.fecha === fecha) || { fecha };
+			const nuevo = { ...previo, ...cambios };
+			for (const k of Object.keys(nuevo)) if (nuevo[k] === null) delete nuevo[k];
+			const antes = resumenMedidas(doc.registros);
+			const vista = Object.fromEntries(Object.entries(cambios).map(([k, v]) => [MEDIDAS[k].n, { antes: antes[k]?.ultimo.valor ?? null, despues: v }]));
+			if (args.confirm !== true) return { fecha, vista_previa: vista, escrito: false, siguiente: "Enseñeselo y, si dice que sí, llame otra vez con confirm=true." };
+			const resto = doc.registros.filter((r) => r.fecha !== fecha);
+			const registros = (Object.keys(nuevo).length > 1 ? [...resto, nuevo] : resto).sort((a, b) => a.fecha.localeCompare(b.fecha)).slice(-MEDIDAS_MAX);
+			await guardarDoc(env, userId, MEDIDAS_DOC, { registros });
+			return { fecha, guardado: nuevo, escrito: true, resumen: resumenMedidas(registros) };
+		},
+	},
+});
+
 // ──────────────────────────── Plan de comidas y platos ────────────────────────────
 // La semana de comidas va como la de entrenos: el motor pone la carga de cada día y
 // el código de hidrato de cada comida (alto, medio o bajo), Claude propone los platos

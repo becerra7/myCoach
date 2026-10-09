@@ -556,7 +556,7 @@ const rpc = async (env, token, message) => {
 	check("un navegador en la raiz sigue viendo la pagina", (await (await get(env, "/")).text()).includes("<h1>"));
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("tools/list devuelve 47 herramientas", list.body.result.tools.length === 47);
+	check("tools/list devuelve 49 herramientas", list.body.result.tools.length === 49);
 	check("app_guardar se anuncia como escritura", anot0(list).app_guardar.readOnlyHint === false);
 	{
 		const call = (name, args) => rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name, arguments: args } });
@@ -1266,7 +1266,7 @@ const rpc = async (env, token, message) => {
 	check("el token de acceso vale sin leer del KV", init.body.result?.serverInfo?.name === "garmin");
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("las herramientas se listan igualmente", list.body.result.tools.length === 47);
+	check("las herramientas se listan igualmente", list.body.result.tools.length === 49);
 
 	// Y el dato que si vive en KV avisa en vez de mentir
 	const call = await rpc(env, tokens.access_token, {
@@ -2097,7 +2097,7 @@ const rpc = async (env, token, message) => {
 	const env = makeEnv();
 	const { tokens } = await connect(env, "ana@x.com", "a");
 	const tools = (await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 30, method: "tools/list" })).body.result.tools;
-	const FAMILIAS = /^(agenda|garmin|coach|entrenos?|entreno|fuerza|cardio|comida|comidas|peso|intervals|app|mycoach)(_[a-z0-9]+)*$/;
+	const FAMILIAS = /^(agenda|garmin|coach|entrenos?|entreno|fuerza|cardio|comida|comidas|peso|medidas|intervals|app|mycoach)(_[a-z0-9]+)*$/;
 	check("convención: cada herramienta empieza por su familia", tools.every((t) => FAMILIAS.test(t.name)), tools.filter((t) => !FAMILIAS.test(t.name)).map((t) => t.name).join());
 	check("convención: todas con título, descripción y esquema de objeto", tools.every((t) => t.title && t.description?.length > 40 && t.inputSchema?.type === "object"));
 	check("convención: descripciones de menos de 1500 caracteres", tools.every((t) => t.description.length < 1500), tools.filter((t) => t.description.length >= 1500).map((t) => t.name).join());
@@ -2107,7 +2107,7 @@ const rpc = async (env, token, message) => {
 	const viejas = ["garmin_sleep", "garmin_hrv", "garmin_daily_summary", "garmin_body_battery", "garmin_training_readiness", "garmin_course_detail", "fuerza_entrenos", "cardio_entrenos", "fuerza_enviar_garmin", "cardio_enviar_garmin"];
 	check("las herramientas juntadas ya no existen", !tools.some((t) => viejas.includes(t.name)));
 	const visibles = tools.filter((t) => !t._meta?.ui?.visibility || t._meta.ui.visibility.includes("model"));
-	check("Claude ve 42 herramientas", visibles.length === 42, String(visibles.length));
+	check("Claude ve 44 herramientas", visibles.length === 44, String(visibles.length));
 }
 
 // ── 13. Intervals.icu: clave cifrada, actividades, series, bienestar y curvas ──
@@ -2675,6 +2675,33 @@ const rpc = async (env, token, message) => {
 	// Borrar un plato
 	const borr = await llamar(ana, "comida_plato_guardar", { id: "paella-de-marisco", borrar: true });
 	check("plato: borrar lo quita", borr.borrado && (await llamar(ana, "comida_platos")).total === 2);
+}
+
+// ── 20. Medidas corporales: en myCoach, por día, sin tocar las que no se toman ──
+{
+	mockGarmin({ "ana@x.com": { password: "a", data: { displayName: "ana", hrv: 50 } }, "bob@x.com": { password: "b", data: { displayName: "bob", hrv: 60 } } });
+	const env = makeEnv();
+	const ana = (await connect(env, "ana@x.com", "a")).tokens.access_token;
+	const bob = (await connect(env, "bob@x.com", "b")).tokens.access_token;
+	const llamar = async (token, name, args = {}) => {
+		const res = (await rpc(env, token, { jsonrpc: "2.0", id: 60, method: "tools/call", params: { name, arguments: args } })).body.result;
+		return res.isError ? { error: res.content[0].text } : JSON.parse(res.content[0].text);
+	};
+	const vista = await llamar(ana, "medidas_registrar", { fecha: "2026-09-01", cintura_cm: 86, pecho_cm: 100 });
+	check("medidas: sin confirm solo enseña", vista.escrito === false && vista.vista_previa?.Cintura?.despues === 86);
+	check("medidas: sin confirm no guarda", (await llamar(ana, "medidas", {})).registros.length === 0);
+	await llamar(ana, "medidas_registrar", { fecha: "2026-09-01", cintura_cm: 86, pecho_cm: 100, confirm: true });
+	await llamar(ana, "medidas_registrar", { fecha: "2026-10-01", cintura_cm: 84.04, confirm: true });
+	const m = await llamar(ana, "medidas", {});
+	check("medidas: un registro por día", m.registros.length === 2);
+	check("medidas: el cambio sale de la primera a la última", m.resumen.cintura_cm?.cambio === -2 && m.resumen.cintura_cm.ultimo.valor === 84);
+	check("medidas: lo que no se midió no se toca", m.resumen.pecho_cm?.ultimo.fecha === "2026-09-01");
+	const otraVez = await llamar(ana, "medidas_registrar", { fecha: "2026-10-01", brazo_derecho_cm: 33, confirm: true });
+	check("medidas: el mismo día se completa, no se duplica", otraVez.guardado.cintura_cm === 84 && otraVez.guardado.brazo_derecho_cm === 33);
+	check("medidas: fuera de rango da error", /entre/.test((await llamar(ana, "medidas_registrar", { cintura_cm: 900, confirm: true })).error || ""));
+	await llamar(ana, "medidas_registrar", { fecha: "2026-10-01", brazo_derecho_cm: null, confirm: true });
+	check("medidas: null borra esa medida", (await llamar(ana, "medidas", {})).registros.find((r) => r.fecha === "2026-10-01").brazo_derecho_cm === undefined);
+	check("medidas: cada uno ve las suyas", (await llamar(bob, "medidas", {})).registros.length === 0);
 }
 
 // ── Plan compartido con myLuv: permiso reducido plan:leer ──

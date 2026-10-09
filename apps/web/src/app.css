@@ -1125,6 +1125,16 @@ button.hp-encaje{cursor:pointer;align-items:center;min-height:44px}
   .ter-f{grid-template-columns:minmax(0,1.3fr) repeat(3,minmax(0,1fr));align-items:center}
   .ter-n{grid-column:auto;flex-direction:column;align-items:flex-start;gap:2px}
 }
+/* Medidas: cada medida con su cifra y, debajo, su gráfica a todo el ancho (a media anchura no se leía) */
+.med{display:grid;grid-template-columns:minmax(0,1fr);border-top:1px solid var(--rule)}
+.med-f{display:flex;flex-direction:column;gap:4px;padding:12px 0;border-bottom:1px solid var(--rule)}
+.med-l{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px;min-width:0}
+.med-l small{flex-basis:100%}
+.med-l b{font-weight:650}
+.med-l span{font-size:22px;font-weight:700;font-stretch:80%;font-variant-numeric:tabular-nums}
+.med-l small{font-size:13px;color:var(--ink-2)}
+.med-f .viz{margin:0}
+.med-campos{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
 /* Para profundizar: plegado por defecto */
 .mas{border-top:1px solid var(--rule);margin-top:8px}
 .mas>summary{display:flex;flex-direction:column;justify-content:center;min-height:calc(var(--tap) + 16px);padding:12px 0 12px 28px;position:relative;cursor:pointer;list-style:none}
