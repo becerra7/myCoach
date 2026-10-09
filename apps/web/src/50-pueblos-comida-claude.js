@@ -294,7 +294,7 @@ const ACTIONS = {
   'otro-save': () => saveOtro(),
   'seen-sim': () => { S.seenSim = true; save(); go('pueblos'); },
   week: el => { S.week = el.dataset.v; save(); render(); markFlow(el.dataset.v < SEM ? 'revision' : el.dataset.v === PROX ? 'planificar' : 'semana'); },
-  day: el => sheetDia(el.dataset.v), move: el => sheetMover(el.dataset.v), 'move-to': el => doMove(el.dataset.v, el.dataset.to),
+  day: el => sheetDia(el.dataset.v), move: el => sheetMover(el.dataset.v), 'quitar-dia': el => quitarDelPlan(el.dataset.v), 'move-to': el => doMove(el.dataset.v, el.dataset.to),
   'draft-dep': el => { const d = S.nextDraft; const v = el.dataset.v; d.deps = d.deps.includes(v) ? d.deps.filter(x => x !== v) : [...d.deps, v]; save(); render(); },
   'gen-week': async () => { const d = S.nextDraft; if (!d.deps.some(k => SPORTS[k].cardio)) { ask({ title: 'Elige un deporte de resistencia', text: 'Bici, correr, skimo o montaña.', actions: [{ label: 'Vale', kind: 'fill' }] }); return; }
     const w = semSel(); const p = generarSemana(d.deps, d.h, S.goal.modo, w); if (w === SEM) for (const f of Object.keys(p)) if (f < HOY) delete p[f];

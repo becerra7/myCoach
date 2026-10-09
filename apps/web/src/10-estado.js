@@ -213,7 +213,7 @@ const ICP = {
   mountain: '<path d="M2.5 19.5 9 8.5l4 6.5 2.5-3.5 6 8z"/>', ski: '<path d="M4 20 20 6M7 21l14-12"/><circle cx="16" cy="4" r="1.5"/>',
   racket: '<ellipse cx="10" cy="9" rx="6" ry="6.5"/><path d="M14.2 13.8 20 20"/><circle cx="18.5" cy="5.5" r="1.5"/>',
   dumbbell: '<path d="M6 7v10M3 9.5v5M18 7v10M21 9.5v5M6 12h12"/>', walk: '<circle cx="13" cy="4" r="1.8"/><path d="M9 21l2-6 3 2v4M11 15l1-6 3 3 3 1M12 9l-3 2-1 3"/>',
-  dot: '<circle cx="12" cy="12" r="3"/>', move: '<path d="M7 7 3 11l4 4M3 11h13M17 9l4 4-4 4M21 13H8"/>',
+  dot: '<circle cx="12" cy="12" r="3"/>', move: '<path d="M7 7 3 11l4 4M3 11h13M17 9l4 4-4 4M21 13H8"/>', trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/>',
   watch: '<rect x="6.5" y="6" width="11" height="12" rx="3.5"/><path d="M9 6l.8-3h4.4l.8 3M9 18l.8 3h4.4l.8-3M12 10v2.5l1.5 1"/>',
   target: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1"/>',
   battery: '<rect x="3" y="7" width="15.5" height="10" rx="2.5"/><path d="M21 10.5v3"/><path d="M6 10v4"/>',

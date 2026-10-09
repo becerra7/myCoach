@@ -44,6 +44,7 @@ function sheetDia(f) {
         ${pasado ? '' : `<button class="li" type="button" data-a="move" data-v="${f}">${ic('move')}<span class="main"><b>Mover a otro día</b></span>${ic('chev', 18, 'chev')}</button>`}
         <button class="li" type="button" data-a="otro" data-v="${f}">${ic('edit')}<span class="main"><b>Cambiar por otra cosa</b></span>${ic('chev', 18, 'chev')}</button>
         ${pasado ? '' : `<button class="li" type="button" data-a="ent-elegir" data-v="${f}">${ic('dumbbell')}<span class="main"><b>${s.dep === 'fuerza' ? 'Cambiar el entreno de fuerza' : 'Poner un entreno de fuerza'}</b></span>${ic('chev', 18, 'chev')}</button>`}
+        ${s.t !== 'descanso' ? `<button class="li" type="button" data-a="quitar-dia" data-v="${f}">${ic('trash')}<span class="main"><b>Quitar del plan</b><span>Ese día queda de descanso; puedes deshacerlo</span></span></button>` : ''}
       </div>${bloqueAgendaDia(f)}`;
   } });
 }
@@ -75,6 +76,11 @@ function doMove(f, to) {
   const warn = capsCheck(days7(wk).filter(d => d !== f), to, a.t);
   if (warn) { ask({ title: 'No se puede', text: warn, actions: [{ label: 'Entendido', kind: 'fill' }] }); return; }
   closeSheet(); commit(`Movido al ${fCorta(to)}`, () => { S[key][to] = a; S[key][f] = b || { dep: a.dep, t: 'descanso', d: 'Descanso', min: 0 }; }); markFlow('planificar');
+}
+/* Quitar una sesión del plan: el día queda de descanso (no se mueve a otro día, como "Descansar"). Se puede deshacer. */
+function quitarDelPlan(f) {
+  const key = weekOf(f) === SEM ? 'plan' : 'next'; const s = (S[key] || {})[f]; if (!s) return;
+  closeSheet(); commit(`Quitado del ${fCorta(f)}`, () => { S[key][f] = { dep: s.dep, t: 'descanso', d: 'Descanso', min: 0 }; }); markFlow('planificar');
 }
 /* "Otro": decir qué harás hoy (o ese día) sin IA; con IA opcional */
 function sheetOtro(f = HOY) {
