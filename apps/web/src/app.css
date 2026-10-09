@@ -1070,7 +1070,7 @@ button.hp-encaje{cursor:pointer;align-items:center;min-height:44px}
 .chart2 .grid{stroke:var(--rule);stroke-width:1}
 .chart2 .ref{stroke:var(--ink);stroke-width:1.25;stroke-dasharray:4 4}
 .chart2 .ref2{stroke:var(--line-3);stroke-width:1.25;stroke-dasharray:2 3}
-.chart2 .lbl{fill:var(--ink);font-weight:600}
+.chart2 .lbl{fill:var(--ink);font-weight:600;paint-order:stroke;stroke:var(--paper);stroke-width:3px;stroke-linejoin:round}
 .chart2 .hit{fill:transparent}
 .viz-t{display:flex;align-items:center;gap:6px;font-size:17px;font-weight:700}
 .viz-t span{flex:1;min-width:0}
@@ -1081,7 +1081,12 @@ button.hp-encaje{cursor:pointer;align-items:center;min-height:44px}
 .leyenda i{width:12px;height:12px;border-radius:2px;display:inline-block}
 
 /* ===== Insights ===== */
-.ins-ctl{display:flex;flex-wrap:wrap;gap:8px 16px}
+.ins-ctl{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 16px}
+/* Periodo: control secundario, más discreto que el de deporte (que es lo que cambia la pantalla entera) */
+.ins-per{position:relative;display:inline-flex;align-items:center;gap:8px;min-height:var(--tap);font-size:15px;color:var(--ink-2)}
+.ins-per::after{content:"";position:absolute;right:8px;top:50%;width:7px;height:7px;border-right:2px solid var(--ink);border-bottom:2px solid var(--ink);transform:translateY(-75%) rotate(45deg);pointer-events:none}
+.ins-per select{appearance:none;-webkit-appearance:none;min-height:var(--tap);padding:0 30px 0 2px;border:0;border-bottom:1px solid var(--ink);border-radius:0;background:transparent;color:var(--ink);font:inherit;font-weight:650;cursor:pointer}
+.ins-per select:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 /* Dónde estás: una barra de 1 a 10 por dimensión, con las marcas de "medio" (5) y "fuerte" (7) */
 .esc-tot{display:flex;align-items:baseline;gap:8px;margin-bottom:12px}
 .esc-tot b{font-size:44px;line-height:1;font-weight:800;font-stretch:72%;font-variant-numeric:tabular-nums}

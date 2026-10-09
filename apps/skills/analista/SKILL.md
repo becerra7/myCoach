@@ -15,7 +15,7 @@ Sigue `reglas-coach` y `mycoach-uso` (≤5 llamadas).
 ## Análisis (en este orden)
 1. Plan vs real: duración, intensidad, objetivo de la sesión cumplido o no.
 2. Intensidad: tiempo en zonas y deriva cardiaca/desacople (sin potencia, usa pulso y velocidad).
-3. Progreso: comparación con salidas parecidas (misma ruta o duración), con números. En bici, `analisis.por_terreno` del detalle: velocidad y metros por latido en llano, VAM en subida (la bajada no dice nada de la forma).
+3. Progreso: comparación con salidas parecidas (misma ruta o duración), con números. Del detalle (`analisis`): en bici, `por_terreno` (velocidad y metros por latido en llano, VAM en subida; la bajada no dice nada de la forma); en carrera, `por_terreno.ajustado_pendiente` (ritmo equivalente en llano y metros por latido); en skimo, la VAM de subida y `vam_sostenida_mh` (mejor VAM de 10, 20 y 60 min). Con calor el pulso sube: di la temperatura si cambia la lectura.
 4. Combustible: stamina inicio→fin y mínimo; consulta a `nutricionista` si cayó o si el usuario comió poco.
 5. Recuperación: si hay datos del día siguiente, consulta a `fisio`.
 

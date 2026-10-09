@@ -29,25 +29,26 @@ function vTicks(lo, hi, n = 4) {
   const t = []; for (let v = a; v <= b + 1e-9; v += paso) t.push(Math.round(v * 100) / 100); return t;
 }
 const vBar = (x, base, y, w, fill) => `<path class="mk" d="M${x},${base}V${Math.min(base - 1, y + 3)}q0,-3 3,-3h${Math.max(0, w - 6)}q3,0 3,3V${base}z" fill="${fill}"/>`;
-function vBarras({ datos, y0 = 0, y1, ticks, refs = [], h = 180, color = () => 'var(--s-bici)', tip, fmt, cada = 1, aria, etiqueta }) {
-  const pad = { t: 12, r: 6, b: 24, l: 34 }, n = datos.length, bw = (VW - pad.l - pad.r) / Math.max(n, 1), gap = Math.max(2, bw * .28);
+function vBarras({ datos, y0 = 0, y1, ticks, refs = [], h = 180, color = () => 'var(--s-bici)', tip, fmt, cada = 1, aria, etiqueta, u = '', marcas: prev = [] }) {
+  const pad = { t: u ? 22 : 12, r: 6, b: 24, l: 34 }, n = datos.length, bw = (VW - pad.l - pad.r) / Math.max(n, 1), gap = Math.max(2, bw * .28);
   const Y = v => pad.t + (1 - (v - y0) / (y1 - y0)) * (h - pad.t - pad.b), base = Y(Math.max(y0, 0));
   const marcas = datos.map((d, i) => { const x = pad.l + i * bw + gap / 2, w = bw - gap, y = Y(Math.max(y0, Math.min(y1, d[1])));
     return `<g data-tip="${esc(tip(d))}"><rect class="hit" x="${pad.l + i * bw}" y="${pad.t}" width="${bw}" height="${h - pad.t - pad.b}"/>${d[1] > y0 ? vBar(x, base, y, w, color(d, i)) : ''}</g>
       ${(n - 1 - i) % cada === 0 ? `<text x="${x + w / 2}" y="${h - 8}" text-anchor="middle">${esc(d[0])}</text>` : ''}
-      ${etiqueta ? `<text class="lbl" x="${x + w / 2}" y="${y - 5}" text-anchor="middle">${esc(etiqueta(d, i))}</text>` : ''}`; }).join('');
+      ${etiqueta ? `<text class="lbl" x="${x + w / 2}" y="${y - 5}" text-anchor="middle">${esc(etiqueta(d, i))}</text>` : ''}
+      ${prev[i] != null && prev[i] > y0 ? `<line x1="${x - 3}" x2="${x + w + 3}" y1="${Y(Math.min(y1, prev[i]))}" y2="${Y(Math.min(y1, prev[i]))}" stroke="var(--ink)" stroke-width="2.5" stroke-linecap="round"/>` : ''}`; }).join('');
   const rf = refs.map(r => `<line class="${r.cls || 'ref'}" x1="${pad.l}" x2="${VW - pad.r}" y1="${Y(r.v)}" y2="${Y(r.v)}"/><text x="${VW - pad.r}" y="${Y(r.v) - 4}" text-anchor="end" class="lbl">${esc(r.t)}</text>`).join('');
-  return `<svg class="chart2" viewBox="0 0 ${VW} ${h}" role="img" aria-label="${esc(aria)}">${vEjeY(y0, y1, ticks, h, pad, fmt)}${marcas}${rf}</svg>`;
+  return `<svg class="chart2" viewBox="0 0 ${VW} ${h}" role="img" aria-label="${esc(aria)}">${typeof vUnidad === 'function' ? vUnidad(u, pad) : ''}${vEjeY(y0, y1, ticks.filter(t => t >= y0 && t <= y1 + 1e-9), h, pad, fmt)}${marcas}${rf}</svg>`;
 }
 /* Barras apiladas (p. ej. minutos suaves, medios y duros por semana) */
-function vApiladas({ cols, claves, colores, h = 180, tip, aria, fmt = v => nf(v, 0), cada = 1 }) {
+function vApiladas({ cols, claves, colores, h = 180, tip, aria, fmt = v => nf(v, 0), cada = 1, u = '' }) {
   const tot = cols.map(c => claves.reduce((a, k, i) => a + (c[1][i] || 0), 0)); const y1 = niceMax(Math.max(...tot, 1));
-  const pad = { t: 12, r: 6, b: 24, l: 34 }, n = cols.length, bw = (VW - pad.l - pad.r) / Math.max(n, 1), gap = Math.max(2, bw * .3);
+  const pad = { t: u ? 22 : 12, r: 6, b: 24, l: 34 }, n = cols.length, bw = (VW - pad.l - pad.r) / Math.max(n, 1), gap = Math.max(2, bw * .3);
   const Y = v => pad.t + (1 - v / y1) * (h - pad.t - pad.b);
   const marcas = cols.map((c, i) => { const x = pad.l + i * bw + gap / 2, w = bw - gap; let acc = 0;
     const segs = claves.map((k, j) => { const v = c[1][j] || 0; if (!v) return ''; const y0 = Y(acc), y = Y(acc + v); acc += v; return `<rect x="${x}" y="${y}" width="${w}" height="${Math.max(0, y0 - y - 2)}" rx="2" fill="${colores[j]}"/>`; }).join('');
     return `<g data-tip="${esc(tip(c))}"><rect class="hit" x="${pad.l + i * bw}" y="${pad.t}" width="${bw}" height="${h - pad.t - pad.b}"/>${segs}</g>${(n - 1 - i) % cada === 0 ? `<text x="${x + w / 2}" y="${h - 8}" text-anchor="middle">${esc(c[0])}</text>` : ''}`; }).join('');
-  return `<svg class="chart2" viewBox="0 0 ${VW} ${h}" role="img" aria-label="${esc(aria)}">${vEjeY(0, y1, vTicks(0, y1), h, pad, fmt)}${marcas}</svg>`;
+  return `<svg class="chart2" viewBox="0 0 ${VW} ${h}" role="img" aria-label="${esc(aria)}">${typeof vUnidad === 'function' ? vUnidad(u, pad) : ''}${vEjeY(0, y1, vTicks(0, y1), h, pad, fmt)}${marcas}</svg>`;
 }
 function vPuntos({ datos, x0, x1, y0, y1, xt, yt, h = 220, xl, yl, r = () => 6, fill, tip, aria, etiquetas = [], fmtX = v => nf(v, 1), fmtY = v => nf(v, 1) }) {
   const pad = { t: 12, r: 12, b: 38, l: 38 };

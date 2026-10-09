@@ -155,7 +155,7 @@ function insightsSemana(w) {
   return out;
 }
 function wkgScore(w) { const A = [[0, 1], [2.2, 3], [3.2, 5], [4.1, 7], [5.0, 9], [5.7, 10]]; if (w >= 5.7) return 10; for (let i = 1; i < A.length; i++) if (w <= A[i][0]) { const [x0, y0] = A[i - 1], [x1, y1] = A[i]; return Math.max(1, y0 + (w - x0) / (x1 - x0) * (y1 - y0)); } return 10; }
-function forma() { const d = dims(); const ks = ['motor', 'fondo', 'volumen', S.sports.includes('bici') ? 'subida' : 'equilibrio']; const vs = ks.map(k => d[k].v).filter(v => v != null); return vs.length ? half(vs.reduce((a, b) => a + b, 0) / vs.length) : null; }
+function forma() { const d = dims(); const ks = ['motor', 'fondo', 'volumen', 'equilibrio']; const vs = ks.map(k => d[k].v).filter(v => v != null); return vs.length ? half(vs.reduce((a, b) => a + b, 0) / vs.length) : null; }
 function tipoAtleta() {
   const horas = {}; for (const a of acts()) if (SPORTS[a.dep].cardio) horas[a.dep] = (horas[a.dep] || 0) + a.min / 60;
   const top = Object.entries(horas).filter(([, h]) => h >= 8).sort((a, b) => b[1] - a[1]).map(([k]) => k);

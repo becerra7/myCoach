@@ -252,12 +252,12 @@ function evoDeForma(fm, previa) {
 /** Lo que la app guarda del detalle de una actividad: pulso por zonas, desnivel, subida y llano principales,
    cómo fue en cada terreno (ter: llano, subida y bajada de toda la salida), desacople y pulso máximo sostenido.
    v marca la versión: si cambia lo que se guarda, la sincronización vuelve a pedir el detalle. */
-const DET_V = 2;
+const DET_V = 3;
 function detalleDe(r) {
   const an = r.analisis || {}; const sb = (an.subidas || [])[0], t = an.por_terreno || {}, fs = an.fc_max_sostenida || {};
   return { v: DET_V, h: an.histograma_fc_min || null, desn: r.elevation_gain_m ?? null, sub: sb ? [sb.largo_km, sb.desnivel_m, sb.minutos, sb.fc_media] : null, llano: an.llano ? [an.llano.km, an.llano.vel_media_kmh, an.llano.fc_media] : null,
-    ter: { ll: t.llano ? [t.llano.km, t.llano.vel_media_kmh, t.llano.fc_media, t.llano.metros_por_latido] : null, su: t.subida ? [t.subida.km, t.subida.minutos, t.subida.vel_media_kmh, t.subida.fc_media, t.subida.pendiente_pct, t.subida.vam_m_h] : null, ba: t.bajada ? [t.bajada.km, t.bajada.vel_media_kmh, t.bajada.pendiente_pct] : null, pp: (t.por_pendiente || []).map(b => [b.pendiente_pct, b.km, b.minutos, b.fc_media]) },
-    dc: an.desacople_pct ?? null, tc: r.metricas?.temperatura_media_c ?? null, fs: [fs.min5 ?? null, fs.min20 ?? null, fs.min60 ?? null] };
+    ter: { ll: t.llano ? [t.llano.km, t.llano.vel_media_kmh, t.llano.fc_media, t.llano.metros_por_latido] : null, su: t.subida ? [t.subida.km, t.subida.minutos, t.subida.vel_media_kmh, t.subida.fc_media, t.subida.pendiente_pct, t.subida.vam_m_h] : null, ba: t.bajada ? [t.bajada.km, t.bajada.vel_media_kmh, t.bajada.pendiente_pct] : null, pp: (t.por_pendiente || []).map(b => [b.pendiente_pct, b.km, b.minutos, b.fc_media]), gp: t.ajustado_pendiente ? [t.ajustado_pendiente.km_equivalentes, t.ajustado_pendiente.minutos, t.ajustado_pendiente.vel_equivalente_kmh, t.ajustado_pendiente.fc_media, t.ajustado_pendiente.metros_por_latido] : null },
+    vs: an.vam_sostenida_mh ? [an.vam_sostenida_mh.min10, an.vam_sostenida_mh.min20, an.vam_sostenida_mh.min60] : null, dc: an.desacople_pct ?? null, tc: r.metricas?.temperatura_media_c ?? null, fs: [fs.min5 ?? null, fs.min20 ?? null, fs.min60 ?? null] };
 }
 
 /* Detalle a demanda: al abrir una actividad que este navegador aún no ha analizado (la sincronización

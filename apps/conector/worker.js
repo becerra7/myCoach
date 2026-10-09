@@ -806,6 +806,10 @@ function porTerreno(puntos) {
 	const acc = { llano: [], subida: [], bajada: [] };
 	// Además, por pendiente en tramos de 2 puntos (−10 % a +12 %): la curva de velocidad según desnivel.
 	const bins = new Map();
+	// Ritmo ajustado a la pendiente (carrera): cada tramo se pasa a su equivalente en llano con el
+	// coste energético de Minetti y otros (2002). Solo entre −10 % y +10 %, donde el modelo es fiable;
+	// en bajadas más fuertes manda la técnica y el frenado, no el motor.
+	const gap = { m: 0, s: 0, fcs: 0, sfc: 0 };
 	let a = 0;
 	for (let i = 1; i < p.length; i++) {
 		const largo = p[i].d - p[a].d;
@@ -820,6 +824,10 @@ function porTerreno(puntos) {
 			b.m += largo; b.s += seg;
 			if (fcsB.length) { b.fcs += MEDIA(fcsB) * seg; b.sfc += seg; }
 			bins.set(bin, b);
+			if (Math.abs(pend) <= 0.1) {
+				gap.m += largo * (costeMinetti(pend) / costeMinetti(0)); gap.s += seg;
+				if (fcsB.length) { gap.fcs += MEDIA(fcsB) * seg; gap.sfc += seg; }
+			}
 			if (tipo) {
 				const fcs = p.slice(a, i + 1).map((x) => x.fc).filter(Boolean);
 				acc[tipo].push({ m: largo, s: seg, gan: p[i].es - p[a].es, fc: fcs.length ? MEDIA(fcs) : null });
@@ -853,10 +861,39 @@ function porTerreno(puntos) {
 			return { ...limpio(subida), pendiente_pct: round(pend, 1), vam_m_h: Math.round(vam), w_kg_estimado: round(vam / (200 + 10 * pend), 2) };
 		})(),
 		bajada: bajada && { ...limpio(bajada), fc_media: undefined, pendiente_pct: round((bajada._gan / bajada._m) * 100, 1) },
+		ajustado_pendiente: gap.m >= 2000 && gap.s > 0 ? (() => {
+			const fc = gap.sfc ? gap.fcs / gap.sfc : null;
+			return { km_equivalentes: round(gap.m / 1000, 1), minutos: round(gap.s / 60, 1), vel_equivalente_kmh: round((gap.m / gap.s) * 3.6, 1), fc_media: fc ? Math.round(fc) : null, metros_por_latido: fc ? round((gap.m / (gap.s / 60)) / fc, 2) : null };
+		})() : null,
 		por_pendiente: [...bins.entries()].sort((x, y) => x[0] - y[0]).filter(([, b]) => b.m >= 500 && b.s > 0).map(([pend, b]) => ({
 			pendiente_pct: pend, km: round(b.m / 1000, 1), minutos: round(b.s / 60, 1), vel_media_kmh: round((b.m / b.s) * 3.6, 1), fc_media: b.sfc ? Math.round(b.fcs / b.sfc) : null,
 		})),
 	};
+}
+
+/** Coste energético de correr (J/kg/m) según la pendiente i (−0,45 a +0,45), de Minetti y otros (2002). */
+const costeMinetti = (i) => 155.4 * i ** 5 - 30.4 * i ** 4 - 43.3 * i ** 3 + 46.3 * i ** 2 + 19.5 * i + 3.6;
+
+/**
+ * Mejor VAM sostenida: los metros de desnivel por hora más altos que se mantienen durante N
+ * minutos (la altitud de final menos la de inicio de la ventana, suavizada). Es la "curva de
+ * potencia" de quien sube sin potenciómetro: en skimo y en bici dice cuánto aguantas subiendo.
+ */
+function vamSostenida(puntos, minutos) {
+	const e = suavizarAltitud(puntos);
+	const p = puntos.map((x, i) => ({ t: x.t, es: e[i] })).filter((x) => x.es != null && x.t != null);
+	if (p.length < 2 || p.at(-1).t - p[0].t < minutos * 60) return null;
+	let mejor = null;
+	let ini = 0;
+	for (let i = 0; i < p.length; i++) {
+		while (p[i].t - p[ini].t > minutos * 60) ini++;
+		if (ini > 0 && p[i].t - p[ini - 1].t >= minutos * 60) {
+			const gan = p[i].es - p[ini - 1].es;
+			const vam = gan / ((p[i].t - p[ini - 1].t) / 3600);
+			if (gan > 0 && (mejor == null || vam > mejor)) mejor = vam;
+		}
+	}
+	return mejor != null ? Math.round(mejor) : null;
 }
 
 function analizarActividad(details) {
@@ -869,6 +906,7 @@ function analizarActividad(details) {
 		por_terreno: porTerreno(puntos),
 		llano: velocidadLlano(puntos),
 		desacople_pct: desacople(puntos),
+		vam_sostenida_mh: { min10: vamSostenida(puntos, 10), min20: vamSostenida(puntos, 20), min60: vamSostenida(puntos, 60) },
 		histograma_fc_min: histogramaFc(puntos),
 		fc_max_sostenida: { min5: fcMaxSostenida(puntos, 5), min20: fcMaxSostenida(puntos, 20), min60: fcMaxSostenida(puntos, 60) },
 		nota: "por_terreno suma toda la salida en tramos de 500 m (llano < 1,5 %, subida ≥ 3 %, bajada ≤ −3 %). W/kg estimado con la fórmula de Ferrari (VAM / (200 + 10 · pendiente)): orientativo, sin potenciómetro.",
@@ -1712,7 +1750,7 @@ const TOOLS = {
 			"desnivel, velocidad vertical, dinamicas de carrera, temperatura, efecto de entrenamiento y stamina de Garmin cuando " +
 			"existan. 'series' resume cada grafica (min, media, max, inicio, final) y 'perfil' da sus valores a lo largo de la " +
 			"actividad (24 tramos): uselo para contestar sobre graficas (stamina, pulso, potencia...) en vez de pedir capturas. " +
-			"'analisis.por_terreno' da velocidad y pulso en llano, subida y bajada de toda la salida, y por_pendiente, la velocidad según el desnivel.",
+			"'analisis.por_terreno' da velocidad y pulso en llano, subida y bajada de toda la salida, por_pendiente, la velocidad según el desnivel, y ajustado_pendiente, el ritmo equivalente en llano (carrera); 'analisis.vam_sostenida_mh', la mejor VAM de 10, 20 y 60 min.",
 		schema: {
 			type: "object",
 			properties: { activity_id: { type: "string", description: "El activity_id devuelto por garmin_activities." } },

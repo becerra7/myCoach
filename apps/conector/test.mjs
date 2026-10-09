@@ -1010,6 +1010,11 @@ const rpc = async (env, token, message) => {
 	const enBin = (x) => pp.find((b) => b.pendiente_pct === x);
 	check("por pendiente: 30 km/h en el 0 %, 15 en el 6 % y 40 en el −6 %", Math.abs(enBin(0)?.vel_media_kmh - 30) < 1 && Math.abs(enBin(6)?.vel_media_kmh - 15) < 1.5 && Math.abs(enBin(-6)?.vel_media_kmh - 40) < 3,
 		`(${JSON.stringify(pp)})`);
+	const gp = ter.ajustado_pendiente;
+	check("ajustado a pendiente: la subida al 6 % cuenta como más distancia en llano", gp && gp.km_equivalentes > 49 && gp.vel_equivalente_kmh > 28, `(${JSON.stringify(gp)})`);
+	const vs = r.analisis?.vam_sostenida_mh || {};
+	check("VAM sostenida de 10 min: la subida al 6 % a 15 km/h son 900 m/h", Math.abs(vs.min10 - 900) <= 120, `(${JSON.stringify(vs)})`);
+	check("VAM sostenida: sin 60 min de subida, la de 60 min es menor", vs.min60 == null || vs.min60 < vs.min10, `(${JSON.stringify(vs)})`);
 	check("por terreno: bajada a 40 km/h, sin pulso", ter.bajada && Math.abs(ter.bajada.vel_media_kmh - 40) < 3 && ter.bajada.fc_media === undefined,
 		`(${JSON.stringify(ter.bajada)})`);
 	// El desacople solo tiene sentido en llano: dos horas a 30 km/h con el

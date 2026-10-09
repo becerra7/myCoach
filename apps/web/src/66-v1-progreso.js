@@ -12,6 +12,9 @@ const INS_TXT = { 28: 'las últimas 4 semanas', 90: 'los últimos 3 meses', 182:
 const kmh = a => a.km && a.min ? a.km / (a.min / 60) : null;
 const ritmoC = v => { if (!v) return '—'; const s = Math.round(3600 / v); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 const ritmo = v => v ? `${ritmoC(v)} min/km` : '—';
+/* En carrera se dibuja el ritmo (segundos por km, en negativo): así las marcas del eje son ritmos redondos
+   (4:00, 5:00…) y lo más rápido queda arriba, como en el resto de gráficas. */
+const segKm = kmh => -3600 / kmh, fmtRitmoSeg = s => ritmoC(3600 / -s);
 /* Cómo se lee la velocidad en cada deporte: km/h en bici y skimo, ritmo en carrera */
 const VEL = {
   bici: { n: 'Velocidad', u: 'km/h', f: v => nf(v, 1) },
@@ -26,34 +29,47 @@ const REND = {
 };
 
 /* ===== Gráfica de serie temporal: un punto por salida (o por semana) y la media de los 3 últimos ===== */
-function vSerie({ pts, desde, hasta = HOY, h = 190, fmt = v => nf(v, 1), color = 'var(--ink)', refs = [], aria, tend = true, y0, y1 }) {
-  const pad = { t: 14, r: 10, b: 24, l: 38 }, t0 = dte(desde).getTime(), t1 = dte(hasta).getTime();
+/* Unidad del eje y, encima de los números del eje: así ninguna gráfica deja dudas de qué mide. */
+const vUnidad = (u, pad) => u ? `<text x="${pad.l - 6}" y="10" text-anchor="end">${esc(u)}</text>` : '';
+/* Marcas del eje y: redondas en la escala que se lee (para el ritmo, minutos enteros o medios). */
+const ticksY = (a, b, paso) => { if (!paso) return vTicks(a, b, 4).filter(t => t >= a && t <= b); if (paso === 'ritmo') paso = b - a > 200 ? 60 : 30; const t = []; for (let v = Math.ceil(a / paso) * paso; v <= b; v += paso) t.push(v); return t; };
+/* Recta de tendencia (mínimos cuadrados) de una serie temporal: { a, b } con y = a + b · días. */
+function tendencia(pts) {
+  const xs = pts.map(p => dte(p.f).getTime() / 864e5), n = xs.length, mx = xs.reduce((s, x) => s + x, 0) / n, my = pts.reduce((s, p) => s + p.v, 0) / n;
+  const sxx = xs.reduce((s, x) => s + (x - mx) ** 2, 0); if (!sxx) return null;
+  const b = xs.reduce((s, x, i) => s + (x - mx) * (pts[i].v - my), 0) / sxx; return { a: my - b * mx, b };
+}
+
+/* ===== Gráfica de serie temporal =====
+   modo "puntos": un punto por salida, la media del periodo (la misma cifra que la tabla) y la recta de tendencia.
+   modo "linea": una línea que une los valores (series de Garmin y desacople). */
+function vSerie({ pts, desde, hasta = HOY, h = 190, fmt = v => nf(v, 1), color = 'var(--ink)', refs = [], aria, modo = 'puntos', media = null, u = '', y0, y1, pasoY }) {
+  const pad = { t: 22, r: 10, b: 24, l: 38 }, t0 = dte(desde).getTime(), t1 = dte(hasta).getTime();
   const X = f => pad.l + (dte(f).getTime() - t0) / Math.max(1, t1 - t0) * (VW - pad.l - pad.r);
   const vals = pts.map(p => p.v), lo = Math.min(...vals), hi = Math.max(...vals), marg = Math.max((hi - lo) * .6, Math.abs(hi) * .03);
   refs = refs.filter(r => r.siempre || (r.v >= lo - marg && r.v <= hi + marg));
-  const [a, b] = y0 != null ? [y0, y1] : rango([...vals, ...refs.map(r => r.v)], .18);
+  const [a, b] = y0 != null ? [y0, y1] : rango([...vals, ...refs.map(r => r.v), ...(media != null ? [media] : [])], .18);
   const Y = v => pad.t + (1 - (v - a) / (b - a)) * (h - pad.t - pad.b);
-  const yt = vTicks(a, b, 4).filter(t => t >= a && t <= b);
+  const yt = ticksY(a, b, pasoY);
   // Marcas del eje x: semanas si el periodo es corto; meses (o cada dos) si es largo.
   const dias = (t1 - t0) / 864e5, xt = [];
   if (dias <= 45) { for (let f = addDays(weekOf(desde), 7); f <= hasta; f = addDays(f, 7)) xt.push([f, fDia(f)]); }
   else { const d0 = dte(desde), paso = dias > 200 ? 2 : 1; for (let m = new Date(d0.getFullYear(), d0.getMonth() + 1, 1); m.getTime() <= t1; m = new Date(m.getFullYear(), m.getMonth() + paso, 1)) { const f = `${m.getFullYear()}-${String(m.getMonth() + 1).padStart(2, '0')}-01`; xt.push([f, MC[m.getMonth()]]); } }
   const ejeX = xt.map(([f, l]) => `<text x="${X(f)}" y="${h - 8}" text-anchor="middle">${l}</text>`).join('');
   // La etiqueta de cada referencia va a la izquierda: lo reciente (a la derecha) es lo que más se mira.
-  const rf = refs.filter(r => r.v >= a && r.v <= b).map(r => `<line class="${r.cls || 'ref'}" x1="${pad.l}" x2="${VW - pad.r}" y1="${Y(r.v)}" y2="${Y(r.v)}"/><text x="${pad.l + 4}" y="${Y(r.v) - 4}" class="lbl">${esc(r.t)}</text>`).join('');
-  // La media se corta donde hay más de 5 semanas sin datos: no se inventa lo que pasó en el hueco.
-  const tramos = []; pts.forEach((p, i) => { if (!i || dte(p.f) - dte(pts[i - 1].f) > 35 * 864e5) tramos.push([]); tramos[tramos.length - 1].push(i); });
-  const ini = []; tramos.forEach(t => t.forEach(i => { ini[i] = t[0]; }));
-  const media = pts.map((p, i) => { const w = pts.slice(Math.max(ini[i], i - 2), i + 1); return w.reduce((s, q) => s + q.v, 0) / w.length; });
-  const linea = tend && pts.length >= 3 ? tramos.filter(t => t.length > 1).map(t => `<polyline points="${t.map(i => `${X(pts[i].f).toFixed(1)},${Y(media[i]).toFixed(1)}`).join(' ')}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`).join('') : '';
+  const rf = [...refs, ...(media != null ? [{ v: media, t: `Media ${fmt(media)}`, cls: 'ref2' }] : [])].filter(r => r.v >= a && r.v <= b)
+    .map(r => `<line class="${r.cls || 'ref'}" x1="${pad.l}" x2="${VW - pad.r}" y1="${Y(r.v)}" y2="${Y(r.v)}"/><text x="${pad.l + 4}" y="${Y(r.v) - 4}" class="lbl">${esc(r.t)}</text>`).join('');
+  const tr = modo === 'puntos' && pts.length >= 4 ? tendencia(pts) : null;
+  const recta = tr ? (() => { const fa = pts[0].f, fb = pts[pts.length - 1].f, v = f => tr.a + tr.b * dte(f).getTime() / 864e5;
+    return `<line x1="${X(fa)}" y1="${Y(v(fa))}" x2="${X(fb)}" y2="${Y(v(fb))}" stroke="${color}" stroke-width="2.5" stroke-linecap="round"/>`; })() : '';
+  const linea = modo === 'linea' && pts.length > 1 ? `<polyline points="${pts.map(p => `${X(p.f).toFixed(1)},${Y(p.v).toFixed(1)}`).join(' ')}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round"/>` : '';
   const muchos = pts.length > 40;
-  const marcas = pts.map(p => `<g data-tip="${esc(p.tip)}"><circle class="hit" cx="${X(p.f)}" cy="${Y(p.v)}" r="14"/>${muchos ? '' : `<circle cx="${X(p.f)}" cy="${Y(p.v)}" r="4" fill="color-mix(in srgb,${color} ${tend ? 45 : 100}%,var(--paper))" stroke="var(--paper)" stroke-width="1.5"/>`}</g>`).join('');
+  const marcas = pts.map(p => `<g data-tip="${esc(p.tip)}"><circle class="hit" cx="${X(p.f)}" cy="${Y(p.v)}" r="14"/>${muchos ? '' : `<circle cx="${X(p.f)}" cy="${Y(p.v)}" r="4" fill="color-mix(in srgb,${color} ${modo === 'puntos' ? 55 : 100}%,var(--paper))" stroke="var(--paper)" stroke-width="1.5"/>`}</g>`).join('');
   const ult = pts[pts.length - 1];
-  const fin = ult ? `<text class="lbl" x="${Math.min(X(ult.f), VW - pad.r - 2)}" y="${Y(tend && pts.length >= 3 ? media[media.length - 1] : ult.v) - 9}" text-anchor="end">${esc(fmt(tend && pts.length >= 3 ? media[media.length - 1] : ult.v))}</text>` : '';
-  const sinTend = !tend && pts.length > 1 ? `<polyline points="${pts.map(p => `${X(p.f).toFixed(1)},${Y(p.v).toFixed(1)}`).join(' ')}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round"/>` : '';
-  return `<svg class="chart2" viewBox="0 0 ${VW} ${h}" role="img" aria-label="${esc(aria)}">${vEjeY(a, b, yt, h, pad, fmt)}${ejeX}${rf}${sinTend}${marcas}${linea}${fin}</svg>`;
+  const fin = modo === 'linea' && ult ? `<text class="lbl" x="${Math.min(X(ult.f), VW - pad.r - 2)}" y="${Y(ult.v) - 9}" text-anchor="end">${esc(fmt(ult.v))}</text>` : '';
+  return `<svg class="chart2" viewBox="0 0 ${VW} ${h}" role="img" aria-label="${esc(aria)}">${vUnidad(u, pad)}${vEjeY(a, b, yt, h, pad, fmt)}${ejeX}${rf}${linea}${recta}${marcas}${fin}</svg>`;
 }
-const leyendaSerie = col => `<div class="leyenda"><span><i style="background:color-mix(in srgb,${col} 45%,var(--paper));border-radius:50%"></i>Cada salida</span><span><i class="ln" style="border-top:2.5px solid ${col}"></i>Media de las 3 últimas</span></div>`;
+const leyendaSerie = (col, media = true) => `<div class="leyenda"><span><i style="background:color-mix(in srgb,${col} 55%,var(--paper));border-radius:50%"></i>Cada actividad</span><span><i class="ln" style="border-top:2.5px solid ${col}"></i>Tendencia</span>${media ? '<span><i class="ln" style="border-top:2px dashed var(--ink-2)"></i>Media del periodo</span>' : ''}</div>`;
 
 /* ===== Velocidad según la pendiente: este periodo frente al anterior, a igual desnivel ===== */
 function sumaPendiente(as) {
@@ -68,137 +84,168 @@ function difPend(A, B) {
   const t = [txt('En llano', dif(p => p === 0)), txt('en subida', dif(p => p >= 2))].filter(Boolean);
   return t.length ? `${t.join('; ')} que en el periodo anterior, a igual pendiente.` : '';
 }
-function vCurvas({ series, h = 200, fmtY = v => nf(v, 0), aria }) {
-  const pad = { t: 14, r: 10, b: 38, l: 38 }, xs = series.flatMap(s => s.pts.map(p => p[0])), ys = series.flatMap(s => s.pts.map(p => p[1]));
-  const x0 = Math.min(...xs), x1 = Math.max(...xs), [y0, y1] = rango(ys, .12), yt = vTicks(y0, y1, 4).filter(t => t >= y0 && t <= y1);
+function vCurvas({ series, h = 200, fmtY = v => nf(v, 0), aria, u = '', pasoY }) {
+  const pad = { t: 22, r: 10, b: 38, l: 38 }, xs = series.flatMap(s => s.pts.map(p => p[0])), ys = series.flatMap(s => s.pts.map(p => p[1]));
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), [y0, y1] = rango(ys, .12), yt = ticksY(y0, y1, pasoY);
   const X = v => pad.l + (v - x0) / Math.max(1, x1 - x0) * (VW - pad.l - pad.r), Y = v => pad.t + (1 - (v - y0) / (y1 - y0)) * (h - pad.t - pad.b);
   const ejeX = [...new Set(xs)].sort((a, b) => a - b).map(x => `<text x="${X(x)}" y="${h - pad.b + 14}" text-anchor="middle">${x > 0 ? '+' : x < 0 ? '−' : ''}${Math.abs(x)}</text>`).join('');
   const lineas = series.map(s => `<polyline points="${s.pts.map(p => `${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(' ')}" fill="none" stroke="${s.color}" stroke-width="${s.dash ? 2 : 2.5}"${s.dash ? ' stroke-dasharray="5 4"' : ''} stroke-linejoin="round"/>
     ${s.pts.map(p => `<g data-tip="${esc(p[2])}"><circle class="hit" cx="${X(p[0])}" cy="${Y(p[1])}" r="14"/><circle cx="${X(p[0])}" cy="${Y(p[1])}" r="${s.dash ? 3 : 4}" fill="${s.dash ? 'var(--paper)' : s.color}" stroke="${s.color}" stroke-width="1.5"/></g>`).join('')}`).join('');
-  return `<svg class="chart2" viewBox="0 0 ${VW} ${h}" role="img" aria-label="${esc(aria)}">${vEjeY(y0, y1, yt, h, pad, fmtY)}${ejeX}
+  return `<svg class="chart2" viewBox="0 0 ${VW} ${h}" role="img" aria-label="${esc(aria)}">${vUnidad(u, pad)}${vEjeY(y0, y1, yt, h, pad, fmtY)}${ejeX}
     <text x="${(pad.l + VW - pad.r) / 2}" y="${h - 4}" text-anchor="middle">Pendiente (%)</text>${lineas}</svg>`;
 }
 
 /* ===== Por terreno: suma del periodo, con medias por tiempo (como hace el conector en cada salida) ===== */
 function sumaTerreno(as, peso) {
-  const z = () => ({ n: 0, km: 0, min: 0, fcm: 0, fcmin: 0, desn: 0 }); const L = z(), U = z(), B = z();
+  const z = () => ({ n: 0, km: 0, min: 0, fcm: 0, fcmin: 0, desn: 0 }); const L = z(), U = z(), B = z(), G = z();
   const sumar = (x, km, min, fc) => { x.n++; x.km += km; x.min += min; if (fc) { x.fcm += fc * min; x.fcmin += min; } };
   for (const a of as) { const t = a.ter; if (!t) continue;
     if (t.llano && t.llano.kmh) sumar(L, t.llano.km, t.llano.km / t.llano.kmh * 60, t.llano.fc);
     if (t.subida && t.subida.min) { sumar(U, t.subida.km, t.subida.min, t.subida.fc); U.desn += t.subida.km * t.subida.pend * 10; }
-    if (t.bajada && t.bajada.kmh) { sumar(B, t.bajada.km, t.bajada.km / t.bajada.kmh * 60); B.desn += t.bajada.km * Math.abs(t.bajada.pend) * 10; } }
+    if (t.bajada && t.bajada.kmh) { sumar(B, t.bajada.km, t.bajada.km / t.bajada.kmh * 60); B.desn += t.bajada.km * Math.abs(t.bajada.pend) * 10; }
+    if (t.gap && t.gap.min) sumar(G, t.gap.km, t.gap.min, t.gap.fc); }
   const base = x => ({ n: x.n, km: x.km, kmh: x.km / (x.min / 60), fc: x.fcmin ? x.fcm / x.fcmin : null });
   const ll = L.n && L.min ? base(L) : null; if (ll && ll.fc) ll.mpl = (L.km * 1000 / L.min) / ll.fc;
   const su = U.n && U.min ? { ...base(U), vam: U.desn / (U.min / 60), pend: U.desn / (U.km * 10), wkg: wkgFisica(U.km, U.desn, U.min, peso) } : null;
+  if (su && su.fc) su.dpl = su.vam / 60 / su.fc * 100; // metros de desnivel por cada 100 latidos
   const ba = B.n && B.min ? { ...base(B), pend: B.desn / (B.km * 10) } : null;
-  return { llano: ll, subida: su, bajada: ba };
+  const gp = G.n && G.min ? base(G) : null; if (gp && gp.fc) gp.mpl = (G.km * 1000 / G.min) / gp.fc;
+  return { llano: ll, subida: su, bajada: ba, gap: gp };
 }
-function tablaTerreno(dep, as) {
-  const T = sumaTerreno(as, (M.perfil || {}).peso), V = VEL[dep], n = x => `${nf(x.km, 0)} km en ${x.n} ${dep === 'bici' ? 'salida' : 'actividad'}${x.n === 1 ? '' : 's'}`;
+function tablaTerreno(dep, T) {
+  const V = VEL[dep], n = x => `${nf(x.km, 0)} km en ${x.n} ${dep === 'bici' ? 'salida' : 'actividad'}${x.n === 1 ? '' : 's'}`;
   const celda = (nom, v, u) => `<div class="ter-c"><span class="n">${nom}</span><b>${v}${u ? ` <small>${u}</small>` : ''}</b></div>`;
   const fila = (nom, ico, x, celdas, extra = '') => `<div class="ter-f"><div class="ter-n"><b><i aria-hidden="true">${ico}</i>${nom}</b><span>${x ? n(x) : 'Sin tramos en este periodo'}${extra}</span></div>${x ? celdas.join('') : ''}</div>`;
-  const filas = [];
-  if (dep !== 'skimo') filas.push(fila('Llano', '→', T.llano, T.llano ? [celda(V.n, V.f(T.llano.kmh), V.u), celda('Pulso', T.llano.fc ? nf(T.llano.fc, 0) : '—', 'ppm'), celda('Por latido', T.llano.mpl ? nf(T.llano.mpl, 2) : '—', 'm')] : []));
-  filas.push(fila('Subida', '↗', T.subida, T.subida ? [dep === 'skimo' ? celda('Velocidad', nf(T.subida.kmh, 1), 'km/h') : celda(V.n, V.f(T.subida.kmh), V.u), celda('VAM', nf(T.subida.vam, 0), 'm/h'), celda('Pulso', T.subida.fc ? nf(T.subida.fc, 0) : '—', 'ppm')] : [],
+  const pulso = x => celda('Pulso', x.fc ? nf(x.fc, 0) : '—', 'ppm'), filas = [];
+  if (dep === 'correr') filas.push(fila('Ajustado a pendiente', '≈', T.gap, T.gap ? [celda('Ritmo', ritmoC(T.gap.kmh), 'min/km'), pulso(T.gap), celda('Por latido', T.gap.mpl ? nf(T.gap.mpl, 2) : '—', 'm')] : [], T.gap ? ' equivalentes en llano' : ''));
+  if (dep !== 'skimo') filas.push(fila('Llano', '→', T.llano, T.llano ? [celda(V.n, V.f(T.llano.kmh), V.u), pulso(T.llano), celda('Por latido', T.llano.mpl ? nf(T.llano.mpl, 2) : '—', 'm')] : []));
+  filas.push(fila('Subida', '↗', T.subida, T.subida ? [celda('VAM', nf(T.subida.vam, 0), 'm/h'), pulso(T.subida),
+    dep === 'skimo' ? celda('Por 100 latidos', nf(T.subida.dpl, 1), 'm') : celda(V.n, V.f(T.subida.kmh), V.u)] : [],
     T.subida ? ` al ${nf(T.subida.pend, 1)} %${dep === 'bici' && T.subida.wkg ? ` · ≈${nf(T.subida.wkg, 1)} W/kg estimados` : ''}` : ''));
   if (dep !== 'skimo') filas.push(fila('Bajada', '↘', T.bajada, T.bajada ? [celda(V.n, V.f(T.bajada.kmh), V.u), celda('Pendiente', nf(T.bajada.pend, 1), '%')] : []));
-  return { html: `<div class="ter">${filas.join('')}</div>`, T };
+  return `<div class="ter">${filas.join('')}</div>`;
 }
+/* Qué explica la tabla en cada deporte */
+const AYUDA_TER = {
+  bici: 'Suma de todas tus salidas del periodo, separadas por terreno en tramos de 500 m: llano por debajo del 1,5 % de pendiente, subida desde el 3 % y bajada desde el −3 %. Las medias son por tiempo. "Por latido" son los metros que recorres en llano con cada latido: si sube, vas más rápido con el mismo esfuerzo. La VAM son los metros de desnivel que subes por hora. Los W/kg salen de la física de la subida (sin potenciómetro): son una estimación. La bajada depende más de la pendiente y del tráfico que de tu forma.',
+  correr: 'En carrera, la cifra que manda es el ritmo ajustado a la pendiente: cada tramo se pasa a su equivalente en llano con el coste energético de correr cuesta arriba y cuesta abajo (Minetti y otros, 2002), así una salida con cuestas se compara con una llana. Solo cuenta pendientes entre −10 % y +10 %, donde el modelo es fiable. "Por latido" son los metros equivalentes que recorres con cada latido: es la idea del índice pulso-velocidad, que en estudios sigue la mejora de forma (Vesterinen y otros, 2014). Debajo, el mismo cálculo por terreno.',
+  skimo: 'En skimo lo que cuenta es subir: la VAM (metros de desnivel por hora) y con qué pulso la consigues. "Por 100 latidos" son los metros de desnivel que ganas cada 100 latidos: si sube, subes más con el mismo esfuerzo. En los estudios de skimo, lo que más explica el rendimiento es el VO2máx y el umbral (correlaciones de 0,7 a 0,9), y la VAM sostenida es lo más parecido que se puede medir sin laboratorio. La altitud la baja: compara salidas a cotas parecidas.',
+};
 
-/* ===== Un deporte: tus números por terreno, lo esencial en gráficas y "Para profundizar" ===== */
+/* ===== Un deporte: tus números, lo esencial en gráficas y "Para profundizar" ===== */
 function progDep(dep) {
-  const desde = insDesde(), dias = insDias();
+  const desde = insDesde(), dias = insDias(), act = dep === 'bici' ? 'salida' : 'actividad';
   const todas = acts().filter(a => a.dep === dep && a.f > desde && a.min >= 15).sort((x, y) => x.f.localeCompare(y.f));
+  const antes = acts().filter(a => a.dep === dep && a.f > addDays(desde, -dias) && a.f <= desde && a.min >= 15);
   const R = REND[dep], col = scol(dep), V = VEL[dep];
-  if (todas.length < 2) return blk(pendiente(`Hay pocas ${dep === 'bici' ? 'salidas' : 'actividades'} de ${SPORTS[dep].n.toLowerCase()} en ${INS_TXT[dias]}`, 'Con dos ya te enseño tus números por terreno; con tres, tendencias. Prueba con un periodo más largo o actualiza los datos de Garmin.') + '<div class="btns"><button class="btn tonal" type="button" data-a="v-sync">Actualizar con Garmin</button></div>', 'first');
-  const conTer = todas.filter(a => a.ter), sinDet = todas.length - conTer.length;
+  if (todas.length < 2) return blk(pendiente(`Hay pocas ${act}s de ${SPORTS[dep].n.toLowerCase()} en ${INS_TXT[dias]}`, 'Con dos ya te enseño tus números; con cuatro, tendencias. Prueba con un periodo más largo o actualiza los datos de Garmin.') + '<div class="btns"><button class="btn tonal" type="button" data-a="v-sync">Actualizar con Garmin</button></div>', 'first');
+  const conTer = todas.filter(a => a.ter), sinDet = todas.length - conTer.length, T = sumaTerreno(conTer, (M.perfil || {}).peso);
   const tot = { h: todas.reduce((s, a) => s + a.min, 0) / 60, km: todas.reduce((s, a) => s + (a.km || 0), 0), desn: todas.reduce((s, a) => s + (a.desn || 0), 0) };
-  const { html: tabla } = tablaTerreno(dep, conTer);
-  const numeros = blk(`${blkH(`Tus números en ${INS_TXT[dias]}`, info(`ter-${dep}`, 'Tus números por terreno', `Suma de todas tus ${dep === 'bici' ? 'salidas' : 'actividades'} del periodo, separadas por terreno en tramos de 500 m: llano por debajo del 1,5 % de pendiente, subida desde el 3 % y bajada desde el −3 %. Las medias son por tiempo. "Por latido" son los metros que recorres con cada latido en llano: si sube, vas más rápido con el mismo esfuerzo. La VAM son los metros de desnivel que subes por hora.${dep === 'bici' ? ' Los W/kg salen de la física de la subida (sin potenciómetro): son una estimación.' : ''} La bajada depende más de la pendiente y del tráfico que de tu forma.`))}
-    <p class="small muted" style="margin:-4px 0 12px">${todas.length} ${dep === 'bici' ? 'salidas' : 'actividades'} · ${nf(tot.h, 0)} h · ${nf(tot.km, 0)} km${tot.desn ? ` · ${nf(tot.desn, 0)} m de desnivel` : ''}</p>
-    ${conTer.length ? tabla : '<p class="muted">Aún no tengo el detalle por terreno de estas actividades: se completa al actualizar con Garmin.</p>'}
+  const numeros = blk(`${blkH(`Tus números en ${INS_TXT[dias]}`, info(`ter-${dep}`, 'Tus números', AYUDA_TER[dep]))}
+    <p class="small muted" style="margin:-4px 0 12px">${todas.length} ${act}s · ${nf(tot.h, 0)} h · ${nf(tot.km, 0)} km${tot.desn ? ` · ${nf(tot.desn, 0)} m de desnivel` : ''}</p>
+    ${conTer.length ? tablaTerreno(dep, T) : '<p class="muted">Aún no tengo el detalle por terreno de estas actividades: se completa al actualizar con Garmin.</p>'}
     ${sinDet && conTer.length ? `<p class="xs muted" style="margin-top:8px">${sinDet} sin analizar todavía: se completan al actualizar con Garmin.</p>` : ''}`, 'first');
 
-  const top = [], mas = [];
-  const serie = (titulo, inf, pts, o) => blk(`${vizT(titulo, inf)}<div class="viz">${vSerie({ desde, color: col, ...o, pts })}</div>${o.tend === false ? '' : leyendaSerie(col)}`);
-  // Lo esencial: velocidad en llano (o ritmo), VAM en subida y horas por semana
-  const pLl = conTer.filter(a => a.ter.llano && a.ter.llano.km >= 2).map(a => ({ f: a.f, v: a.ter.llano.kmh, a }));
-  if (dep !== 'skimo' && pLl.length >= 2) top.push(serie(`${V.n} en llano`, info(`vll-${dep}`, `${V.n} en llano`, `Cada punto es una ${dep === 'bici' ? 'salida' : 'actividad'}: su velocidad media en los tramos llanos. La línea es la media de las tres últimas, para que una salida con viento o en grupo no engañe. Toca un punto para ver el pulso y la temperatura: con calor el pulso sube a la misma velocidad, así que en verano la eficiencia parece peor de lo que es.`),
-    pLl.map(p => ({ ...p, tip: `${fDia(p.f)}: ${dep === 'correr' ? ritmo(p.v) : `${nf(p.v, 1)} km/h`} a ${p.a.ter.llano.fc || '—'} ppm (${nf(p.a.ter.llano.km, 0)} km llanos${p.a.tc != null ? `, ${nf(p.a.tc, 0)} °C` : ''})` })),
-    { fmt: dep === 'correr' ? ritmoC : v => nf(v, 1), aria: `${V.n} en llano por ${dep === 'bici' ? 'salida' : 'actividad'} en ${INS_TXT[dias]}` }));
+  const top = [], mas = [], fondo = a => ['rec', 'fondo'].includes(tipoAct(a)), temp = a => a.tc != null ? `, ${nf(a.tc, 0)} °C` : '';
+  const serie = (titulo, inf, pts, o) => blk(`${vizT(titulo, inf)}<div class="viz">${vSerie({ desde, color: col, ...o, pts })}</div>${o.modo === 'linea' ? '' : leyendaSerie(col, o.media != null)}`);
+  const fmtV = dep === 'correr' ? ritmoC : v => nf(v, 1), uV = dep === 'correr' ? 'min/km' : 'km/h', txtV = v => dep === 'correr' ? ritmo(v) : `${nf(v, 1)} km/h`;
+  const ayudaPuntos = `Cada punto es una ${act}. La línea continua es la tendencia del periodo y la discontinua, la media del periodo (la misma cifra que la tabla de arriba).`;
+
+  // ── Lo esencial ──
+  if (dep === 'correr') { const p = conTer.filter(a => a.ter.gap).map(a => ({ f: a.f, v: a.ter.gap.kmh, a }));
+    p.forEach(x => { x.kmh = x.v; x.v = segKm(x.v); });
+    if (p.length >= 2) top.push(serie('Ritmo ajustado a pendiente', info('gap', 'Ritmo ajustado a pendiente', `${ayudaPuntos} Es tu ritmo equivalente en llano: las cuestas cuentan como más distancia y las bajadas suaves como menos (Minetti y otros, 2002). Así se comparan carreras por sitios distintos. Toca un punto para ver el pulso y la temperatura.`),
+      p.map(x => ({ ...x, tip: `${fDia(x.f)}: ${ritmo(x.kmh)} a ${x.a.ter.gap.fc || '—'} ppm${temp(x.a)}` })), { fmt: fmtRitmoSeg, pasoY: 'ritmo', u: 'min/km', media: T.gap && segKm(T.gap.kmh), aria: `Ritmo ajustado a pendiente por carrera en ${INS_TXT[dias]}` })); }
+  if (dep === 'bici') { const p = conTer.filter(a => a.ter.llano && a.ter.llano.km >= 2).map(a => ({ f: a.f, v: a.ter.llano.kmh, a }));
+    if (p.length >= 2) top.push(serie('Velocidad en llano', info('vll-bici', 'Velocidad en llano', `${ayudaPuntos} Es la velocidad media en los tramos llanos de cada salida. Toca un punto para ver el pulso y la temperatura: con calor el pulso sube a la misma velocidad.`),
+      p.map(x => ({ ...x, tip: `${fDia(x.f)}: ${nf(x.v, 1)} km/h a ${x.a.ter.llano.fc || '—'} ppm (${nf(x.a.ter.llano.km, 0)} km llanos${temp(x.a)})` })), { u: 'km/h', media: T.llano && T.llano.kmh, aria: `Velocidad en llano por salida en ${INS_TXT[dias]}` })); }
   const pSu = conTer.filter(a => a.ter.subida && a.ter.subida.km >= 1).map(a => ({ f: a.f, v: a.ter.subida.vam, a }));
-  if (pSu.length >= 2) top.push(serie('Subidas: metros por hora (VAM)', info(`vam-${dep}`, 'VAM en subida', 'Metros de desnivel que subes por hora en los tramos de subida de cada salida (desde el 3 %). Es la cifra con la que se comparan los escaladores sin potenciómetro, pero depende de la pendiente: en rampas suaves sale más baja que en un puerto duro, así que compara salidas parecidas. Toca un punto para ver la pendiente, el pulso y los vatios estimados.'),
-    pSu.map(p => { const s = p.a.ter.subida; return { ...p, tip: `${fDia(p.f)}: ${nf(s.vam, 0)} m/h, ${nf(s.km, 1)} km al ${nf(s.pend, 1)} % a ${s.fc || '—'} ppm${s.wkg ? `, ≈${nf(s.wkg, 1)} W/kg` : ''}` }; }),
-    { fmt: v => nf(v, 0), aria: `VAM en subida por actividad en ${INS_TXT[dias]}` }));
+  if (pSu.length >= 2) top.push(serie('Subidas: metros por hora (VAM)', info(`vam-${dep}`, 'VAM en subida', `${ayudaPuntos} La VAM son los metros de desnivel que subes por hora en los tramos de subida. Depende de la pendiente: en rampas suaves sale más baja que en una subida dura, así que compara ${act}s parecidas.`),
+    pSu.map(x => { const s = x.a.ter.subida; return { ...x, tip: `${fDia(x.f)}: ${nf(s.vam, 0)} m/h al ${nf(s.pend, 1)} % a ${s.fc || '—'} ppm${s.wkg ? `, ≈${nf(s.wkg, 1)} W/kg` : ''}` }; }),
+    { fmt: v => nf(v, 0), u: 'm/h', media: T.subida && T.subida.vam, aria: `VAM en subida por ${act} en ${INS_TXT[dias]}` }));
+  // Mejor VAM sostenida (10, 20 y 60 min): este periodo frente al anterior. Esencial en skimo; en bici y carrera, para profundizar.
+  const mejorVs = (as, i) => { const v = as.map(a => a.vs && a.vs[i]).filter(Boolean); return v.length ? Math.max(...v) : null; };
+  const vsAhora = [0, 1, 2].map(i => mejorVs(todas, i)), vsAntes = [0, 1, 2].map(i => mejorVs(antes, i));
+  if (vsAhora.filter(Boolean).length >= 2) {
+    const etq = ['10 min', '20 min', '60 min'], datos = etq.map((l, i) => [l, vsAhora[i] || 0, vsAntes[i]]).filter(d => d[1]), vy = niceMax(Math.max(...datos.map(d => Math.max(d[1], d[2] || 0))));
+    const b = blk(`${vizT('Tu mejor subida sostenida', info(`vs-${dep}`, 'Mejor VAM sostenida', `Los metros de desnivel por hora más altos que has mantenido durante 10, 20 y 60 minutos seguidos en ${INS_TXT[dias]}. Es como la curva de potencia de Intervals.icu, pero con lo que se puede medir sin potenciómetro: cuánto aguantas subiendo. La marca es el periodo anterior, de la misma duración.`))}
+      <div class="viz">${vBarras({ datos, y0: 0, y1: vy, ticks: vTicks(0, vy), h: 170, u: 'm/h', color: () => col, marcas: datos.map(d => d[2]), tip: d => `${d[0]}: ${nf(d[1], 0)} m/h${d[2] ? ` (antes ${nf(d[2], 0)})` : ''}`, etiqueta: d => nf(d[1], 0), aria: 'Mejor VAM sostenida durante 10, 20 y 60 minutos', fmt: v => nf(v, 0) })}</div>
+      ${datos.some(d => d[2]) ? '<div class="leyenda"><span><i style="background:' + col + '"></i>Este periodo</span><span><i class="ln" style="border-top:2.5px solid var(--ink)"></i>Periodo anterior</span></div>' : ''}`);
+    (dep === 'skimo' ? top : mas).push(b);
+  }
+  // Velocidad (o ritmo) según la pendiente, este periodo frente al anterior
   if (dep !== 'skimo') {
-    const antes = acts().filter(a => a.dep === dep && a.f > addDays(desde, -dias) && a.f <= desde && a.ter), A = sumaPendiente(conTer), B = sumaPendiente(antes);
-    const v = x => x.km / (x.min / 60), fv = dep === 'correr' ? (x => `${ritmo(x)}`) : (x => `${nf(x, 1)} km/h`);
+    const A = sumaPendiente(conTer), B = sumaPendiente(antes.filter(a => a.ter)), v = x => x.km / (x.min / 60), yv = dep === 'correr' ? segKm : k => k;
     const pts = [...A.entries()].filter(([, x]) => x.km >= 1).sort((a, b) => a[0] - b[0]);
     const prev = [...B.entries()].filter(([p, x]) => x.km >= 1 && A.has(p) && A.get(p).km >= 1).sort((a, b) => a[0] - b[0]);
     if (pts.length >= 3) {
       const txt = p => `${p > 0 ? '+' : p < 0 ? '−' : ''}${Math.abs(p)} %`;
-      const series = [{ color: col, pts: pts.map(([p, x]) => [p, v(x), `${txt(p)}: ${fv(v(x))} en ${nf(x.km, 0)} km${B.get(p) && B.get(p).km >= 1 ? ` (antes ${fv(v(B.get(p)))})` : ''}`]) }];
-      if (prev.length >= 2) series.push({ color: 'var(--ink-2)', dash: true, pts: prev.map(([p, x]) => [p, v(x), `${txt(p)}, periodo anterior: ${fv(v(x))} en ${nf(x.km, 0)} km`]) });
-      top.push(blk(`${vizT('Velocidad según la pendiente', info(`vpend-${dep}`, 'Velocidad según la pendiente', `Tu velocidad media en cada pendiente, de bajadas (a la izquierda) a subidas (a la derecha), sumando todos los tramos de 500 m del periodo. La línea discontinua es el periodo anterior, de la misma duración: si la de ahora queda por encima en las mismas pendientes, vas más rápido en el mismo terreno. Así se compara sin que importe si has hecho rutas más llanas o más duras. El viento y el pulso no se descuentan.`))}
-        <div class="viz">${vCurvas({ series, fmtY: dep === 'correr' ? ritmoC : v => nf(v, 0), aria: `${V.n} según la pendiente en ${INS_TXT[dias]}${prev.length >= 2 ? ', frente al periodo anterior' : ''}` })}</div>
+      const series = [{ color: col, pts: pts.map(([p, x]) => [p, yv(v(x)), `${txt(p)}: ${txtV(v(x))} en ${nf(x.km, 0)} km${B.get(p) && B.get(p).km >= 1 ? ` (antes ${txtV(v(B.get(p)))})` : ''}`]) }];
+      if (prev.length >= 2) series.push({ color: 'var(--ink-2)', dash: true, pts: prev.map(([p, x]) => [p, yv(v(x)), `${txt(p)}, periodo anterior: ${txtV(v(x))} en ${nf(x.km, 0)} km`]) });
+      top.push(blk(`${vizT(`${V.n} según la pendiente`, info(`vpend-${dep}`, `${V.n} según la pendiente`, `Tu ${V.n.toLowerCase()} media en cada pendiente, de bajadas (a la izquierda) a subidas (a la derecha), sumando todos los tramos de 500 m del periodo. La línea discontinua es el periodo anterior, de la misma duración: si la de ahora queda por encima en las mismas pendientes, vas más rápido en el mismo terreno. Así se compara sin que importe si has hecho rutas más llanas o más duras. El viento y el pulso no se descuentan.`))}
+        <div class="viz">${vCurvas({ series, fmtY: dep === 'correr' ? fmtRitmoSeg : fmtV, pasoY: dep === 'correr' ? 'ritmo' : null, u: uV, aria: `${V.n} según la pendiente en ${INS_TXT[dias]}${prev.length >= 2 ? ', frente al periodo anterior' : ''}` })}</div>
         <div class="leyenda"><span><i class="ln" style="border-top:2.5px solid ${col}"></i>${cap1(INS_TXT[dias])}</span>${prev.length >= 2 ? `<span><i class="ln" style="border-top:2px dashed var(--ink-2)"></i>Periodo anterior</span>` : ''}</div>
         ${prev.length >= 2 ? `<p class="lee">${difPend(A, B)}</p>` : ''}`));
     }
   }
+  // Volumen por semana: horas (bici y carrera) o desnivel (skimo, donde el volumen se mide subiendo)
   const nSem = Math.min(52, Math.ceil(dias / 7)), sems = Array.from({ length: nSem }, (_, i) => addDays(SEM, (i - nSem + 1) * 7));
-  const vol = sems.map(w => { const wk = (M.weeks || []).find(x => x[0] === w); return [fDia(w), ((wk && wk[1][dep]) || 0) / 60, w === SEM]; });
-  const vy = niceMax(Math.max(...vol.map(v => v[1]), 1));
-  top.push(blk(`${vizT('Horas por semana', info(`vol-${dep}`, 'Horas por semana', `Horas de ${SPORTS[dep].n.toLowerCase()} cada semana. La de esta semana va más clara porque aún no ha acabado.`))}
-    <div class="viz">${vBarras({ datos: vol, y0: 0, y1: vy, ticks: vTicks(0, vy), h: 160, cada: Math.ceil(nSem / 6), color: d => d[2] ? `color-mix(in srgb,${col} 45%,var(--paper))` : col,
-      tip: d => `Semana del ${d[0]}: ${nf(d[1])} h${d[2] ? ' (en curso)' : ''}`, etiqueta: nSem <= 13 ? (d => d[1] ? nf(d[1]) : '') : null, aria: 'Horas por semana', fmt: v => nf(v, 1) })}</div>`));
+  const porSem = dep === 'skimo' ? sems.map(w => [fDia(w), acts().filter(a => a.dep === dep && weekOf(a.f) === w).reduce((s, a) => s + (a.desn || 0), 0), w === SEM])
+    : sems.map(w => { const wk = (M.weeks || []).find(x => x[0] === w); return [fDia(w), ((wk && wk[1][dep]) || 0) / 60, w === SEM]; });
+  const vy = niceMax(Math.max(...porSem.map(v => v[1]), 1)), skH = dep === 'skimo';
+  top.push(blk(`${vizT(skH ? 'Desnivel por semana' : 'Horas por semana', info(`vol-${dep}`, skH ? 'Desnivel por semana' : 'Horas por semana', `${skH ? 'Metros de desnivel positivo' : `Horas de ${SPORTS[dep].n.toLowerCase()}`} cada semana; cada barra empieza el lunes que marca. La de esta semana va más clara porque aún no ha acabado.`))}
+    <div class="viz">${vBarras({ datos: porSem, y0: 0, y1: vy, ticks: vTicks(0, vy), h: 160, u: skH ? 'm' : 'h', cada: Math.ceil(nSem / 6), color: d => d[2] ? `color-mix(in srgb,${col} 45%,var(--paper))` : col,
+      tip: d => `Semana del ${d[0]}: ${skH ? `${nf(d[1], 0)} m` : `${nf(d[1])} h`}${d[2] ? ' (en curso)' : ''}`, etiqueta: nSem <= 13 ? (d => d[1] ? nf(d[1], skH ? 0 : 1) : '') : null, aria: skH ? 'Desnivel por semana' : 'Horas por semana', fmt: v => nf(v, skH ? 0 : 1) })}</div>`));
 
-  // Para profundizar
-  const fondo = a => ['rec', 'fondo'].includes(tipoAct(a));
-  const pEf = conTer.filter(a => fondo(a) && a.ter.llano && a.ter.llano.mpl).map(a => ({ f: a.f, v: a.ter.llano.mpl, a }));
-  if (dep !== 'skimo' && pEf.length >= 2) mas.push(serie('Eficiencia: metros por latido en llano', info(`mpl-${dep}`, 'Metros por latido', 'Los metros que recorres en llano con cada latido: velocidad dividida por pulso. Es la idea del factor de eficiencia de Intervals.icu o TrainingPeaks, pero con velocidad porque no hay potenciómetro. Si sube, tu motor aeróbico mejora. Solo cuenta las salidas suaves y constantes (fondos): con series o con un grupo, el dato no sirve. En una misma ruta repetida sale casi igual aunque cambie el ritmo, pero entre rutas distintas varía mucho más (viento, tráfico, grupo): mira la línea, no un punto.'),
-    pEf.map(p => ({ ...p, tip: `${fDia(p.f)}: ${nf(p.v, 2)} m por latido (${nf(p.a.ter.llano.kmh, 1)} km/h a ${p.a.ter.llano.fc} ppm${p.a.tc != null ? `, ${nf(p.a.tc, 0)} °C` : ''})` })), { fmt: v => nf(v, 2), aria: 'Metros por latido en llano por actividad' }));
+  // ── Para profundizar ──
+  const efi = dep === 'correr' ? a => a.ter.gap && a.ter.gap.mpl : dep === 'bici' ? a => a.ter.llano && a.ter.llano.mpl : a => a.ter.subida && a.ter.subida.fc && a.ter.subida.vam / 60 / a.ter.subida.fc * 100;
+  const pEf = conTer.filter(a => fondo(a) && efi(a)).map(a => ({ f: a.f, v: efi(a), a }));
+  const mediaEf = (() => { const x = sumaTerreno(conTer.filter(fondo), (M.perfil || {}).peso); return dep === 'correr' ? x.gap && x.gap.mpl : dep === 'bici' ? x.llano && x.llano.mpl : x.subida && x.subida.dpl; })();
+  if (pEf.length >= 2) mas.push(serie(dep === 'skimo' ? 'Eficiencia: desnivel por 100 latidos' : `Eficiencia: metros por latido${dep === 'correr' ? ' (ajustados a pendiente)' : ' en llano'}`,
+    info(`mpl-${dep}`, 'Eficiencia', `${dep === 'skimo' ? 'Los metros de desnivel que ganas cada 100 latidos en los tramos de subida.' : `Los metros que recorres ${dep === 'correr' ? '(equivalentes en llano)' : 'en llano'} con cada latido.`} Es la idea del factor de eficiencia de Intervals.icu o TrainingPeaks, sin potenciómetro. Si sube, tu motor aeróbico mejora. Solo cuenta ${act}s suaves y constantes (fondos): con series o con un grupo, el dato no sirve. En una misma ruta repetida sale casi igual, pero entre rutas distintas varía mucho (viento, calor, grupo): mira la tendencia, no un punto.`),
+    pEf.map(x => ({ ...x, tip: `${fDia(x.f)}: ${nf(x.v, dep === 'skimo' ? 1 : 2)}${temp(x.a)}` })), { fmt: v => nf(v, dep === 'skimo' ? 1 : 2), u: 'm', media: mediaEf, aria: `Eficiencia por ${act} en ${INS_TXT[dias]}` }));
   const pts = todas.map(a => [fDia(a.f), R.fc(a), R.v(a)]).filter(p => p[1] && p[2]);
   if (pts.length >= 3) { const [xa, xb] = rango(pts.map(p => p[1])), [ya, yb] = rango(pts.map(p => p[2])), n = pts.length;
     const mejor = pts.reduce((m, p, i) => p[2] / p[1] > pts[m][2] / pts[m][1] ? i : m, 0);
-    mas.push(blk(`${vizT(`${R.n} frente a pulso`, info(`ve-${dep}`, `${R.n} frente a pulso`, `Cada punto es una ${dep === 'bici' ? 'salida' : 'actividad'}: a la derecha, más pulso; arriba, más ${R.n.toLowerCase()}. Más oscuro, más reciente. Mejoras si los puntos recientes quedan arriba y a la izquierda: lo mismo con menos pulso. ${R.nota}`))}
+    mas.push(blk(`${vizT(`${R.n} frente a pulso`, info(`ve-${dep}`, `${R.n} frente a pulso`, `Cada punto es una ${act}: a la derecha, más pulso; arriba, más ${R.n.toLowerCase()}. Más oscuro, más reciente. Mejoras si los puntos recientes quedan arriba y a la izquierda: lo mismo con menos pulso. ${R.nota}`))}
       <div class="viz">${vPuntos({ datos: pts, x0: xa, x1: xb, y0: ya, y1: yb, xt: vTicks(xa, xb, 4).filter(t => t >= xa && t <= xb), yt: vTicks(ya, yb, 4).filter(t => t >= ya && t <= yb), xl: 'Pulso medio (ppm)', yl: R.u,
         fill: (d, i) => `color-mix(in srgb,${col} ${30 + i / Math.max(1, n - 1) * 70}%,var(--paper))`, tip: d => `${d[0]}: ${R.tip(d[2])} a ${d[1]} ppm`, aria: `${R.n} frente a pulso medio en ${n} actividades`, etiquetas: [n - 1, mejor], fmtX: v => nf(v, 0), fmtY: v => nf(v, dep === 'skimo' ? 0 : 1) })}</div>
       <p class="lee">Tu mejor relación: ${pts[mejor][0]}, ${R.tip(pts[mejor][2])} a ${pts[mejor][1]} ppm.</p>`)); }
   const pDc = todas.filter(a => a.dc != null && a.min >= 60 && fondo(a)).map(a => ({ f: a.f, v: a.dc, a }));
-  if (dep !== 'skimo' && pDc.length >= 2) mas.push(serie('Desacople en las salidas largas', info(`dc-${dep}`, 'Desacople', 'Cuánto empeora la relación entre velocidad y pulso de la primera mitad a la segunda, medido solo en llano (método de Joe Friel, el mismo que usan Intervals.icu y TrainingPeaks). Por debajo del 5 % aguantas bien el ritmo; por encima, te falta fondo para esa duración o fuiste deprisa al principio. Solo fondos de una hora o más: en salidas con series, repechos o grupo salen cifras sin sentido (de −15 % a +18 %).'),
-    pDc.map(p => ({ ...p, tip: `${fDia(p.f)}: ${p.v > 0 ? '+' : ''}${nf(p.v, 1)} % en ${dur(p.a.min)}` })), { fmt: v => `${nf(v, 0)} %`, tend: false, refs: [{ v: 5, t: 'Límite 5 %', siempre: true }], aria: 'Desacople por salida larga' }));
+  if (dep !== 'skimo' && pDc.length >= 2) mas.push(serie('Desacople en los fondos largos', info(`dc-${dep}`, 'Desacople', 'Cuánto empeora la relación entre velocidad y pulso de la primera mitad a la segunda, medido solo en llano (método de Joe Friel, el mismo que usan Intervals.icu y TrainingPeaks). Por debajo del 5 % aguantas bien el ritmo; por encima, te falta fondo para esa duración o fuiste deprisa al principio. Solo fondos de una hora o más: en salidas con series, repechos o grupo salen cifras sin sentido (de −15 % a +18 %).'),
+    pDc.map(x => ({ ...x, tip: `${fDia(x.f)}: ${x.v > 0 ? '+' : ''}${nf(x.v, 1)} % en ${dur(x.a.min)}` })), { fmt: v => nf(v, 0), u: '%', modo: 'linea', refs: [{ v: 5, t: 'Límite 5 %', siempre: true }], aria: 'Desacople por fondo largo' }));
   const fsMax = i => { const v = todas.map(a => a.fs && a.fs[i]).filter(Boolean); return v.length ? Math.max(...v) : null; };
   const curva = [['5 min', fsMax(0)], ['20 min', fsMax(1)], ['60 min', fsMax(2)]].filter(c => c[1]);
   if (curva.length >= 2) { const lthr = (M.perfil && M.perfil.lthr) || null, cy0 = Math.floor((Math.min(...curva.map(c => c[1])) - 15) / 10) * 10, cy1 = Math.ceil((Math.max(...curva.map(c => c[1]), lthr || 0) + 5) / 10) * 10;
     mas.push(blk(`${vizT('Tu mejor pulso sostenido', info(`fs-${dep}`, 'Pulso máximo sostenido', `El pulso medio más alto que has aguantado durante 5, 20 y 60 minutos en ${INS_TXT[dias]}. Es como la curva de pulso de Intervals.icu. El de 20 minutos se acerca a tu umbral${lthr ? ` (${lthr} ppm según Garmin)` : ''}: si sube sin que suba tu umbral, has apretado más; si baja, no has hecho esfuerzos largos y fuertes en este periodo.`))}
-      <div class="viz">${vBarras({ datos: curva, y0: cy0, y1: cy1, ticks: vTicks(cy0, cy1, 4).filter(t => t >= cy0 && t <= cy1), h: 160, color: () => col, refs: lthr ? [{ v: lthr, t: `Umbral ${lthr}` }] : [], tip: d => `${d[0]}: ${d[1]} ppm`, etiqueta: d => String(d[1]), aria: 'Pulso medio máximo durante 5, 20 y 60 minutos', fmt: v => nf(v, 0) })}</div>`)); }
+      <div class="viz">${vBarras({ datos: curva, y0: cy0, y1: cy1, ticks: vTicks(cy0, cy1, 4).filter(t => t >= cy0 && t <= cy1), h: 160, u: 'ppm', color: () => col, refs: lthr ? [{ v: lthr, t: `Umbral ${lthr}` }] : [], tip: d => `${d[0]}: ${d[1]} ppm`, etiqueta: d => String(d[1]), aria: 'Pulso medio máximo durante 5, 20 y 60 minutos', fmt: v => nf(v, 0) })}</div>`)); }
   const pBa = conTer.filter(a => a.ter.bajada && a.ter.bajada.km >= 1).map(a => ({ f: a.f, v: a.ter.bajada.kmh, a }));
   if (dep === 'bici' && pBa.length >= 2) mas.push(serie('Velocidad en bajada', info('baj', 'Velocidad en bajada', 'Velocidad media en los tramos de bajada (desde el −3 %). Depende sobre todo de la pendiente, del tráfico y de la técnica, no de tu forma: es para curiosear, no para medir si mejoras.'),
-    pBa.map(p => ({ ...p, tip: `${fDia(p.f)}: ${nf(p.v, 1)} km/h al ${nf(p.a.ter.bajada.pend, 1)} %` })), { fmt: v => nf(v, 0), aria: 'Velocidad en bajada por salida' }));
-  // Disciplina en los fondos y zonas por semana
-  const L = ((M.perfil && M.perfil.lthr) || 170) - (dep === 'bici' ? 5 : 0), techo = Math.round(L * .86), z2 = Math.round(L * .81);
+    pBa.map(x => ({ ...x, tip: `${fDia(x.f)}: ${nf(x.v, 1)} km/h al ${nf(x.a.ter.bajada.pend, 1)} %` })), { fmt: v => nf(v, 0), u: 'km/h', media: T.bajada && T.bajada.kmh, aria: 'Velocidad en bajada por salida' }));
+  const Lt = ((M.perfil && M.perfil.lthr) || 170) - (dep === 'bici' ? 5 : 0), techo = Math.round(Lt * .86), z2 = Math.round(Lt * .81);
   const ult = todas.slice(-16).filter(a => a.fc);
   if (ult.length >= 3) { const fcs = ult.map(a => a.fc), dy0 = Math.floor(Math.min(...fcs, z2) / 10) * 10 - 5, dy1 = Math.ceil(Math.max(...fcs, techo) / 10) * 10 + 5;
-    const fondos = ult.filter(a => ['rec', 'fondo'].includes(tipoAct(a))), dentro = fondos.filter(a => a.fc <= techo).length;
-    mas.push(blk(`${vizT('Disciplina en los fondos', info(`dis-${dep}`, 'Disciplina en los fondos', `Pulso medio de cada salida. En los fondos (en color) el objetivo es quedarte por debajo del techo de ${techo} ppm; ${z2} ppm es el centro de tu zona 2. Salen de tu umbral de Garmin (${L} ppm). En gris, las salidas de otro tipo.`))}
-      <div class="viz">${vBarras({ datos: ult.map(a => [fDia(a.f), a.fc, ['rec', 'fondo'].includes(tipoAct(a))]), y0: dy0, y1: dy1, ticks: vTicks(dy0, dy1, 4).filter(t => t >= dy0 && t <= dy1), h: 190, cada: Math.ceil(ult.length / 6),
-        color: d => d[2] ? col : 'var(--line-3)', tip: d => `${d[0]}: ${d[1]} ppm${d[2] ? ', fondo' : ''}`, refs: [{ v: techo, t: `Techo ${techo}` }, { v: z2, t: `Z2 ${z2}`, cls: 'ref2' }], aria: 'Pulso medio por salida', fmt: v => nf(v, 0) })}</div>
-      <p class="lee">${fondos.length ? `${dentro} de ${fondos.length} fondos por debajo del techo.` : 'En estas salidas no hay fondos.'}</p>`)); }
+    const fondos = ult.filter(fondo), dentro = fondos.filter(a => a.fc <= techo).length;
+    mas.push(blk(`${vizT('Disciplina en los fondos', info(`dis-${dep}`, 'Disciplina en los fondos', `Pulso medio de cada ${act}. En los fondos (en color) el objetivo es quedarte por debajo del techo de ${techo} ppm; ${z2} ppm es el centro de tu zona 2. Salen de tu umbral de Garmin (${Lt} ppm). En gris, las ${act}s de otro tipo.`))}
+      <div class="viz">${vBarras({ datos: ult.map(a => [fDia(a.f), a.fc, fondo(a)]), y0: dy0, y1: dy1, ticks: vTicks(dy0, dy1, 4).filter(t => t >= dy0 && t <= dy1), h: 190, u: 'ppm', cada: Math.ceil(ult.length / 6),
+        color: d => d[2] ? col : 'var(--line-3)', tip: d => `${d[0]}: ${d[1]} ppm${d[2] ? ', fondo' : ''}`, refs: [{ v: techo, t: `Techo ${techo}` }, { v: z2, t: `Z2 ${z2}`, cls: 'ref2' }], aria: `Pulso medio por ${act}`, fmt: v => nf(v, 0) })}</div>
+      <p class="lee">${fondos.length ? `${dentro} de ${fondos.length} fondos por debajo del techo.` : 'En este periodo no hay fondos.'}</p>`)); }
   const zon = sems.map(w => { const z = [0, 0, 0]; acts().filter(a => a.dep === dep && weekOf(a.f) === w && a.z).forEach(a => a.z.forEach((v, k) => { z[k] += v; })); return [fDia(w), z.map(v => v / 60)]; });
   if (zon.filter(c => c[1].some(Boolean)).length >= 3) mas.push(blk(`${vizT('Suave, medio y duro por semana', info(`zon-${dep}`, 'Suave, medio y duro por semana', 'Horas de cada semana según tu pulso: suave (por debajo del 90 % de tu umbral), medio y duro. En los aficionados que mejoran, cerca del 80 % es suave.'))}
-    <div class="viz">${vApiladas({ cols: zon, claves: ['suave', 'medio', 'duro'], colores: [`color-mix(in srgb,${col} 35%,var(--paper))`, `color-mix(in srgb,${col} 65%,var(--paper))`, col], tip: c => `Semana del ${c[0]}: ${nf(c[1][0])} h suaves, ${nf(c[1][1])} h medias, ${nf(c[1][2])} h duras`, aria: 'Horas suaves, medias y duras por semana', fmt: v => nf(v, 1), cada: Math.ceil(nSem / 6) })}</div>
+    <div class="viz">${vApiladas({ cols: zon, claves: ['suave', 'medio', 'duro'], colores: [`color-mix(in srgb,${col} 35%,var(--paper))`, `color-mix(in srgb,${col} 65%,var(--paper))`, col], tip: c => `Semana del ${c[0]}: ${nf(c[1][0])} h suaves, ${nf(c[1][1])} h medias, ${nf(c[1][2])} h duras`, aria: 'Horas suaves, medias y duras por semana', fmt: v => nf(v, 1), u: 'h', cada: Math.ceil(nSem / 6) })}</div>
     <div class="leyenda"><span><i style="background:color-mix(in srgb,${col} 35%,var(--paper))"></i>Suave</span><span><i style="background:color-mix(in srgb,${col} 65%,var(--paper))"></i>Medio</span><span><i style="background:${col}"></i>Duro</span></div>`));
   mas.push(blk(`${blkH('Durabilidad y combustible', info('pend', 'Lo que falta por guardar', 'La stamina mínima de cada salida larga y los gramos de hidrato por hora que tomaste los calcula tu Claude al analizar una salida, pero aún no se guardan en myCoach. Cuando se guarden, saldrán aquí con su gráfica.'))}
     <p class="muted">Aún no se guardan. Mientras, pídeselos a tu Claude.</p><div class="btns"><button class="btn tonal" type="button" data-a="v-encargo" data-v="4">Preguntárselo a Claude</button></div>`));
+  const queMas = { bici: 'Eficiencia, VAM sostenida, desacople, pulso, bajadas y zonas', correr: 'Eficiencia, VAM sostenida, desacople, pulso y zonas', skimo: 'Eficiencia subiendo, pulso, disciplina y zonas' }[dep];
   return `${numeros}<div class="grid2">${top.join('')}</div>
-    <details class="mas"${S.insMas ? ' open' : ''}><summary data-a="ins-mas"><span>Para profundizar</span><small>Eficiencia, desacople, pulso, bajadas y zonas</small></summary>
+    <details class="mas"${S.insMas ? ' open' : ''}><summary data-a="ins-mas"><span>Para profundizar</span><small>${queMas}</small></summary>
       ${bloqueMismaRuta(dep)}<div class="grid2">${mas.join('')}</div></details>`;
 }
 
 /* Dos salidas son "la misma ruta" si empiezan a menos de 500 m y la distancia se parece (±8 %) */
 function mismaRuta(dep) {
   const rutas = (DSET && DSET.rutas) || {}; const pt = a => { const p = rutas[a.id]; if (!p) return null; try { const d = decodePoly(p); return d && d[0]; } catch (e) { return null; } };
-  const desde = insDesde(), as = acts().filter(a => a.dep === dep && a.km > 3 && a.f > desde && rutas[a.id]).slice(0, 40);
+  const as = acts().filter(a => a.dep === dep && a.km > 3 && rutas[a.id]).slice(0, 40);
   for (let i = 0; i < as.length; i++) { const a = as[i], pa = pt(a); if (!pa) continue;
     for (let j = i + 1; j < as.length; j++) { const b = as[j], pb = pt(b); if (!pb) continue;
       if (Math.abs(a.km - b.km) / a.km < .08 && hav(pa, pb) < .5) return [b, a]; } }
@@ -220,10 +267,11 @@ function bloqueMismaRuta(dep) {
 
 
 /* ===== General: dónde estás (comparado con otra gente), cómo evoluciona, cuánto entrenas y tu peso ===== */
-const ESC_KEYS = ['motor', 'fondo', 'subida', 'volumen', 'equilibrio'];
+// Solo lo común a todos los deportes: lo de cada deporte (los W/kg en subida, por ejemplo) vive en su pestaña.
+const ESC_KEYS = ['motor', 'fondo', 'volumen', 'equilibrio'];
 function dondeEstas() {
-  const d = dims(), nota = forma(), bici = S.sports.includes('bici') || acts().some(a => a.dep === 'bici');
-  const filas = ESC_KEYS.filter(k => k !== 'subida' || bici).map(k => { const x = d[k];
+  const d = dims(), nota = forma();
+  const filas = ESC_KEYS.map(k => { const x = d[k];
     const inf = info(`dim-${k}`, x.n, `${x.por || x.falta} ${x.mejora || ''}`);
     if (x.v == null) return `<div class="esc-f"><div class="esc-l"><b>${x.n}</b><span>${esc(x.falta || 'Sin datos todavía.')}</span></div>${inf}</div>`;
     return `<div class="esc-f"><div class="esc-l"><b>${x.n}</b><span>${esc(x.u)}</span></div>
@@ -242,17 +290,17 @@ function serieGarmin(clave) {
 }
 function evolucionGarmin() {
   const desde = insDesde(), dias = insDias(), out = [];
-  const una = (clave, titulo, inf, fmt, refs = []) => {
+  const una = (clave, titulo, inf, fmt, refs = [], u = '') => {
     const todo = serieGarmin(clave), pts = todo.filter(p => p.f >= desde); if (!todo.length) return;
     const ult = todo[todo.length - 1], prim = pts[0];
     const lee = pts.length >= 2 && prim !== ult ? `${fmt(ult.v)} ahora; ${fmt(prim.v)} el ${fDia(prim.f)}.` : `${fmt(ult.v)} (${fDia(ult.f)}).`;
     const ps = pts.length >= 2 ? pts : todo.slice(-2);
-    out.push(blk(`${vizT(titulo, inf)}${ps.length >= 2 ? `<div class="viz">${vSerie({ pts: ps.map(p => ({ ...p, tip: `${fDia(p.f)}: ${fmt(p.v)}` })), desde: pts.length >= 2 ? desde : ps[0].f, tend: false, h: 160, fmt, refs, aria: `${titulo} en ${INS_TXT[dias]}` })}</div>` : ''}<p class="lee">${lee}</p>`));
+    out.push(blk(`${vizT(titulo, inf)}${ps.length >= 2 ? `<div class="viz">${vSerie({ pts: ps.map(p => ({ ...p, tip: `${fDia(p.f)}: ${fmt(p.v)}` })), desde: pts.length >= 2 ? desde : ps[0].f, modo: 'linea', h: 160, fmt, refs, u, aria: `${titulo} en ${INS_TXT[dias]}` })}</div>` : ''}<p class="lee">${lee}</p>`));
   };
-  una('es', 'Endurance Score', info('ev-es', 'Endurance Score', 'Lo calcula Garmin con todas tus actividades de resistencia, de cualquier deporte: mide cuánto aguantas esfuerzos largos. Las líneas marcan sus niveles: Entrenado desde 5.800, Muy entrenado desde 6.600 y Experto desde 7.300.'), v => nf(v, 0), [{ v: 5800, t: 'Entrenado' }, { v: 6600, t: 'Muy entrenado' }, { v: 7300, t: 'Experto' }]);
-  una('vo2', 'VO2máx', info('ev-vo2', 'VO2máx', 'El oxígeno que tu cuerpo puede usar por minuto y kilo: el tamaño de tu motor. Garmin lo estima en carreras con pulso y GPS. Sube despacio: un punto en unos meses ya es mucho.'), v => nf(v, 1));
-  if (serieGarmin('vo2b').length) una('vo2b', 'VO2máx en bici', info('ev-vo2b', 'VO2máx en bici', 'El VO2máx que estima Garmin en bici. Necesita potenciómetro.'), v => nf(v, 1));
-  una('hill', 'Hill Score', info('ev-hill', 'Hill Score', 'Lo calcula Garmin con tus carreras y caminatas en cuesta: fuerza y resistencia subiendo. No usa la bici.'), v => nf(v, 0));
+  una('es', 'Endurance Score', info('ev-es', 'Endurance Score', 'Lo calcula Garmin con todas tus actividades de resistencia, de cualquier deporte: mide cuánto aguantas esfuerzos largos. Las líneas marcan sus niveles: Entrenado desde 5.800, Muy entrenado desde 6.600 y Experto desde 7.300.'), v => nf(v, 0), [{ v: 5800, t: 'Entrenado' }, { v: 6600, t: 'Muy entrenado' }, { v: 7300, t: 'Experto' }], 'puntos');
+  una('vo2', 'VO2máx', info('ev-vo2', 'VO2máx', 'El oxígeno que tu cuerpo puede usar por minuto y kilo: el tamaño de tu motor. Garmin lo estima en carreras con pulso y GPS. Sube despacio: un punto en unos meses ya es mucho.'), v => nf(v, 1), [], 'ml/kg/min');
+  if (serieGarmin('vo2b').length) una('vo2b', 'VO2máx en bici', info('ev-vo2b', 'VO2máx en bici', 'El VO2máx que estima Garmin en bici. Necesita potenciómetro.'), v => nf(v, 1), [], 'ml/kg/min');
+  una('hill', 'Hill Score', info('ev-hill', 'Hill Score', 'Lo calcula Garmin con tus carreras y caminatas en cuesta: fuerza y resistencia subiendo. No usa la bici.'), v => nf(v, 0), [], 'puntos');
   return out.length ? `<div class="grid2">${out.join('')}</div>` : '';
 }
 /* Cuánto entrenas, todos los deportes juntos: horas por semana apiladas por deporte */
@@ -263,7 +311,7 @@ function horasDeportes() {
   const cols = sems.map(w => { const v = ((M.weeks || []).find(x => x[0] === w) || [w, {}])[1]; return [fDia(w), deps.map(k => (v[k] || 0) / 60)]; });
   const media = cols.reduce((s, c) => s + c[1].reduce((a, b) => a + b, 0), 0) / nSem;
   return blk(`${vizT('Horas por semana, todos los deportes', info('hdep', 'Horas por semana', 'Todo lo que haces cuenta como carga, también lo que no se planifica (pádel, montaña, fuerza). Toca una barra para ver el reparto de esa semana.'))}
-    <div class="viz">${vApiladas({ cols, claves: deps, colores: deps.map(scol), tip: c => `Semana del ${c[0]}: ${deps.map((k, i) => c[1][i] ? `${SPORTS[k].n} ${nf(c[1][i])} h` : '').filter(Boolean).join(', ') || 'nada'}`, aria: `Horas por semana y deporte en ${INS_TXT[dias]}`, fmt: v => nf(v, 1), cada: Math.ceil(nSem / 6) })}</div>
+    <div class="viz">${vApiladas({ cols, claves: deps, colores: deps.map(scol), tip: c => `Semana del ${c[0]}: ${deps.map((k, i) => c[1][i] ? `${SPORTS[k].n} ${nf(c[1][i])} h` : '').filter(Boolean).join(', ') || 'nada'}`, aria: `Horas por semana y deporte en ${INS_TXT[dias]}`, fmt: v => nf(v, 1), cada: Math.ceil(nSem / 6), u: 'h' })}</div>
     <div class="leyenda">${deps.map(k => `<span><i style="background:${scol(k)}"></i>${SPORTS[k].n}</span>`).join('')}</div>
     <p class="lee">${nf(media, 1)} h por semana de media en ${INS_TXT[dias]}.</p>`);
 }
@@ -287,12 +335,11 @@ function tabProgresoV1() {
   const segs = [['forma', 'General'], ...deps.map(d => [d, SPORTS[d].n])], rg = String(insDias());
   return { title: 'Insights', html: `<div class="v1"><header class="v1-h"><h1>Insights</h1></header>
     <div class="seg-row ins-ctl">${segs.length > 1 ? `<div class="seg2" role="group" aria-label="Qué ver">${segs.map(([k, l]) => `<button type="button" data-a="v-prog" data-v="${k}" aria-pressed="${V.prog === k}">${l}</button>`).join('')}</div>` : ''}
-      <div class="seg2" role="group" aria-label="Periodo">${RANGOS_INS.map(([v, l]) => `<button type="button" data-a="ins-rango" data-v="${v}" aria-pressed="${rg === v}">${l}</button>`).join('')}</div></div>
+      <label class="ins-per" for="ins-per"><span>Periodo</span><select id="ins-per">${RANGOS_INS.map(([v]) => `<option value="${v}"${rg === v ? ' selected' : ''}>${cap1(INS_TXT[v])}</option>`).join('')}</select></label></div>
     ${V.prog === 'forma' ? progForma() : progDep(V.prog)}</div>` };
 }
 Object.assign(ACTIONS, {
   'v-sync': () => sync(true),
-  'ins-rango': el => { S.insRango = el.dataset.v; save(); render(); },
   // Se abre y se cierra aquí (el clic general anula el del navegador) y se recuerda para la próxima vez.
   'ins-mas': el => { const d = el.closest('details'); d.open = !d.open; S.insMas = d.open; save(); },
 });
@@ -351,3 +398,5 @@ function scrNumeros() {
   return { title: 'Tus números', html: head('Tus números', 'Lo que Garmin calcula de ti') + `<div class="content" style="max-width:760px">${html ||
     `${pendiente('Aún no tengo tus números', 'Salen de tu Garmin: umbral, FTP, predicciones de carrera y edad física. Actualiza para traerlos.')}<div class="btns"><button class="btn fill" type="button" data-a="v-sync">Actualizar con Garmin</button></div>`}</div>` };
 }
+/* El periodo es un desplegable nativo: se cambia con el evento change, no con el clic general (que lo anularía). */
+document.addEventListener('change', e => { if (e.target && e.target.id === 'ins-per') { S.insRango = e.target.value; save(); render(); document.getElementById('ins-per')?.focus(); } });

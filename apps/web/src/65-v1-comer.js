@@ -59,6 +59,39 @@ function bloquePeso(desdeIns) {
       ${r.ultimo.fecha < addDays(HOY, -14) ? '<p class="small muted">Hace más de dos semanas del último pesaje.</p>' : ''}`;
   }
   return blk(`${blkH('Peso', `${d?.demo ? '<span class="demo-tag">Ejemplo</span>' : ''}${info('peso', 'Peso', 'Puntos: cada pesaje. Línea: la media de 7 días, que es la que cuenta, porque el peso de un día sube y baja con el agua y la comida. Sale de Garmin: de tu báscula o de lo que le dices a tu Claude.')}`)}${cuerpo}
-    <div class="btns"><button class="link" type="button" data-a="v-peso-claude">Apuntar peso con Claude</button></div>`);
+    <div class="btns"><button class="btn tonal" type="button" data-a="peso-apuntar">Apuntar peso</button><button class="link" type="button" data-a="v-peso-claude">Con Claude</button></div>`);
 }
 Object.assign(ACTIONS, { 'v-prog-ir': el => { V.prog = el.dataset.v; go('progreso'); }, 'v-peso-claude': () => enClaude('Hoy peso X kg en ayunas. Regístralo en myCoach con peso_registrar y dime cómo va la tendencia de la media de 7 días.') });
+
+/* Apuntar el peso a mano: se enseña lo que se va a guardar y se sube a Garmin (peso_registrar), que es donde
+   vive el peso. En el modo demo se queda en este navegador. */
+function hojaPeso() {
+  const d = PZ.datos && PZ.datos.resumen, ult = d && d.ultimo;
+  const st = { kg: ult ? String(ult.kg).replace('.', ',') : '', fecha: HOY, guardando: false, error: '' };
+  const kg = () => { const v = parseFloat(String(st.kg).replace(',', '.')); return v >= 25 && v <= 300 ? Math.round(v * 100) / 100 : null; };
+  const pinta = () => { const v = kg(); return `<form class="stack" style="gap:12px" data-form="peso">
+      <label class="stack" for="pz-kg" style="gap:4px"><span class="small">Peso en kg</span><input id="pz-kg" class="search" type="text" inputmode="decimal" autocomplete="off" value="${esc(st.kg)}" placeholder="79,2"></label>
+      <label class="stack" for="pz-f" style="gap:4px"><span class="small">Día</span><input id="pz-f" class="search" type="date" max="${HOY}" value="${st.fecha}"></label>
+      <p class="small" role="status">${v ? `Se guardará en Garmin: <b>${nf(v, 2)} kg</b> el ${st.fecha === HOY ? 'día de hoy' : fDia(st.fecha)}${ult ? ` (el último fue ${nf(ult.kg, 2)} kg, el ${fDia(ult.fecha)})` : ''}. Si te equivocas, se borra en Garmin Connect.` : 'Escribe un peso entre 25 y 300 kg.'}</p>
+      ${st.error ? `<p class="small" role="alert">${esc(st.error)}</p>` : ''}
+      <button class="btn fill" type="button" data-a="peso-guardar"${v && !st.guardando ? '' : ' disabled'}>${st.guardando ? 'Guardando…' : v ? `Guardar ${nf(v, 2)} kg` : 'Guardar'}</button></form>`; };
+  HPESO = { st, kg };
+  openSheet({ title: 'Apuntar peso', size: 'auto', id: 'peso', body: pinta, onClose: () => { HPESO = null; } });
+  setTimeout(() => document.getElementById('pz-kg')?.focus(), 400);
+}
+let HPESO = null;
+document.addEventListener('input', e => { if (!HPESO) return; const id = e.target && e.target.id;
+  if (id === 'pz-kg' || id === 'pz-f') { HPESO.st[id === 'pz-kg' ? 'kg' : 'fecha'] = e.target.value; HPESO.st.error = '';
+    // Se repinta solo el resumen y el botón, para no perder el foco ni el cursor del campo.
+    const f = document.querySelector('[data-form="peso"]'); if (!f) return; const tmp = document.createElement('div'); tmp.innerHTML = sheetState.body();
+    f.querySelector('[role="status"]').replaceWith(tmp.querySelector('[role="status"]')); f.querySelector('[data-a="peso-guardar"]').replaceWith(tmp.querySelector('[data-a="peso-guardar"]')); } });
+async function guardarPeso() {
+  if (!HPESO) return; const st = HPESO.st, v = HPESO.kg(); if (!v) return;
+  st.guardando = true; fillSheet();
+  try {
+    if (PZ.fuente === 'demo' || S.modo === 'demo') { const ps = PZ.datos.pesajes.filter(p => p.fecha !== st.fecha); ps.push({ fecha: st.fecha, kg: v }); ps.sort((a, b) => a.fecha.localeCompare(b.fecha)); PZ.datos = { ...PZ.datos, pesajes: ps, resumen: { ...PZ.datos.resumen, ultimo: ps[ps.length - 1] } }; }
+    else { await coachCall('peso_registrar', { kg: v, fecha: st.fecha, confirm: true }, true); PZ.datos = undefined; cargarPeso(true); }
+    closeSheet(); toast(`${nf(v, 2)} kg guardados${S.modo === 'demo' ? ' (demo)' : ' en Garmin'}`); render();
+  } catch (e) { st.guardando = false; st.error = 'No he podido guardarlo en Garmin. Vuelve a probar en un momento.'; fillSheet(); }
+}
+Object.assign(ACTIONS, { 'peso-apuntar': () => hojaPeso(), 'peso-guardar': () => guardarPeso() });
