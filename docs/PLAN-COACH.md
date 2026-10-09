@@ -248,6 +248,7 @@ Objetivo: que funcione sin ti delante y aprender qué enamora.
     - Decisión: la eficiencia y el desacople solo se enseñan con fondos; los vatios por kilo, solo en subida; y no hay nota "Forma bici" hasta tener más histórico o validarla con datos de potencia (GoldenCheetah OpenData, bloqueado ahora por la red del entorno: hay que permitir `api.osf.io` y `files.osf.io`).
     - Intervals.icu (conectado el 8 de octubre) no trae viento ni potencia para este usuario: sin potenciómetro aporta lo mismo que Garmin (curva de pulso, carga, metros por latido). El viento sí sale de Garmin (`/activity-service/activity/{id}/weather`), pero de una estación al empezar, sin dirección respecto a la ruta (y en la Cerdanya, la de Perpiñán).
     - Con viento y temperatura en el modelo, el ruido baja (de 2,0 a 1,7 km/h), pero la temperatura va de la mano del calendario (verano caluroso, otoño fresco: r = −0,68) y la "mejora" a igual pulso deja de distinguirse (−0,05 ± 1,5 km/h al mes). Con estos datos no se puede separar "he mejorado" de "hace menos calor". Por eso la temperatura de cada salida sale en los detalles de las gráficas de llano y eficiencia.
+20. **Este cambio va directo a `main`** cuando el usuario lo dé por bueno, sin pasar por `mycoach-pruebas` (lo pidió él).
 21. **Insights, segunda vuelta (9 de octubre).**
     - **Quién calcula qué:** el conector calcula cada actividad (terreno, pendiente, ritmo ajustado, VAM sostenida) cuando la app la pide al sincronizar; la web solo suma por periodo y dibuja. Claude no interviene ni gasta tokens en eso.
     - **Métricas por deporte** (research): carrera, ritmo ajustado a pendiente con el coste de Minetti y otros (2002), fiable entre −10 % y +10 %, y metros por latido sobre ese ritmo (la idea del índice pulso-velocidad de Vesterinen y otros, 2014). Skimo, lo que explica el rendimiento en los estudios es el VO2máx y el umbral (r = 0,7-0,9): sin laboratorio se mide con la VAM de subida, la mejor VAM sostenida de 10, 20 y 60 min, el desnivel por 100 latidos y el desnivel por semana. La bajada en skimo no se mide.
@@ -256,7 +257,6 @@ Objetivo: que funcione sin ti delante y aprender qué enamora.
     - **Ejes con unidad** en todas las gráficas; el ritmo de carrera se dibuja en min/km con marcas redondas.
     - **Filtros:** deporte con botones (cambia la pantalla) y periodo con un desplegable discreto al lado; antes eran dos filas de botones iguales.
     - **Peso a mano** en Insights → Peso → "Apuntar peso": se enseña lo que se guardará y se sube a Garmin con `peso_registrar` (la web ya puede llamarla). Para borrar un error, en Garmin Connect.
-20. **Este cambio va directo a `main`** cuando el usuario lo dé por bueno, sin pasar por `mycoach-pruebas` (lo pidió él).
 
 ## 10. Próximos pasos concretos (2 semanas)
 1. Sacar `packages/domain` con carga TRIMP, semáforo y tests.
