@@ -5658,12 +5658,17 @@ async function sincronizarTodos(env) {
 			const userId = clave.name.slice("user:".length);
 			try {
 				const estado = await leerEstado(env, userId);
-				if (estado.done && estado.last_sync && Date.parse(estado.last_sync) > limite) continue;
-				await sincronizar(env, userId, estado.done ? { paginas: 1, dias: 10 } : { paginas: 6, dias: 20 });
-				// El semaforo de la manana, listo para la web (y para avisos), solo
-				// para quien usa myCoach: son tres llamadas mas a Garmin.
-				if (await env.GARMIN.get(appKey(userId, "estado/app")))
-					await guardarDoc(env, userId, "coach/hoy", await calcularHoy(env, userId));
+				const fresco = estado.done && estado.last_sync && Date.parse(estado.last_sync) > limite;
+				if (!fresco) await sincronizar(env, userId, estado.done ? { paginas: 1, dias: 10 } : { paginas: 6, dias: 20 });
+				// El semaforo de la manana, listo para la web y para el aviso, solo
+				// para quien usa myCoach: son tres llamadas mas a Garmin. Si los datos
+				// ya estaban frescos, solo se calcula si hace falta para el aviso.
+				if (!(await env.GARMIN.get(appKey(userId, "estado/app")))) continue;
+				const avisos = await leerDoc(env, userId, AVISOS_DOC);
+				const quiereAviso = avisos?.subs?.length && avisos.prefs?.semaforo !== false;
+				let hoy = fresco ? await leerDoc(env, userId, "coach/hoy") : null;
+				if (!fresco || (quiereAviso && hoy?.fecha !== fechaLocal())) { hoy = await calcularHoy(env, userId); await guardarDoc(env, userId, "coach/hoy", hoy); }
+				if (quiereAviso && hoy?.mensaje) await enviarAviso(env, userId, "semaforo", avisoSemaforo(hoy));
 			} catch {
 				// Un usuario con la sesion caducada no puede parar al resto.
 			}
@@ -7355,6 +7360,153 @@ Object.assign(TOOLS, {
 	},
 });
 
+// ──────────────────────────── Avisos (Web Push) ────────────────────────────
+// Notificaciones al móvil o al ordenador aunque la app esté cerrada (la web instalada).
+// Sin preguntar a Garmin por ellas: miran lo que ya está en myCoach y el semáforo que
+// el cron calcula cada mañana. El push va sin contenido (así no hace falta cifrarlo):
+// el aviso se deja en `aviso:<id>` y el service worker lo lee de /avisos/<id> al llegar.
+// El id es un hash del endpoint de la suscripción: imposible de adivinar, hace de credencial.
+//   avisos/config  { subs: [{ id, endpoint, alta }], prefs: { semaforo, plan, menus } }
+
+const AVISOS_DOC = "avisos/config";
+const AVISO_TIPOS = {
+	semaforo: "Cada mañana, el semáforo del día y qué toca",
+	plan: "El domingo, si la semana que viene no tiene plan",
+	menus: "El domingo, si la semana que viene no tiene menús",
+};
+// Solo se manda a servicios de push conocidos: el servidor no hace peticiones a cualquier URL.
+const PUSH_HOSTS = /^(fcm\.googleapis\.com|updates\.push\.services\.mozilla\.com|web\.push\.apple\.com|[a-z0-9.-]+\.notify\.windows\.com|android\.googleapis\.com)$/;
+const CRON_DOMINGO = "0 17 * * 0";
+const b64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const b64uTexto = (s) => b64u(new TextEncoder().encode(s));
+
+/** Las claves VAPID del servidor: se crean la primera vez y se guardan (privadas) en el KV. */
+async function clavesVapid(env) {
+	const g = await env.GARMIN.get("vapid:claves", "json");
+	if (g) return g;
+	const par = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+	const c = { publica: b64u(await crypto.subtle.exportKey("raw", par.publicKey)), privada: await crypto.subtle.exportKey("jwk", par.privateKey) };
+	await env.GARMIN.put("vapid:claves", JSON.stringify(c));
+	return (await env.GARMIN.get("vapid:claves", "json")) || c;
+}
+
+async function idSuscripcion(endpoint) {
+	const h = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(endpoint)));
+	return [...h.slice(0, 16)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Manda un aviso a todos los dispositivos de la persona, si tiene ese tipo activado. Quita las suscripciones caducadas. */
+async function enviarAviso(env, userId, tipo, mensaje) {
+	const cfg = await leerDoc(env, userId, AVISOS_DOC);
+	if (!cfg?.subs?.length || (tipo !== "prueba" && cfg.prefs?.[tipo] === false)) return { enviados: 0 };
+	const claves = await clavesVapid(env);
+	const privada = await crypto.subtle.importKey("jwk", claves.privada, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
+	let enviados = 0;
+	const vivas = [];
+	for (const s of cfg.subs) {
+		await env.GARMIN.put(`aviso:${s.id}`, JSON.stringify({ ...mensaje, tipo, en: new Date().toISOString() }), { expirationTtl: 2 * 86400 });
+		const jwt = `${b64uTexto(JSON.stringify({ typ: "JWT", alg: "ES256" }))}.${b64uTexto(JSON.stringify({ aud: new URL(s.endpoint).origin, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub: env.MYCOACH_URL || "https://mycoach.albertbecervas.workers.dev" }))}`;
+		const firma = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, privada, new TextEncoder().encode(jwt));
+		let r;
+		try {
+			r = await fetch(s.endpoint, { method: "POST", body: "", headers: { TTL: "86400", Urgency: "normal", Authorization: `vapid t=${jwt}.${b64u(firma)}, k=${claves.publica}` } });
+		} catch {
+			vivas.push(s);
+			continue;
+		}
+		if (r.status === 404 || r.status === 410) continue; // el navegador ya no la quiere: se olvida
+		vivas.push(s);
+		if (r.ok) enviados++;
+	}
+	if (vivas.length !== cfg.subs.length) await guardarDoc(env, userId, AVISOS_DOC, { ...cfg, subs: vivas });
+	return { enviados };
+}
+
+/** El aviso del semáforo de la mañana, a partir de lo que calcula coach_hoy. */
+const avisoSemaforo = (hoy) => ({ titulo: `${hoy.entrenador || NOMBRE_COACH}: tu día`, texto: hoy.mensaje, url: "/?ir=hoy" });
+
+/** Domingo por la tarde: ¿la semana que viene tiene plan y menús? */
+async function avisosDeLaSemana(env, userId, hoy = fechaLocal()) {
+	const cfg = await leerDoc(env, userId, AVISOS_DOC);
+	if (!cfg?.subs?.length) return [];
+	const L = sumaDias(lunesDe(hoy), 7), D = sumaDias(L, 6), enSemana = (f) => f >= L && f <= D;
+	const hechos = [];
+	const plan = planCompleto(await leerDoc(env, userId, "estado/app"));
+	if (!Object.keys(plan).some(enSemana)) {
+		await enviarAviso(env, userId, "plan", { titulo: "La semana que viene está vacía", texto: "Créala en un momento: te propongo las sesiones según tu objetivo y tu agenda.", url: "/?ir=plan" });
+		hechos.push("plan");
+	}
+	const comidas = await leerPlanComida(env, userId);
+	if (!Object.entries(comidas).some(([f, d]) => enSemana(f) && d && Object.keys(d).length)) {
+		await enviarAviso(env, userId, "menus", { titulo: "Sin menús para la semana que viene", texto: "Planifícalos con tu Claude y tendrás la lista de la compra.", url: "/?ir=comer" });
+		hechos.push("menus");
+	}
+	return hechos;
+}
+
+async function avisosDomingo(env) {
+	let cursor;
+	do {
+		const pagina = await env.GARMIN.list({ prefix: "user:", cursor });
+		for (const clave of pagina.keys) {
+			try { await avisosDeLaSemana(env, clave.name.slice("user:".length)); } catch { /* uno no para al resto */ }
+		}
+		cursor = pagina.list_complete ? null : pagina.cursor;
+	} while (cursor);
+}
+
+Object.assign(TOOLS, {
+	avisos: {
+		title: "Avisos de la app",
+		soloApp: true,
+		description: "Los avisos (notificaciones push) de la app web: qué tipos hay, cuáles tiene activados, cuántos dispositivos y la clave pública para suscribirse.",
+		schema: { type: "object", properties: {} },
+		run: async (env, userId) => {
+			const cfg = (await leerDoc(env, userId, AVISOS_DOC)) || {};
+			return { tipos: AVISO_TIPOS, prefs: Object.fromEntries(Object.keys(AVISO_TIPOS).map((k) => [k, cfg.prefs?.[k] !== false])), dispositivos: (cfg.subs || []).length, ids: (cfg.subs || []).map((s) => s.id), clave_publica: (await clavesVapid(env)).publica };
+		},
+	},
+	avisos_guardar: {
+		title: "Guardar los avisos de la app",
+		soloApp: true,
+		write: true,
+		description: "Da de alta o de baja un dispositivo para los avisos (suscripcion o quitar, con su endpoint), cambia qué avisos quiere (prefs) o manda uno de prueba (prueba=true).",
+		schema: {
+			type: "object",
+			properties: {
+				suscripcion: { type: "object", properties: { endpoint: { type: "string" } } },
+				quitar: { type: "string", description: "Endpoint del dispositivo que se da de baja." },
+				prefs: { type: "object", properties: Object.fromEntries(Object.keys(AVISO_TIPOS).map((k) => [k, { type: "boolean" }])) },
+				prueba: { type: "boolean" },
+			},
+		},
+		run: async (env, userId, args = {}) => {
+			const cfg = (await leerDoc(env, userId, AVISOS_DOC)) || { subs: [], prefs: {} };
+			cfg.subs = cfg.subs || [];
+			if (args.suscripcion) {
+				const ep = String(args.suscripcion.endpoint || "");
+				let host = "";
+				try { const u = new URL(ep); if (u.protocol === "https:") host = u.hostname; } catch {}
+				if (!PUSH_HOSTS.test(host) || ep.length > 1000) throw new Error("Ese dispositivo no usa un servicio de avisos conocido.");
+				const id = await idSuscripcion(ep);
+				if (!cfg.subs.some((s) => s.id === id)) cfg.subs = [...cfg.subs, { id, endpoint: ep, alta: new Date().toISOString() }].slice(-10);
+			}
+			if (args.quitar) { const id = await idSuscripcion(String(args.quitar)); cfg.subs = cfg.subs.filter((s) => s.id !== id); }
+			if (args.prefs) for (const k of Object.keys(AVISO_TIPOS)) if (typeof args.prefs[k] === "boolean") cfg.prefs = { ...(cfg.prefs || {}), [k]: args.prefs[k] };
+			await guardarDoc(env, userId, AVISOS_DOC, cfg);
+			const prueba = args.prueba ? await enviarAviso(env, userId, "prueba", { titulo: "myCoach", texto: "Así te llegarán los avisos. Puedes quitarlos cuando quieras en Ajustes.", url: "/" }) : null;
+			return { guardado: true, dispositivos: cfg.subs.length, prefs: Object.fromEntries(Object.keys(AVISO_TIPOS).map((k) => [k, cfg.prefs?.[k] !== false])), ...(prueba ? { prueba } : {}) };
+		},
+	},
+});
+
+/** GET /avisos/<id>: el aviso pendiente de un dispositivo (lo pide su service worker al llegar el push). */
+async function handleAvisoPendiente(env, id) {
+	if (!/^[0-9a-f]{32}$/.test(id)) return new Response("No encontrado", { status: 404 });
+	const a = await env.GARMIN.get(`aviso:${id}`, "json");
+	return new Response(JSON.stringify(a || null), { status: a ? 200 : 404, headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" } });
+}
+
 // ──────────────────────────── Plan de comidas y platos ────────────────────────────
 // La semana de comidas va como la de entrenos: el motor pone la carga de cada día y
 // el código de hidrato de cada comida (alto, medio o bajo), Claude propone los platos
@@ -8121,6 +8273,7 @@ export default {
 
 			if (pathname === "/cuenta" || pathname.startsWith("/cuenta/")) return handleCuenta(request, env, pathname);
 			if (pathname === "/compartido/plan") return handleCompartidoPlan(request, env);
+			if (pathname.startsWith("/avisos/") && request.method === "GET") return handleAvisoPendiente(env, pathname.slice("/avisos/".length));
 
 			// Descarga del GPX. El id es un token aleatorio, asi que hace de
 			// credencial: permite importar la ruta a mano sin exponer nada mas.
@@ -8200,6 +8353,7 @@ esta URL como conector personalizado en Claude:</p>
 	// Descarga diaria. Es lo que hace que el panel tenga historico sin que
 	// nadie tenga que abrirlo.
 	async scheduled(event, env, ctx) {
-		ctx.waitUntil(sincronizarTodos(env).catch(() => {}));
+		// El domingo por la tarde, los avisos de la semana; el resto, la descarga diaria (y el semáforo).
+		ctx.waitUntil((event.cron === CRON_DOMINGO ? avisosDomingo(env) : sincronizarTodos(env)).catch(() => {}));
 	},
 };

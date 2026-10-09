@@ -32,7 +32,7 @@ export const TOOLS = new Set([
   // Fuerza: el entreno del día, su histórico y mandarlo al reloj (con confirmación en la app).
   'fuerza_dia', 'fuerza_historial',
   // La librería de entrenos: verlos, editarlos y añadir ejercicios del catálogo de Garmin.
-  'entrenos', 'fuerza_entreno_guardar', 'fuerza_ejercicios_garmin', 'entreno_enviar_garmin', 'peso_historico', 'peso_registrar', 'medidas', 'medidas_registrar',
+  'entrenos', 'fuerza_entreno_guardar', 'fuerza_ejercicios_garmin', 'entreno_enviar_garmin', 'peso_historico', 'peso_registrar', 'medidas', 'medidas_registrar', 'avisos', 'avisos_guardar',
   // Solo lectura: tus rutas guardadas en Garmin (Plan) y las comidas que registra tu Claude (Comer).
   'garmin_courses', 'comidas',
   // El plan de comidas de la semana (lo propone tu Claude; la web lo enseña y saca la lista de la compra).

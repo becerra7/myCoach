@@ -12,6 +12,7 @@ export function esDelConector(pathname, method) {
     || pathname === '/cuenta' || pathname.startsWith('/cuenta/')
     || pathname === '/panel' || pathname.startsWith('/panel/')
     || pathname === '/compartido/plan'
+    || pathname.startsWith('/avisos/')
     || (pathname.startsWith('/route/') && pathname.endsWith('.gpx'));
 }
 

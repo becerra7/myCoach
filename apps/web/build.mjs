@@ -42,7 +42,7 @@ const html = target === 'mcpapp'
   : shell.replace('/*JS*/', () => js.replaceAll('</script', '<\\/script'));
 // En Claude el runtime pone el esqueleto (doctype, charset, viewport); en la web lo ponemos aquí, con la PWA.
 const page = target === 'web'
-  ? `<!doctype html>\n<html lang="es">\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n<link rel="manifest" href="/manifest.webmanifest">\n<link rel="icon" href="/icon.svg" type="image/svg+xml">\n<link rel="apple-touch-icon" href="/icon.svg">\n<meta name="apple-mobile-web-app-capable" content="yes">\n` + html.replace(/<title>[^<]*<\/title>/, '<title>myCoach</title>') + `\n<script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});</script>\n`
+  ? `<!doctype html>\n<html lang="es">\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n<link rel="manifest" href="/manifest.webmanifest">\n<link rel="icon" href="/icon.svg" type="image/svg+xml">\n<link rel="apple-touch-icon" href="/icon-192.png">\n<meta name="apple-mobile-web-app-capable" content="yes">\n` + html.replace(/<title>[^<]*<\/title>/, '<title>myCoach</title>') + `\n<script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});</script>\n`
   : target === 'mcpapp'
     // Documento completo (la vista es un iframe aislado), sin PWA: no hay service worker ni manifest.
     ? `<!doctype html>\n<html lang="es">\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n` + html.replace(/<title>[^<]*<\/title>/, '<title>myCoach</title>') + `\n<style>#proto-fab,#task{display:none!important}</style>\n`

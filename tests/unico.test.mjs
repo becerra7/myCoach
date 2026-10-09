@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import unico, { esDelConector } from '../apps/worker/src/unico.js';
 
 test('rutas del conector', () => {
-  for (const p of ['/mcp', '/mcp/', '/.well-known/oauth-authorization-server', '/oauth/authorize', '/oauth/token', '/cuenta', '/cuenta/garmin', '/panel', '/route/abc.gpx'])
+  for (const p of ['/mcp', '/mcp/', '/.well-known/oauth-authorization-server', '/oauth/authorize', '/oauth/token', '/cuenta', '/cuenta/garmin', '/panel', '/route/abc.gpx', '/avisos/0123456789abcdef0123456789abcdef'])
     assert.equal(esDelConector(p, 'GET'), true, p);
   assert.equal(esDelConector('/', 'POST'), true, 'POST a la raíz es MCP');
 });

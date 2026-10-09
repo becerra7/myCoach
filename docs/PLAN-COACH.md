@@ -260,6 +260,12 @@ Objetivo: que funcione sin ti delante y aprender qué enamora.
 
 22. **Medidas corporales (9 de octubre).** Pecho, cintura, cadera, brazo derecho e izquierdo (cm), entrepierna (cm) y talla de pie (EU). Garmin no guarda perímetros, así que viven en myCoach (`cuerpo/medidas`), un registro por día con solo lo que se midió. Herramientas `medidas` y `medidas_registrar` (vista previa sin confirm, como el resto de escrituras); la web las puede llamar. En Insights → General, junto al peso: cada perímetro con su cifra, su cambio en el periodo y una gráfica; entrepierna y pie, en una línea (casi no cambian). Sin juicios: número y cambio, nunca "bien" o "mal". Cuesta unos 300 tokens más por conversación con Claude (dos herramientas más en la lista).
 
+23. **Avisos (Web Push), 9 de octubre.** Cambia lo que estaba "sin decidir" (notificaciones push), a petición del usuario. Solo en la web instalada o abierta en el navegador (en Claude no hay avisos). En iPhone, solo con la app en la pantalla de inicio (iOS 16.4+).
+    - **Tres avisos, ninguno pregunta a Garmin:** cada mañana el semáforo del día (el cron de las 5:30 UTC, que ya existía); el domingo a las 17:00 UTC (19 h en verano, 18 h en invierno), si la semana que viene no tiene plan o no tiene menús. Cada uno se puede apagar.
+    - **Descartado:** el aviso de actividad nueva. Garmin no avisa a apps como esta y habría que preguntarle cada pocos minutos; el usuario no quiere gastar llamadas.
+    - **Cómo va:** push sin contenido firmado con VAPID (las claves las crea el conector la primera vez y se guardan en el KV); el aviso queda en `aviso:<id>` dos días y el service worker lo lee en `/avisos/<id>` (el id es el hash del endpoint). Solo se manda a servicios de push conocidos (Google, Mozilla, Apple, Microsoft). Herramientas `avisos` y `avisos_guardar`, solo para la app (Claude no las ve).
+    - **Instalar:** botón "Instalar myCoach" en Ajustes cuando Chrome lo ofrece; iconos PNG para Android e iPhone.
+
 ## 10. Próximos pasos concretos (2 semanas)
 1. Sacar `packages/domain` con carga TRIMP, semáforo y tests.
 2. Documento `atleta/perfil` más registro de decisiones.

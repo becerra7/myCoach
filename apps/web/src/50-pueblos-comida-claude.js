@@ -405,6 +405,8 @@ function renderOnboarding() {
 }
 // Pantallas del rediseño v1 (63-67). Las de la versión anterior que sigan haciendo falta se usan desde ellas.
 const TABSCR = { hoy: () => tabHoyV1(), plan: () => tabPlanV1(), comer: () => tabComerV1(), progreso: () => tabProgresoV1(), pueblos: () => tabPueblosV1() };
+{ const ir = new URLSearchParams(location.search).get('ir'); // los avisos abren su pestaña: /?ir=plan
+  if (['hoy', 'plan', 'comer', 'progreso', 'pueblos'].includes(ir)) { S.tab = ir; S.stack = []; history.replaceState(null, '', location.pathname); } }
 if (!['hoy', 'plan', 'comer', 'progreso', 'pueblos'].includes(S.tab)) S.tab = S.tab === 'forma' ? 'progreso' : 'hoy';
 const SCREENS = { entrenos: scrEntrenos, entreno: scrEntreno, actividad: scrActividad, objetivo: scrObjetivo, ajustes: scrAjustes, evo: scrEvo, numeros: scrNumeros };
 S.stack = (S.stack || []).filter(x => SCREENS[x.s]);

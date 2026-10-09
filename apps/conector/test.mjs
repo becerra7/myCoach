@@ -556,7 +556,7 @@ const rpc = async (env, token, message) => {
 	check("un navegador en la raiz sigue viendo la pagina", (await (await get(env, "/")).text()).includes("<h1>"));
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("tools/list devuelve 49 herramientas", list.body.result.tools.length === 49);
+	check("tools/list devuelve 51 herramientas", list.body.result.tools.length === 51);
 	check("app_guardar se anuncia como escritura", anot0(list).app_guardar.readOnlyHint === false);
 	{
 		const call = (name, args) => rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name, arguments: args } });
@@ -1266,7 +1266,7 @@ const rpc = async (env, token, message) => {
 	check("el token de acceso vale sin leer del KV", init.body.result?.serverInfo?.name === "garmin");
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("las herramientas se listan igualmente", list.body.result.tools.length === 49);
+	check("las herramientas se listan igualmente", list.body.result.tools.length === 51);
 
 	// Y el dato que si vive en KV avisa en vez de mentir
 	const call = await rpc(env, tokens.access_token, {
@@ -2097,12 +2097,12 @@ const rpc = async (env, token, message) => {
 	const env = makeEnv();
 	const { tokens } = await connect(env, "ana@x.com", "a");
 	const tools = (await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 30, method: "tools/list" })).body.result.tools;
-	const FAMILIAS = /^(agenda|garmin|coach|entrenos?|entreno|fuerza|cardio|comida|comidas|peso|medidas|intervals|app|mycoach)(_[a-z0-9]+)*$/;
+	const FAMILIAS = /^(agenda|garmin|coach|entrenos?|entreno|fuerza|cardio|comida|comidas|peso|medidas|avisos|intervals|app|mycoach)(_[a-z0-9]+)*$/;
 	check("convención: cada herramienta empieza por su familia", tools.every((t) => FAMILIAS.test(t.name)), tools.filter((t) => !FAMILIAS.test(t.name)).map((t) => t.name).join());
 	check("convención: todas con título, descripción y esquema de objeto", tools.every((t) => t.title && t.description?.length > 40 && t.inputSchema?.type === "object"));
 	check("convención: descripciones de menos de 1500 caracteres", tools.every((t) => t.description.length < 1500), tools.filter((t) => t.description.length >= 1500).map((t) => t.name).join());
 	const soloApp = tools.filter((t) => t._meta?.ui?.visibility?.join() === "app").map((t) => t.name).sort();
-	check("las de la app no se le enseñan al modelo (visibility app)", soloApp.join() === "agenda_calendario,app_guardar,fuerza_dia,intervals_conectar,intervals_desconectar", soloApp.join());
+	check("las de la app no se le enseñan al modelo (visibility app)", soloApp.join() === "agenda_calendario,app_guardar,avisos,avisos_guardar,fuerza_dia,intervals_conectar,intervals_desconectar", soloApp.join());
 	check("la app sigue pudiendo llamarlas", !(await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 31, method: "tools/call", params: { name: "app_guardar", arguments: { doc: "notas", datos: [] } } })).body.result.isError);
 	const viejas = ["garmin_sleep", "garmin_hrv", "garmin_daily_summary", "garmin_body_battery", "garmin_training_readiness", "garmin_course_detail", "fuerza_entrenos", "cardio_entrenos", "fuerza_enviar_garmin", "cardio_enviar_garmin"];
 	check("las herramientas juntadas ya no existen", !tools.some((t) => viejas.includes(t.name)));
@@ -2702,6 +2702,55 @@ const rpc = async (env, token, message) => {
 	await llamar(ana, "medidas_registrar", { fecha: "2026-10-01", brazo_derecho_cm: null, confirm: true });
 	check("medidas: null borra esa medida", (await llamar(ana, "medidas", {})).registros.find((r) => r.fecha === "2026-10-01").brazo_derecho_cm === undefined);
 	check("medidas: cada uno ve las suyas", (await llamar(bob, "medidas", {})).registros.length === 0);
+}
+
+// ── 21. Avisos (Web Push): suscripción, firma VAPID, aviso pendiente y domingo sin plan ──
+{
+	mockGarmin({ "ana@x.com": { password: "a", data: { displayName: "ana", hrv: 50 } } });
+	const env = makeEnv();
+	const ana = (await connect(env, "ana@x.com", "a")).tokens.access_token;
+	const llamar = async (name, args = {}) => {
+		const res = (await rpc(env, ana, { jsonrpc: "2.0", id: 70, method: "tools/call", params: { name, arguments: args } })).body.result;
+		return res.isError ? { error: res.content[0].text } : JSON.parse(res.content[0].text);
+	};
+	const garmin = globalThis.fetch, pushes = [];
+	let respuestaPush = 201;
+	globalThis.fetch = async (url, init = {}) => {
+		if (String(url).startsWith("https://fcm.googleapis.com/")) { pushes.push({ url: String(url), init }); return new Response("", { status: respuestaPush }); }
+		return garmin(url, init);
+	};
+	const cfg = await llamar("avisos");
+	check("avisos: clave pública VAPID de 65 bytes", cfg.clave_publica && Buffer.from(cfg.clave_publica, "base64url").length === 65, cfg.clave_publica);
+	check("avisos: la clave es siempre la misma", (await llamar("avisos")).clave_publica === cfg.clave_publica);
+	check("avisos: todos los tipos activados por defecto", cfg.prefs.semaforo && cfg.prefs.plan && cfg.prefs.menus);
+	check("avisos: no manda a un servidor cualquiera", /conocido/.test((await llamar("avisos_guardar", { suscripcion: { endpoint: "https://evil.example/x" } })).error || ""));
+	const EP = "https://fcm.googleapis.com/fcm/send/abc123";
+	const alta = await llamar("avisos_guardar", { suscripcion: { endpoint: EP }, prueba: true });
+	check("avisos: alta y aviso de prueba", alta.dispositivos === 1 && alta.prueba?.enviados === 1 && pushes.length === 1);
+	const auth = pushes[0]?.init.headers.Authorization || "";
+	const [, jwt, k] = auth.match(/^vapid t=([^,]+), k=(.+)$/) || [];
+	const [h64, p64, f64] = (jwt || "..").split(".");
+	const pub = await crypto.subtle.importKey("raw", Buffer.from(k || "", "base64url"), { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]);
+	check("avisos: la firma VAPID (ES256) es válida", await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, pub, Buffer.from(f64 || "", "base64url"), new TextEncoder().encode(`${h64}.${p64}`)));
+	check("avisos: el JWT va para el servicio de push", JSON.parse(Buffer.from(p64 || "e30", "base64url")).aud === "https://fcm.googleapis.com");
+	const id = (await llamar("avisos")).ids[0];
+	const pend = await (await get(env, `/avisos/${id}`)).json();
+	check("avisos: el service worker lee el aviso pendiente", pend?.tipo === "prueba" && /avisos/.test(pend.texto));
+	check("avisos: un id inventado no da nada", (await get(env, "/avisos/" + "0".repeat(32))).status === 404);
+	await llamar("avisos_guardar", { prefs: { menus: false } });
+	check("avisos: se pueden quitar tipos", (await llamar("avisos")).prefs.menus === false);
+	// Domingo por la tarde: sin plan para la semana que viene → aviso de plan; los menús están desactivados.
+	pushes.length = 0;
+	const esperas = [];
+	await worker.scheduled({ cron: "0 17 * * 0" }, env, { waitUntil: (p) => esperas.push(p) });
+	await Promise.all(esperas);
+	const tras = await (await get(env, `/avisos/${id}`)).json();
+	check("avisos: el domingo avisa de la semana sin plan", pushes.length === 1 && tras?.tipo === "plan", JSON.stringify(tras));
+	// Si el navegador dice que la suscripción ya no vale (410), se olvida.
+	respuestaPush = 410;
+	await llamar("avisos_guardar", { prueba: true });
+	check("avisos: una suscripción caducada se borra", (await llamar("avisos")).dispositivos === 0);
+	globalThis.fetch = garmin;
 }
 
 // ── Plan compartido con myLuv: permiso reducido plan:leer ──

@@ -45,7 +45,8 @@ Lo que no tienen Garmin Connect ni otras apps, todo a la vez:
 - Todo lo que cambia algo se enseña antes (antes → después) y se puede deshacer. Nada de `prompt()`, `alert()` ni `confirm()`.
 - Castellano de España, tuteando, frases cortas; los botones dicen lo que pasa.
 - Un único HTML por destino (web, Claude); sin framework. Tokens de color, radio y tipografía en `apps/web/src/app.css`.
-- Sin decidir: suscripción para quien no tenga Claude; notificaciones push; enlaces a contenido que explique las métricas.
+- Avisos push en la web: el semáforo de la mañana y, el domingo, semana sin plan o sin menús (ver la decisión 23 de `docs/PLAN-COACH.md`).
+- Sin decidir: suscripción para quien no tenga Claude; enlaces a contenido que explique las métricas.
 
 ## Brand Commitments
 
