@@ -841,7 +841,10 @@ function porTerreno(puntos) {
 			}
 			if (tipo) {
 				const fcs = p.slice(a, i + 1).map((x) => x.fc).filter(Boolean);
-				acc[tipo].push({ m: largo, s: seg, gan: p[i].es - p[a].es, fc: fcs.length ? MEDIA(fcs) : null });
+				// abs: lo que sube y baja dentro del tramo (cada 100 m), para la pendiente media del llano y del ondulado.
+				let abs = 0;
+				for (let j = a + 1, k = a; j <= i; j++) if (p[j].d - p[k].d >= 100 || j === i) { abs += Math.abs(p[j].es - p[k].es); k = j; }
+				acc[tipo].push({ m: largo, s: seg, gan: p[i].es - p[a].es, abs, fc: fcs.length ? MEDIA(fcs) : null });
 			}
 		}
 		a = i;
@@ -854,26 +857,33 @@ function porTerreno(puntos) {
 		const sFc = conFc.reduce((q, x) => q + x.s, 0);
 		const fc = sFc ? conFc.reduce((q, x) => q + x.fc * x.s, 0) / sFc : null;
 		const kmh = (m / s) * 3.6;
-		return { km: round(m / 1000, 1), minutos: round(s / 60, 1), vel_media_kmh: round(kmh, 1), fc_media: fc ? Math.round(fc) : null, _gan: ts.reduce((q, x) => q + x.gan, 0), _m: m, _s: s };
+		return { km: round(m / 1000, 1), minutos: round(s / 60, 1), vel_media_kmh: round(kmh, 1), fc_media: fc ? Math.round(fc) : null, _gan: ts.reduce((q, x) => q + x.gan, 0), _abs: ts.reduce((q, x) => q + x.abs, 0), _m: m, _s: s };
 	};
+	// Todas las filas traen lo mismo: km, minutos, velocidad, pulso y pendiente. En llano y ondulado la
+	// pendiente es la media sin signo (lo que sube y baja); en subida y bajada, la neta.
+	const porLatido = (x) => (x.fc_media ? round((x._m / (x._s / 60)) / x.fc_media, 2) : null);
 	const llano = resumir(acc.llano, 2);
 	const subida = resumir(acc.subida, 1);
 	const bajada = resumir(acc.bajada, 1);
 	const ondulado = resumir(acc.ondulado, 0.5);
-	const limpio = ({ _gan, _m, _s, ...x }) => x;
+	const limpio = ({ _gan, _abs, _m, _s, ...x }) => x;
 	return {
 		llano: llano && {
 			...limpio(llano),
-			// Metros recorridos por cada latido: la eficiencia sin potenciómetro.
-			metros_por_latido: llano.fc_media ? round((llano._m / (llano._s / 60)) / llano.fc_media, 2) : null,
+			pendiente_media_pct: round((llano._abs / llano._m) * 100, 1),
+			// Metros recorridos por cada latido: la eficiencia sin potenciómetro (vale en llano, donde manda el aire).
+			metros_por_latido: porLatido(llano),
 		},
 		subida: subida && (() => {
 			const pend = (subida._gan / subida._m) * 100;
 			const vam = subida._gan / (subida._s / 3600);
-			return { ...limpio(subida), pendiente_pct: round(pend, 1), vam_m_h: Math.round(vam), w_kg_estimado: round(vam / (200 + 10 * pend), 2) };
+			// En subida manda la gravedad: lo que compara es el desnivel por latido, no la distancia.
+			return { ...limpio(subida), pendiente_pct: round(pend, 1), vam_m_h: Math.round(vam), w_kg_estimado: round(vam / (200 + 10 * pend), 2),
+				desnivel_por_100_latidos_m: subida.fc_media ? round((vam / 60 / subida.fc_media) * 100, 1) : null };
 		})(),
-		bajada: bajada && { ...limpio(bajada), fc_media: undefined, pendiente_pct: round((bajada._gan / bajada._m) * 100, 1) },
-		ondulado: ondulado && limpio(ondulado),
+		// En bajada el pulso dice cuánto recuperas, no tu forma.
+		bajada: bajada && { ...limpio(bajada), pendiente_pct: round((bajada._gan / bajada._m) * 100, 1) },
+		ondulado: ondulado && { ...limpio(ondulado), pendiente_media_pct: round((ondulado._abs / ondulado._m) * 100, 1), metros_por_latido: porLatido(ondulado) },
 		ajustado_pendiente: gap.m >= 2000 && gap.s > 0 ? (() => {
 			const fc = gap.sfc ? gap.fcs / gap.sfc : null;
 			return { km_equivalentes: round(gap.m / 1000, 1), minutos: round(gap.s / 60, 1), vel_equivalente_kmh: round((gap.m / gap.s) * 3.6, 1), fc_media: fc ? Math.round(fc) : null, metros_por_latido: fc ? round((gap.m / (gap.s / 60)) / fc, 2) : null };
@@ -909,6 +919,42 @@ function vamSostenida(puntos, minutos) {
 	return mejor != null ? Math.round(mejor) : null;
 }
 
+/**
+ * Pendiente máxima sostenida en 200 m (altitud suavizada), subiendo y bajando. Con menos distancia
+ * el barómetro inventa rampas; 200 m es lo que se nota en las piernas.
+ */
+function pendienteMaxima(puntos, ventanaM = 200) {
+	const e = suavizarAltitud(puntos);
+	const p = puntos.map((x, i) => ({ d: x.d, t: x.t, es: e[i] })).filter((x) => x.es != null);
+	let sube = null, baja = null, ini = 0;
+	for (let i = 1; i < p.length; i++) {
+		while (ini < i && p[i].d - p[ini + 1].d >= ventanaM) ini++;
+		const largo = p[i].d - p[ini].d;
+		if (largo < ventanaM || largo > ventanaM * 1.5) continue;
+		if (p[i].t != null && p[ini].t != null && p[i].t > p[ini].t && largo / (p[i].t - p[ini].t) > 40) continue; // salto del GPS
+		const g = ((p[i].es - p[ini].es) / largo) * 100;
+		if (sube == null || g > sube) sube = g;
+		if (baja == null || g < baja) baja = g;
+	}
+	return { subiendo: sube != null && sube > 0 ? round(sube, 1) : null, bajando: baja != null && baja < 0 ? round(baja, 1) : null };
+}
+
+/** Perfil de la salida para dibujarlo: n puntos [km, altitud suavizada, pulso medio del trozo]. */
+function perfilAltitud(puntos, n = 60) {
+	const e = suavizarAltitud(puntos);
+	const p = puntos.map((x, i) => ({ d: x.d, es: e[i], fc: x.fc })).filter((x) => x.es != null);
+	if (p.length < n || !p.at(-1).d) return null;
+	const total = p.at(-1).d, out = [];
+	let j = 0;
+	for (let k = 1; k <= n; k++) {
+		const hasta = (total * k) / n, fcs = [];
+		let ult = p[j];
+		while (j < p.length && p[j].d <= hasta) { if (p[j].fc) fcs.push(p[j].fc); ult = p[j]; j++; }
+		out.push([round(hasta / 1000, 2), Math.round(ult.es), fcs.length ? Math.round(MEDIA(fcs)) : null]);
+	}
+	return out;
+}
+
 function analizarActividad(details) {
 	const puntos = seriesDeActividad(details);
 	if (puntos.length < 10) return { muestras: puntos.length, nota: "Sin series suficientes." };
@@ -922,7 +968,9 @@ function analizarActividad(details) {
 		vam_sostenida_mh: { min10: vamSostenida(puntos, 10), min20: vamSostenida(puntos, 20), min60: vamSostenida(puntos, 60) },
 		histograma_fc_min: histogramaFc(puntos),
 		fc_max_sostenida: { min5: fcMaxSostenida(puntos, 5), min20: fcMaxSostenida(puntos, 20), min60: fcMaxSostenida(puntos, 60) },
-		nota: "por_terreno suma toda la salida en tramos de 500 m (llano < 1,5 %, subida ≥ 3 %, bajada ≤ −3 %, ondulado lo de en medio). W/kg estimado con la fórmula de Ferrari (VAM / (200 + 10 · pendiente)): orientativo, sin potenciómetro.",
+		pendiente_max_pct: pendienteMaxima(puntos),
+		perfil_altitud: perfilAltitud(puntos),
+		nota: "por_terreno suma toda la salida en tramos de 500 m (llano < 1,5 %, subida ≥ 3 %, bajada ≤ −3 %, ondulado lo de en medio); en llano y ondulado la pendiente es la media sin signo. W/kg estimado con la fórmula de Ferrari (VAM / (200 + 10 · pendiente)): orientativo, sin potenciómetro. pendiente_max_pct: la más fuerte en 200 m. perfil_altitud: [km, altitud, pulso].",
 	};
 }
 
@@ -1735,6 +1783,8 @@ const TOOLS = {
 					fc: a.averageHR ?? null,
 					te: a.trainingEffectLabel ?? null,
 					cg: a.activityTrainingLoad != null ? Math.round(a.activityTrainingLoad) : null,
+					desn: a.elevationGain != null ? Math.round(a.elevationGain) : null,
+					vmax: kmh(a.maxSpeed),
 					n: a.activityName,
 				}));
 			return list.map((a) => ({
@@ -1744,6 +1794,8 @@ const TOOLS = {
 				start: a.startTimeLocal,
 				duration_min: round((a.duration ?? 0) / 60, 1),
 				distance_km: round((a.distance ?? 0) / 1000),
+				elevation_gain_m: a.elevationGain != null ? Math.round(a.elevationGain) : null,
+				max_speed_kmh: kmh(a.maxSpeed),
 				calories: a.calories ?? null,
 				avg_hr: a.averageHR ?? null,
 				max_hr: a.maxHR ?? null,
@@ -1763,7 +1815,7 @@ const TOOLS = {
 			"desnivel, velocidad vertical, dinamicas de carrera, temperatura, efecto de entrenamiento y stamina de Garmin cuando " +
 			"existan. 'series' resume cada grafica (min, media, max, inicio, final) y 'perfil' da sus valores a lo largo de la " +
 			"actividad (24 tramos): uselo para contestar sobre graficas (stamina, pulso, potencia...) en vez de pedir capturas. " +
-			"'analisis.por_terreno' da velocidad y pulso en llano, subida y bajada de toda la salida, por_pendiente, la velocidad según el desnivel, y ajustado_pendiente, el ritmo equivalente en llano (carrera); 'analisis.vam_sostenida_mh', la mejor VAM de 10, 20 y 60 min.",
+			"'analisis.por_terreno' da velocidad y pulso en llano, subida y bajada de toda la salida, por_pendiente, la velocidad según el desnivel, y ajustado_pendiente, el ritmo equivalente en llano (carrera); 'analisis.vam_sostenida_mh', la mejor VAM de 10, 20 y 60 min; 'analisis.subidas', todas las subidas; 'analisis.pendiente_max_pct', la rampa más dura en 200 m; 'analisis.perfil_altitud', [km, altitud, pulso].",
 		schema: {
 			type: "object",
 			properties: { activity_id: { type: "string", description: "El activity_id devuelto por garmin_activities." } },

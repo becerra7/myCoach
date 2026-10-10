@@ -52,16 +52,22 @@ function scrActividad(scr) {
   detalleAlAbrir(a); const pidiendo = DET_PIDIENDO.has(a.id);
   const s = sesion(a.f); const plan = s && s.a && s.a.id === a.id && s.t !== 'descanso' ? s : null;
   const cifra = (v, u, l) => `<div class="field"><span class="l">${l}</span><span class="v">${v}${u ? ` <small>${u}</small>` : ''}</span></div>`;
-  const cifras = [a.km && cardio ? cifra(nf(a.km), 'km', 'Distancia') : '', cifra(dur(a.min), '', 'Tiempo'), a.desn ? cifra(a.desn, 'm', 'Desnivel') : '', a.fc ? cifra(a.fc, 'ppm', 'Pulso medio') : '', a.cg ? cifra(a.cg, '', 'Carga (Garmin)') : ''].join('');
+  // En movimiento y parado por separado (una salida con café no es más lenta); la velocidad media es la de movimiento.
+  const mov = a.mov && a.mov <= a.min + 1 ? a.mov : a.min, vm = a.km && mov ? a.km / (mov / 60) : null, corre = a.dep === 'correr';
+  const cifras = [a.km && cardio ? cifra(nf(a.km), 'km', 'Distancia') : '', cifra(dur(Math.round(mov)), '', a.mov ? 'En movimiento' : 'Tiempo'), a.parado >= 2 ? cifra(dur(a.parado), '', 'Parado') : '',
+    a.desn ? cifra(nf(a.desn, 0), 'm', 'Desnivel') : '', vm && cardio ? cifra(corre ? ritmoC(vm) : nf(vm, 1), corre ? 'min/km' : 'km/h', corre ? 'Ritmo medio' : 'Velocidad media') : '',
+    a.vmax && cardio ? cifra(corre ? ritmoC(a.vmax) : nf(a.vmax, 1), corre ? 'min/km' : 'km/h', corre ? 'Ritmo máximo' : 'Velocidad máxima') : '',
+    a.fc ? cifra(a.fc, 'ppm', 'Pulso medio') : '', a.cg ? cifra(a.cg, '', 'Carga (Garmin)') : ''].join('');
   // Plan frente a lo hecho, en una línea: el color acompaña al texto, nunca va solo.
   const cumple = plan && (!cardio || plan.t === 'otros' || plan.t === k || S.overrides[a.id]);
   const vsPlan = plan ? `<p class="act-plan ${cumple ? 'ok' : 'dev'}">${ic(cumple ? 'check' : 'info', 16)}<span>${cumple ? 'Lo que tocaba' : 'Distinto del plan'}: ${esc(plan.d)}</span></p>` : '';
   const semana = cardio ? `<section class="card" aria-labelledby="act-sem"><div class="act-h"><h2 class="card-t" id="act-sem">Cómo cuenta en tu semana</h2>${chip(k)}</div>
       ${vsPlan}
       ${a.z ? distBar(a.z) + `<div class="row xs"><span class="grow">Suave ${a.z[0]} min</span><span class="grow">Medio ${a.z[1]} min</span><span>Duro ${a.z[2]} min</span></div>` : ''}
+      ${a.ef ? `<p class="small">Efecto según Garmin: aeróbico ${nf(a.ef[0], 1)} y anaeróbico ${a.ef[1] != null ? nf(a.ef[1], 1) : '—'} (de 5)${a.ef[2] && EFECTO_TXT[a.ef[2]] ? ` · ${EFECTO_TXT[a.ef[2]]}` : ''}.</p>` : ''}
       <div class="row" style="justify-content:space-between"><span class="xs">${S.overrides[a.id] ? 'Corregido por ti' : a.analizada ? 'Por tus minutos de pulso' : 'Según Garmin'}</span><button class="btn text" type="button" data-a="fix-type" data-v="${a.id}" style="white-space:nowrap">Corregir</button></div></section>` : '';
-  // Con el análisis por terreno, el llano ya sale en su tabla: aquí solo la subida principal (un dato, un sitio).
-  const mejor = [
+  // Sin el detalle nuevo (perfil y subidas), lo de antes: el llano y la subida principal. Con él, salen en sus tarjetas (un dato, un sitio).
+  const mejor = a.perfil || (a.subs && a.subs.length) ? '' : [
     a.llano && !a.ter ? `<li><b>${nf(a.llano.kmh)} km/h en llano</b><span>${nf(a.llano.km)} km a ${a.llano.fc} ppm</span></li>` : '',
     a.sub && !a.sub.remonte ? `<li><b>Subida de ${a.sub.desn} m en ${dur(a.sub.min)}</b><span>${nf(a.sub.km)} km a ${a.sub.fc} ppm · ${a.sub.vam} m/h${a.sub.wkg ? ` · ≈${nf(a.sub.wkg, 1)} W/kg estimado` : ''}</span></li>` : '',
   ].join('');
@@ -69,7 +75,7 @@ function scrActividad(scr) {
   return { title: a.lugar, html: head(a.lugar, `${cap1(fLarga(a.f))} · ${SPORTS[a.dep].n}${a.sim ? ' · ' + simTag() : ''}`) + `<div class="content" style="max-width:760px">
     <div class="card"><div class="fields">${cifras}</div>${cardio ? '' : vsPlan}</div>
     ${pidiendo ? '<p class="small muted" role="status">Leyendo el detalle de Garmin (zonas, llano, subidas y mapa)…</p>' : ''}
-    ${semana}${fuerza}${cardio ? actEntrenador(a) + actTerreno(a) + actEsfuerzos(a) : ''}
+    ${semana}${fuerza}${cardio ? actEntrenador(a) + actPerfil(a) + actTerreno(a) + actEsfuerzos(a) : ''}
     ${mejor ? `<section class="card" aria-labelledby="act-mejor"><h2 class="card-t" id="act-mejor" style="margin:0">Lo mejor de la salida</h2><ul class="act-mejor">${mejor}</ul></section>` : ''}
     ${(DSET.rutas || {})[a.id] ? `<div class="trackmap">${trackSvg(a.id)}</div>` : ''}
     ${a.nuevos.length ? `<section class="card" aria-labelledby="act-pue"><h2 class="card-t" id="act-pue" style="margin:0">${a.nuevos.length} pueblo${a.nuevos.length === 1 ? '' : 's'} nuevo${a.nuevos.length === 1 ? '' : 's'}</h2><div class="towns">${a.nuevos.map(n => `<span class="town new">${esc(n)}</span>`).join('')}</div></section>` : ''}</div>` };
@@ -107,8 +113,50 @@ function actTerreno(a) {
       ...(ref.length >= 2 ? [{ color: 'var(--ink-2)', dash: true, pts: ref.map(([p, x]) => [p, yv(v(x)), `${pc(p)}, tu media: ${txtV(v(x))}`]) }] : [])],
       fmtY: a.dep === 'correr' ? fmtRitmoSeg : v => nf(v, 0), pasoY: a.dep === 'correr' ? 'ritmo' : null, u: a.dep === 'correr' ? 'min/km' : 'km/h', aria: `${V.n} según la pendiente en esta actividad${ref.length >= 2 ? ', frente a tu media de los 3 meses anteriores' : ''}` })}</div>
     <div class="leyenda"><span><i class="ln" style="border-top:2.5px solid ${col}"></i>Esta ${a.dep === 'bici' ? 'salida' : 'actividad'}</span>${ref.length >= 2 ? '<span><i class="ln" style="border-top:2px dashed var(--ink-2)"></i>Tu media (3 meses)</span>' : ''}</div>` : '';
+  // Pulso según la pendiente: a igual pendiente, menos pulso que tu media es que vas mejor (sin potenciómetro, la cifra más honesta).
+  const pf = [...A.entries()].filter(([, x]) => x.km >= 0.5 && x.fcmin).sort((p, q) => p[0] - q[0]);
+  const rf = [...B.entries()].filter(([p, x]) => x.km >= 1 && x.fcmin && A.has(p)).sort((p, q) => p[0] - q[0]);
+  const fcDe = x => x.fcm / x.fcmin;
+  const curvaFc = pf.length >= 3 ? `<h3 class="met-h" style="margin-top:16px">Pulso según la pendiente</h3>
+    <div class="viz">${vCurvas({ series: [{ color: col, pts: pf.map(([p, x]) => [p, fcDe(x), `${pc(p)}: ${nf(fcDe(x), 0)} ppm en ${nf(x.km, 1)} km${B.get(p) && B.get(p).km >= 1 && B.get(p).fcmin ? ` (tu media ${nf(fcDe(B.get(p)), 0)})` : ''}`]) },
+      ...(rf.length >= 2 ? [{ color: 'var(--ink-2)', dash: true, pts: rf.map(([p, x]) => [p, fcDe(x), `${pc(p)}, tu media: ${nf(fcDe(x), 0)} ppm`]) }] : [])],
+      u: 'ppm', aria: `Pulso según la pendiente en esta actividad${rf.length >= 2 ? ', frente a tu media de los 3 meses anteriores' : ''}` })}</div>
+    <div class="leyenda"><span><i class="ln" style="border-top:2.5px solid ${col}"></i>Esta ${a.dep === 'bici' ? 'salida' : 'actividad'}</span>${rf.length >= 2 ? '<span><i class="ln" style="border-top:2px dashed var(--ink-2)"></i>Tu media (3 meses)</span>' : ''}</div>
+    <p class="xs muted">A igual pendiente, menos pulso que tu media es que vas mejor; el calor y el cansancio lo suben.</p>` : '';
   return `<section class="card" aria-labelledby="act-ter"><div class="act-h"><h2 class="card-t" id="act-ter">Por terreno</h2>${info(`act-ter-${a.id}`, 'Por terreno', `La actividad entera, en tramos de 500 m: llano por debajo del 1,5 % de pendiente, ondulado entre el 1,5 y el 3 %, subida desde el 3 % y bajada desde el −3 %. "Tu media" son tus ${SPORTS[a.dep].n.toLowerCase()} de los 3 meses anteriores. El desnivel sale del barómetro suavizado, así que puede quedar algo por debajo del que da Garmin.`)}</div>
-    ${barra}${tablaTerreno(a.dep, T, R)}${curva}</section>`;
+    ${barra}${tablaTerreno(a.dep, T, R)}${curvaFc}${curva}</section>`;
+}
+/* Perfil de la salida: la altitud con las subidas marcadas y numeradas y, debajo, el pulso con el mismo eje de km.
+   Dos gráficas alineadas en vez de una con dos ejes: se lee qué pasó en cada subida sin confundir escalas. */
+const EFECTO_TXT = { RECOVERY: 'recuperación', AEROBIC_BASE: 'base aeróbica', TEMPO: 'tempo', LACTATE_THRESHOLD: 'umbral', VO2MAX: 'VO2máx', ANAEROBIC_CAPACITY: 'anaeróbico', SPEED: 'velocidad' };
+function actPerfil(a) {
+  const P = a.perfil, subs = (a.subs || []).filter(x => x.desn && x.min).sort((x, y) => x.k0 - y.k0);
+  if (!P && !subs.length) return '';
+  const col = scol(a.dep), corre = a.dep === 'correr';
+  let svg = '';
+  if (P && P.length > 5) {
+    const pad = { t: 18, r: 10, b: 22, l: 38 }, h1 = 150, h2 = 80, W = VW - pad.l - pad.r, kmT = P[P.length - 1][0] || 1;
+    const X = k => pad.l + k / kmT * W, alts = P.map(p => p[1]), [a0, a1] = rango(alts, .08), Ya = v => pad.t + (1 - (v - a0) / (a1 - a0)) * (h1 - pad.t - pad.b);
+    const area = `M${X(0)},${h1 - pad.b} ${P.map(p => `L${X(p[0]).toFixed(1)},${Ya(p[1]).toFixed(1)}`).join(' ')} L${X(kmT)},${h1 - pad.b}Z`;
+    const alt = x => { let best = P[0]; for (const p of P) if (Math.abs(p[0] - x) < Math.abs(best[0] - x)) best = p; return best[1]; };
+    const marcas = subs.map((x, i) => { const xa = X(x.k0), xb = X(x.k0 + x.km), top = Math.min(Ya(alt(x.k0 + x.km)), Ya(alt(x.k0 + x.km / 2)));
+      return `<rect x="${xa.toFixed(1)}" y="${pad.t}" width="${Math.max(2, xb - xa).toFixed(1)}" height="${h1 - pad.b - pad.t}" fill="color-mix(in srgb,${col} 14%,transparent)"/>
+        <text class="lbl" x="${((xa + xb) / 2).toFixed(1)}" y="${Math.max(pad.t + 10, top - 6).toFixed(1)}" text-anchor="middle" style="font-weight:700">${i + 1}</text>`; }).join('');
+    const kt = vTicks(0, kmT, 4).filter(k => k >= 0 && k <= kmT), ejeX = (h) => kt.map(k => `<text x="${X(k)}" y="${h - 6}" text-anchor="middle">${nf(k, 0)}</text>`).join('');
+    const hit = P.map(p => `<g data-tip="km ${nf(p[0], 1)}: ${nf(p[1], 0)} m${p[2] ? `, ${p[2]} ppm` : ''}"><rect class="hit" x="${(X(p[0]) - W / P.length / 2).toFixed(1)}" y="${pad.t}" width="${(W / P.length).toFixed(1)}" height="${h1 - pad.b - pad.t}" fill="transparent"/></g>`).join('');
+    svg = `<div class="viz"><svg class="chart2" viewBox="0 0 ${VW} ${h1}" role="img" aria-label="Perfil de altitud de ${nf(kmT, 0)} km, de ${nf(Math.min(...alts), 0)} a ${nf(Math.max(...alts), 0)} m${subs.length ? `, con ${subs.length} subida${subs.length === 1 ? '' : 's'} marcada${subs.length === 1 ? '' : 's'}` : ''}">${vUnidad('m', pad)}${vEjeY(a0, a1, vTicks(a0, a1, 3).filter(t => t >= a0 && t <= a1), h1, pad, v => nf(v, 0))}
+      <path d="${area}" fill="color-mix(in srgb,${col} 30%,var(--paper))" stroke="${col}" stroke-width="1.5"/>${marcas}${ejeX(h1)}${hit}</svg></div>`;
+    const fcs = P.filter(p => p[2]);
+    if (fcs.length > 5) {
+      const [f0, f1] = rango(fcs.map(p => p[2]), .1), Yf = v => pad.t + (1 - (v - f0) / (f1 - f0)) * (h2 - pad.t - pad.b);
+      svg += `<div class="viz"><svg class="chart2" viewBox="0 0 ${VW} ${h2}" role="img" aria-label="Pulso a lo largo de la salida, de ${Math.min(...fcs.map(p => p[2]))} a ${Math.max(...fcs.map(p => p[2]))} ppm de media por tramo">${vUnidad('ppm', pad)}${vEjeY(f0, f1, vTicks(f0, f1, 2).filter(t => t >= f0 && t <= f1), h2, pad, v => nf(v, 0))}
+        <polyline points="${fcs.map(p => `${X(p[0]).toFixed(1)},${Yf(p[2]).toFixed(1)}`).join(' ')}" fill="none" stroke="var(--int)" stroke-width="2" stroke-linejoin="round"/>${ejeX(h2)}</svg></div><p class="xs muted" style="text-align:center;margin-top:2px">Kilómetros</p>`;
+    }
+  }
+  // Las subidas por orden de paso, con el mismo número que en el perfil. La de mejor VAM se marca con texto, no solo con color.
+  const mejorVam = subs.length > 1 ? subs.reduce((m, x) => x.vam > m.vam ? x : m, subs[0]) : null;
+  const lista = subs.length ? `<h3 class="met-h" style="margin-top:${svg ? 16 : 0}px">${subs.length === 1 ? 'La subida' : `Las ${subs.length} subidas`}</h3><ol class="subs">${subs.map((x, i) => `<li><span class="subs-n" aria-hidden="true">${i + 1}</span><div class="grow"><b>${nf(x.km, 1)} km al ${nf(x.pend, 1)} % · ${nf(x.desn, 0)} m</b><span class="small muted">Desde el km ${nf(x.k0, 0)} · ${dur(Math.round(x.min))}${x.fc ? ` · ${x.fc} ppm` : ''}</span></div><div class="subs-v"><b>${nf(x.vam, 0)} <small>m/h</small></b>${x.wkg ? `<span class="xs muted">≈${nf(x.wkg, 1)} W/kg</span>` : ''}${x === mejorVam ? '<span class="cmp-mejor">↑ mejor VAM</span>' : ''}</div></li>`).join('')}</ol>` : '';
+  return `<section class="card" aria-labelledby="act-pf"><div class="act-h"><h2 class="card-t" id="act-pf">${P ? 'Perfil y subidas' : 'Subidas'}</h2>${info(`act-pf-${a.id}`, 'Perfil y subidas', `Cuenta como subida lo que gana al menos 50 m al 3 % o más durante 800 m o más${corre ? '' : ', con bajadas de menos de 15 m dentro'}. La VAM son los metros de desnivel por hora: es la cifra con la que se comparan subidas sin potenciómetro. ${a.dep === 'bici' ? 'Los W/kg salen de la física de la subida y tu peso: son una estimación. ' : ''}El perfil sale del barómetro suavizado.`)}</div>${svg}${lista}</section>`;
 }
 function actEsfuerzos(a) {
   const f = [];
@@ -117,8 +165,10 @@ function actEsfuerzos(a) {
   if (a.fs && a.fs.some(Boolean)) campo('Mejor pulso sostenido', [a.fs[0], a.fs[1], a.fs[2]].map(x => x || '—').join(' · '), 'ppm', '5, 20 y 60 min');
   if (a.dc != null && a.min >= 60 && ['rec', 'fondo'].includes(tipoAct(a))) campo('Desacople', `${a.dc > 0 ? '+' : ''}${nf(a.dc, 1)}`, '%', Math.abs(a.dc) < 5 ? 'Aguantaste el ritmo' : a.dc >= 5 ? 'El pulso subió al final' : 'Acabaste más suelto');
   if (a.st && a.st[1] != null) campo('Stamina', `${a.st[0]} → ${a.st[1]}`, '%', a.st[2] != null && a.st[2] < a.st[1] ? `Mínimo ${a.st[2]} %` : 'Al empezar y al acabar');
+  if (a.pmax && (a.pmax[0] || a.pmax[1])) campo('Pendiente máxima', [a.pmax[0] ? `+${nf(a.pmax[0], 0)}` : '', a.pmax[1] ? `−${nf(Math.abs(a.pmax[1]), 0)}` : ''].filter(Boolean).join(' · '), '%', 'Lo más fuerte en 200 m');
   if (a.tc != null) campo('Temperatura', nf(a.tc, 0), '°C', a.tc >= 25 ? 'Con calor el pulso sube' : '');
-  return f.length ? `<section class="card" aria-labelledby="act-esf"><div class="act-h"><h2 class="card-t" id="act-esf">Esfuerzos</h2>${info(`act-esf-${a.id}`, 'Esfuerzos', 'Mejor subida sostenida: los metros de desnivel por hora más altos que mantuviste 10, 20 y 60 minutos. Mejor pulso sostenido: el pulso medio más alto en 5, 20 y 60 minutos. El desacople (solo en fondos) es cuánto empeoró la relación entre velocidad y pulso de la primera mitad a la segunda en llano: por debajo del 5 %, bien. La stamina la estima Garmin.')}</div><div class="fields">${f.join('')}</div></section>` : '';
+  if (a.agua) campo('Agua perdida', nf(a.agua / 1000, 1), 'l', 'Estimación de Garmin');
+  return f.length ? `<section class="card" aria-labelledby="act-esf"><div class="act-h"><h2 class="card-t" id="act-esf">Esfuerzos</h2>${info(`act-esf-${a.id}`, 'Esfuerzos', 'Mejor subida sostenida: los metros de desnivel por hora más altos que mantuviste 10, 20 y 60 minutos. Mejor pulso sostenido: el pulso medio más alto en 5, 20 y 60 minutos. La pendiente máxima es la más fuerte sostenida 200 m (con menos, el barómetro inventa rampas). El agua perdida la estima Garmin por el sudor: sirve para saber cuánto beber. El desacople (solo en fondos) es cuánto empeoró la relación entre velocidad y pulso de la primera mitad a la segunda en llano: por debajo del 5 %, bien. La stamina la estima Garmin.')}</div><div class="fields">${f.join('')}</div></section>` : '';
 }
 /* ===== AJUSTES ===== */
 /* Ajustes, agrupados por lo que viene a hacer el usuario: conectar, su entrenador,

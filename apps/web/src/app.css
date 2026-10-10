@@ -1112,7 +1112,18 @@ button.hp-encaje{cursor:pointer;align-items:center;min-height:44px}
 }
 /* Tus números por terreno: una fila por terreno, sus cifras en columnas */
 .ter{display:flex;flex-direction:column;border-top:1px solid var(--rule)}
-.ter-f{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px 12px;padding:12px 0;border-bottom:1px solid var(--rule)}
+.ter-f{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px 12px;padding:12px 0;border-bottom:1px solid var(--rule)}
+@container app (max-width:520px){.ter-f{grid-template-columns:repeat(2,minmax(0,1fr));row-gap:10px}}
+.ter-vam{color:var(--ink);font-weight:700}
+.rec-v{flex:none;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+.rec-n{flex:none;width:26px;text-align:center;font-weight:700;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.subs{list-style:none;margin:0;padding:0;border-top:1px solid var(--rule)}
+.subs li{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--rule)}
+.subs li .grow{display:flex;flex-direction:column;gap:2px;min-width:0}
+.subs-n{flex:none;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:14px;background:var(--card-2);color:var(--ink)}
+.subs-v{display:flex;flex-direction:column;align-items:flex-end;text-align:right;flex:none}
+.subs-v b{font-size:20px;font-weight:700;font-stretch:80%;font-variant-numeric:tabular-nums;white-space:nowrap}
+.subs-v b small{font-size:12px;font-weight:600;font-stretch:100%;color:var(--ink-2)}
 .ter-n{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px}
 .ter-n b{font-size:17px;font-weight:700}
 .ter-n b i{font-style:normal;margin-right:6px;color:var(--ink-2)}
@@ -1138,7 +1149,7 @@ button.hp-encaje{cursor:pointer;align-items:center;min-height:44px}
 .tbar{display:flex;height:12px;border-radius:6px;overflow:hidden;gap:2px;margin-top:4px}
 .tbar span{display:block;min-width:2px}
 @container app (min-width:840px){
-  .ter-f{grid-template-columns:minmax(0,1.3fr) repeat(3,minmax(0,1fr));align-items:center}
+  .ter-f{grid-template-columns:minmax(0,1.4fr) repeat(4,minmax(0,1fr));align-items:center}
   .ter-n{grid-column:auto;flex-direction:column;align-items:flex-start;gap:2px}
 }
 /* Medidas: cada medida con su cifra y, debajo, su gráfica a todo el ancho (a media anchura no se leía) */

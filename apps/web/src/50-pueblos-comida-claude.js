@@ -218,7 +218,7 @@ async function sync(manual, live = !!LIVE && S.modo === 'vivo') {
   try {
     msg('Leyendo tu histórico…');
     const list = await call('garmin_activities', { limit: 300 }, manual || !ds.acts.length);
-    if (Array.isArray(list)) { const prev = new Set(ds.acts.map(a => String(a.id))); ds.acts = list.map(x => ({ id: String(x.id), t: x.t, d: x.d, km: x.km, min: x.min, fc: x.fc, te: x.te, cg: x.cg ?? null, n: x.n })); nuevas = ds.acts.filter(a => !prev.has(a.id)).length; }
+    if (Array.isArray(list)) { const prev = new Set(ds.acts.map(a => String(a.id))); ds.acts = list.map(x => ({ id: String(x.id), t: x.t, d: x.d, km: x.km, min: x.min, fc: x.fc, te: x.te, cg: x.cg ?? null, desn: x.desn ?? null, vmax: x.vmax ?? null, n: x.n })); nuevas = ds.acts.filter(a => !prev.has(a.id)).length; }
   } catch (e) { errs.push(e); }
   // Detalle (pulso, terreno, subidas, llano) del último año y del skimo; trazados para pueblos. Por tandas.
   // Un detalle de una versión anterior se vuelve a pedir: le faltan datos que Insights necesita.
@@ -252,13 +252,18 @@ function evoDeForma(fm, previa) {
 /** Lo que la app guarda del detalle de una actividad: pulso por zonas, desnivel, subida y llano principales,
    cómo fue en cada terreno (ter: llano, subida y bajada de toda la salida), desacople y pulso máximo sostenido.
    v marca la versión: si cambia lo que se guarda, la sincronización vuelve a pedir el detalle. */
-const DET_V = 4;
+const DET_V = 5;
 function detalleDe(r) {
-  const an = r.analisis || {}; const sb = (an.subidas || [])[0], t = an.por_terreno || {}, fs = an.fc_max_sostenida || {};
+  const an = r.analisis || {}; const sb = (an.subidas || [])[0], t = an.por_terreno || {}, fs = an.fc_max_sostenida || {}, m = r.metricas || {}, pm = an.pendiente_max_pct || {};
   return { v: DET_V, h: an.histograma_fc_min || null, desn: r.elevation_gain_m ?? null, sub: sb ? [sb.largo_km, sb.desnivel_m, sb.minutos, sb.fc_media] : null, llano: an.llano ? [an.llano.km, an.llano.vel_media_kmh, an.llano.fc_media] : null,
-    ter: { ll: t.llano ? [t.llano.km, t.llano.vel_media_kmh, t.llano.fc_media, t.llano.metros_por_latido] : null, su: t.subida ? [t.subida.km, t.subida.minutos, t.subida.vel_media_kmh, t.subida.fc_media, t.subida.pendiente_pct, t.subida.vam_m_h] : null, ba: t.bajada ? [t.bajada.km, t.bajada.vel_media_kmh, t.bajada.pendiente_pct] : null, on: t.ondulado ? [t.ondulado.km, t.ondulado.minutos, t.ondulado.vel_media_kmh, t.ondulado.fc_media] : null, pp: (t.por_pendiente || []).map(b => [b.pendiente_pct, b.km, b.minutos, b.fc_media]), gp: t.ajustado_pendiente ? [t.ajustado_pendiente.km_equivalentes, t.ajustado_pendiente.minutos, t.ajustado_pendiente.vel_equivalente_kmh, t.ajustado_pendiente.fc_media, t.ajustado_pendiente.metros_por_latido] : null },
-    st: r.metricas && r.metricas.stamina_potencial_inicio_pct != null ? [r.metricas.stamina_potencial_inicio_pct, r.metricas.stamina_potencial_final_pct ?? null, r.metricas.stamina_disponible_min_pct ?? null] : null,
-    vs: an.vam_sostenida_mh ? [an.vam_sostenida_mh.min10, an.vam_sostenida_mh.min20, an.vam_sostenida_mh.min60] : null, dc: an.desacople_pct ?? null, tc: r.metricas?.temperatura_media_c ?? null, fs: [fs.min5 ?? null, fs.min20 ?? null, fs.min60 ?? null] };
+    // Cada terreno con las mismas cifras: km, minutos, velocidad, pulso, pendiente (y lo propio de cada uno al final).
+    ter: { ll: t.llano ? [t.llano.km, t.llano.vel_media_kmh, t.llano.fc_media, t.llano.metros_por_latido, t.llano.minutos, t.llano.pendiente_media_pct ?? null] : null, su: t.subida ? [t.subida.km, t.subida.minutos, t.subida.vel_media_kmh, t.subida.fc_media, t.subida.pendiente_pct, t.subida.vam_m_h] : null, ba: t.bajada ? [t.bajada.km, t.bajada.vel_media_kmh, t.bajada.pendiente_pct, t.bajada.fc_media ?? null, t.bajada.minutos] : null, on: t.ondulado ? [t.ondulado.km, t.ondulado.minutos, t.ondulado.vel_media_kmh, t.ondulado.fc_media, t.ondulado.pendiente_media_pct ?? null] : null, pp: (t.por_pendiente || []).map(b => [b.pendiente_pct, b.km, b.minutos, b.fc_media]), gp: t.ajustado_pendiente ? [t.ajustado_pendiente.km_equivalentes, t.ajustado_pendiente.minutos, t.ajustado_pendiente.vel_equivalente_kmh, t.ajustado_pendiente.fc_media, t.ajustado_pendiente.metros_por_latido] : null },
+    sbs: (an.subidas || []).slice(0, 6).map(x => [x.km_inicio, x.largo_km, x.desnivel_m, x.pendiente_pct, x.minutos, x.fc_media]),
+    pf: an.perfil_altitud || null, pm: [pm.subiendo ?? null, pm.bajando ?? null],
+    vx: m.velocidad_max_kmh ?? null, mv: m.en_movimiento_min ?? null, tt: m.total_min ?? null,
+    ef: m.efecto_aerobico != null ? [m.efecto_aerobico, m.efecto_anaerobico ?? null, r.tipo_sesion_garmin || null] : null, ag: m.otros_campos_garmin?.waterEstimated ?? null,
+    st: m.stamina_potencial_inicio_pct != null ? [m.stamina_potencial_inicio_pct, m.stamina_potencial_final_pct ?? null, m.stamina_disponible_min_pct ?? null] : null,
+    vs: an.vam_sostenida_mh ? [an.vam_sostenida_mh.min10, an.vam_sostenida_mh.min20, an.vam_sostenida_mh.min60] : null, dc: an.desacople_pct ?? null, tc: m.temperatura_media_c ?? null, fs: [fs.min5 ?? null, fs.min20 ?? null, fs.min60 ?? null] };
 }
 
 /* Detalle a demanda: al abrir una actividad que este navegador aún no ha analizado (la sincronización
@@ -409,7 +414,7 @@ const TABSCR = { hoy: () => tabHoyV1(), plan: () => tabPlanV1(), comer: () => ta
 { const ir = new URLSearchParams(location.search).get('ir'); // los avisos abren su pestaña: /?ir=plan
   if (['hoy', 'plan', 'comer', 'progreso', 'pueblos'].includes(ir)) { S.tab = ir; S.stack = []; history.replaceState(null, '', location.pathname); } }
 if (!['hoy', 'plan', 'comer', 'progreso', 'pueblos'].includes(S.tab)) S.tab = S.tab === 'forma' ? 'progreso' : 'hoy';
-const SCREENS = { entrenos: scrEntrenos, entreno: scrEntreno, actividad: scrActividad, objetivo: scrObjetivo, ajustes: scrAjustes, evo: scrEvo, numeros: scrNumeros };
+const SCREENS = { entrenos: scrEntrenos, entreno: scrEntreno, actividad: scrActividad, objetivo: scrObjetivo, ajustes: scrAjustes, evo: scrEvo, numeros: scrNumeros, records: scrRecords };
 S.stack = (S.stack || []).filter(x => SCREENS[x.s]);
 
 /* ===== Panel de prototipo ===== */

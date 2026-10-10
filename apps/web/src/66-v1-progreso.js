@@ -73,7 +73,7 @@ const leyendaSerie = (col, media = true) => `<div class="leyenda"><span><i style
 
 /* ===== Velocidad según la pendiente: este periodo frente al anterior, a igual desnivel ===== */
 function sumaPendiente(as) {
-  const m = new Map(); for (const a of as) for (const [p, km, min] of (a.ter && a.ter.pp) || []) { const x = m.get(p) || { km: 0, min: 0 }; x.km += km; x.min += min; m.set(p, x); }
+  const m = new Map(); for (const a of as) for (const [p, km, min, fc] of (a.ter && a.ter.pp) || []) { const x = m.get(p) || { km: 0, min: 0, fcm: 0, fcmin: 0 }; x.km += km; x.min += min; if (fc) { x.fcm += fc * min; x.fcmin += min; } m.set(p, x); }
   return m;
 }
 /* La diferencia con el periodo anterior, a igual pendiente: en llano (−1 a +1 %) y en subida (+2 % o más),
@@ -97,42 +97,52 @@ function vCurvas({ series, h = 200, fmtY = v => nf(v, 0), aria, u = '', pasoY })
 
 /* ===== Por terreno: suma del periodo, con medias por tiempo (como hace el conector en cada salida) ===== */
 function sumaTerreno(as, peso) {
-  const z = () => ({ n: 0, km: 0, min: 0, fcm: 0, fcmin: 0, desn: 0 }); const L = z(), U = z(), B = z(), G = z(), O = z();
-  const sumar = (x, km, min, fc) => { x.n++; x.km += km; x.min += min; if (fc) { x.fcm += fc * min; x.fcmin += min; } };
+  const z = () => ({ n: 0, km: 0, min: 0, fcm: 0, fcmin: 0, desn: 0, pa: 0, pakm: 0 }); const L = z(), U = z(), B = z(), G = z(), O = z();
+  const sumar = (x, km, min, fc, pa) => { x.n++; x.km += km; x.min += min; if (fc) { x.fcm += fc * min; x.fcmin += min; } if (pa != null) { x.pa += pa * km; x.pakm += km; } };
   for (const a of as) { const t = a.ter; if (!t) continue;
-    if (t.llano && t.llano.kmh) sumar(L, t.llano.km, t.llano.km / t.llano.kmh * 60, t.llano.fc);
+    if (t.llano && t.llano.kmh) sumar(L, t.llano.km, t.llano.km / t.llano.kmh * 60, t.llano.fc, t.llano.pa);
     if (t.subida && t.subida.min) { sumar(U, t.subida.km, t.subida.min, t.subida.fc); U.desn += t.subida.km * t.subida.pend * 10; }
-    if (t.bajada && t.bajada.kmh) { sumar(B, t.bajada.km, t.bajada.km / t.bajada.kmh * 60); B.desn += t.bajada.km * Math.abs(t.bajada.pend) * 10; }
+    if (t.bajada && t.bajada.kmh) { sumar(B, t.bajada.km, t.bajada.km / t.bajada.kmh * 60, t.bajada.fc); B.desn += t.bajada.km * Math.abs(t.bajada.pend) * 10; }
     if (t.gap && t.gap.min) sumar(G, t.gap.km, t.gap.min, t.gap.fc);
-    if (t.ondulado && t.ondulado.min) sumar(O, t.ondulado.km, t.ondulado.min, t.ondulado.fc); }
-  const base = x => ({ n: x.n, km: x.km, kmh: x.km / (x.min / 60), fc: x.fcmin ? x.fcm / x.fcmin : null });
-  const ll = L.n && L.min ? base(L) : null; if (ll && ll.fc) ll.mpl = (L.km * 1000 / L.min) / ll.fc;
+    if (t.ondulado && t.ondulado.min) sumar(O, t.ondulado.km, t.ondulado.min, t.ondulado.fc, t.ondulado.pa); }
+  // Lo mismo en cada terreno: km, minutos, velocidad, pulso y pendiente (sin signo en llano y ondulado).
+  const base = x => ({ n: x.n, km: x.km, min: x.min, kmh: x.km / (x.min / 60), fc: x.fcmin ? x.fcm / x.fcmin : null, pa: x.pakm ? x.pa / x.pakm : null });
+  const mpl = x => { if (x && x.fc) x.mpl = (x.km * 1000 / x.min) / x.fc; return x; };
+  const ll = L.n && L.min ? mpl(base(L)) : null;
   const su = U.n && U.min ? { ...base(U), vam: U.desn / (U.min / 60), pend: U.desn / (U.km * 10), wkg: wkgFisica(U.km, U.desn, U.min, peso) } : null;
   if (su && su.fc) su.dpl = su.vam / 60 / su.fc * 100; // metros de desnivel por cada 100 latidos
-  const ba = B.n && B.min ? { ...base(B), pend: B.desn / (B.km * 10) } : null;
-  const gp = G.n && G.min ? base(G) : null; if (gp && gp.fc) gp.mpl = (G.km * 1000 / G.min) / gp.fc;
-  const on = O.n && O.min ? { ...base(O), min: O.min } : null;
+  const ba = B.n && B.min ? { ...base(B), pend: -B.desn / (B.km * 10) } : null;
+  const gp = G.n && G.min ? mpl(base(G)) : null;
+  const on = O.n && O.min ? mpl(base(O)) : null;
   return { llano: ll, subida: su, bajada: ba, gap: gp, ondulado: on, min: { llano: L.min, ondulado: O.min, subida: U.min, bajada: B.min } };
 }
-/* R: otra suma para comparar (en una actividad, tu media de los 3 meses anteriores). */
+/* Tabla por terreno: todas las filas con las mismas cuatro cifras (velocidad, pendiente, pulso y lo que rinde
+   cada latido), para que se lean igual. Lo que rinde cada latido cambia de forma según el terreno, porque cambia
+   lo que manda: en llano el aire (metros por latido), en subida la gravedad (metros de desnivel por 100 latidos)
+   y en bajada nada que dependa de ti (se marca "—" y se explica). R: otra suma para comparar. */
 function tablaTerreno(dep, T, R = null) {
-  const V = VEL[dep], una = T.llano && T.llano.n === 1 || T.subida && T.subida.n === 1, n = x => una ? `${nf(x.km, x.km < 10 ? 1 : 0)} km` : `${nf(x.km, 0)} km en ${x.n} ${dep === 'bici' ? 'salida' : 'actividad'}${x.n === 1 ? '' : 's'}`;
-  const celda = (nom, v, u, ref) => `<div class="ter-c"><span class="n">${nom}</span><b>${v}${u ? ` <small>${u}</small>` : ''}</b>${ref ? `<small class="ter-ref">Tu media ${ref}</small>` : ''}</div>`;
+  const V = VEL[dep], una = T.llano && T.llano.n === 1 || T.subida && T.subida.n === 1;
+  const n = x => `${una ? `${nf(x.km, x.km < 10 ? 1 : 0)} km` : `${nf(x.km, 0)} km en ${x.n} ${dep === 'bici' ? 'salida' : 'actividad'}${x.n === 1 ? '' : 's'}`}${x.min ? ` · ${dur(Math.round(x.min))}` : ''}`;
+  const celda = (nom, v, u, ref) => `<div class="ter-c"><span class="n">${nom}</span><b>${v}${u && v !== '—' ? ` <small>${u}</small>` : ''}</b>${ref ? `<small class="ter-ref">Tu media ${ref}</small>` : ''}</div>`;
   const fila = (nom, ico, x, celdas, extra = '') => `<div class="ter-f"><div class="ter-n"><b><i aria-hidden="true">${ico}</i>${nom}</b><span>${x ? n(x) : 'Sin tramos en este periodo'}${extra}</span></div>${x ? celdas.join('') : ''}</div>`;
-  const pulso = x => celda('Pulso', x.fc ? nf(x.fc, 0) : '—', 'ppm'), filas = [];
   const r = (k, f) => R && R[k] ? f(R[k]) : null;
-  if (dep === 'correr') filas.push(fila('Ajustado a pendiente', '≈', T.gap, T.gap ? [celda('Ritmo', ritmoC(T.gap.kmh), 'min/km', r('gap', x => ritmoC(x.kmh))), pulso(T.gap), celda('Por latido', T.gap.mpl ? nf(T.gap.mpl, 2) : '—', 'm', r('gap', x => x.mpl && nf(x.mpl, 2)))] : [], T.gap ? ' equivalentes en llano' : ''));
-  if (dep !== 'skimo') filas.push(fila('Llano', '→', T.llano, T.llano ? [celda(V.n, V.f(T.llano.kmh), V.u, r('llano', x => V.f(x.kmh))), pulso(T.llano), celda('Por latido', T.llano.mpl ? nf(T.llano.mpl, 2) : '—', 'm', r('llano', x => x.mpl && nf(x.mpl, 2)))] : []));
-  if (dep !== 'skimo' && T.ondulado) filas.push(fila('Ondulado', '∿', T.ondulado, [celda(V.n, V.f(T.ondulado.kmh), V.u, r('ondulado', x => V.f(x.kmh))), pulso(T.ondulado)], ' entre el 1,5 y el 3 %'));
-  filas.push(fila('Subida', '↗', T.subida, T.subida ? [celda('VAM', nf(T.subida.vam, 0), 'm/h', r('subida', x => nf(x.vam, 0))), pulso(T.subida),
-    dep === 'skimo' ? celda('Por 100 latidos', nf(T.subida.dpl, 1), 'm') : celda(V.n, V.f(T.subida.kmh), V.u)] : [],
-    T.subida ? ` al ${nf(T.subida.pend, 1)} %${dep === 'bici' && T.subida.wkg ? ` · ≈${nf(T.subida.wkg, 1)} W/kg estimados` : ''}` : ''));
-  if (dep !== 'skimo') filas.push(fila('Bajada', '↘', T.bajada, T.bajada ? [celda(V.n, V.f(T.bajada.kmh), V.u), celda('Pendiente', nf(T.bajada.pend, 1), '%')] : []));
+  const vel = (k, x) => celda(V.n, V.f(x.kmh), V.u, r(k, y => V.f(y.kmh)));
+  const pend = (x, conSigno) => celda('Pendiente', conSigno ? `${x.pend < 0 ? '−' : ''}${nf(Math.abs(x.pend), 1)}` : x.pa != null ? `±${nf(x.pa, 1)}` : '—', '%');
+  const pulso = (k, x) => celda('Pulso', x.fc ? nf(x.fc, 0) : '—', 'ppm', r(k, y => y.fc && `${nf(y.fc, 0)}`));
+  const porLatido = (k, x) => celda('Por latido', x.mpl ? nf(x.mpl, 2) : '—', 'm', r(k, y => y.mpl && nf(y.mpl, 2)));
+  const filas = [];
+  if (dep === 'correr' && T.gap) filas.push(fila('Ajustado a pendiente', '≈', T.gap, [celda('Ritmo', ritmoC(T.gap.kmh), 'min/km', r('gap', x => ritmoC(x.kmh))), celda('Pendiente', '0', '%'), pulso('gap', T.gap), porLatido('gap', T.gap)], ' equivalentes en llano'));
+  if (dep !== 'skimo') filas.push(fila('Llano', '→', T.llano, T.llano ? [vel('llano', T.llano), pend(T.llano), pulso('llano', T.llano), porLatido('llano', T.llano)] : []));
+  if (dep !== 'skimo' && T.ondulado) filas.push(fila('Ondulado', '∿', T.ondulado, [vel('ondulado', T.ondulado), pend(T.ondulado), pulso('ondulado', T.ondulado), porLatido('ondulado', T.ondulado)]));
+  const su = T.subida;
+  filas.push(fila('Subida', '↗', su, su ? [vel('subida', su), pend(su, true), pulso('subida', su), celda('Por 100 latidos', su.dpl ? nf(su.dpl, 1) : '—', 'm ↑', r('subida', y => y.dpl && nf(y.dpl, 1)))] : [],
+    su ? ` · <b class="ter-vam">${nf(su.vam, 0)} m/h</b> de VAM${r('subida', y => ` (tu media ${nf(y.vam, 0)})`) || ''}${dep === 'bici' && su.wkg ? ` · ≈${nf(su.wkg, 1)} W/kg estimados` : ''}` : ''));
+  if (dep !== 'skimo') filas.push(fila('Bajada', '↘', T.bajada, T.bajada ? [vel('bajada', T.bajada), pend(T.bajada, true), pulso('bajada', T.bajada), celda('Por latido', '—', '')] : []));
   return `<div class="ter">${filas.join('')}</div>`;
 }
 /* Qué explica la tabla en cada deporte */
 const AYUDA_TER = {
-  bici: 'Suma de todas tus salidas del periodo, separadas por terreno en tramos de 500 m: llano por debajo del 1,5 % de pendiente, subida desde el 3 % y bajada desde el −3 %. Las medias son por tiempo. "Por latido" son los metros que recorres en llano con cada latido: si sube, vas más rápido con el mismo esfuerzo. La VAM son los metros de desnivel que subes por hora. Los W/kg salen de la física de la subida (sin potenciómetro): son una estimación. La bajada depende más de la pendiente y del tráfico que de tu forma.',
+  bici: 'Suma de todas tus salidas del periodo, separadas por terreno en tramos de 500 m: llano por debajo del 1,5 % de pendiente, ondulado entre el 1,5 y el 3 %, subida desde el 3 % y bajada desde el −3 %. Cada fila trae lo mismo: velocidad, pendiente (en llano y ondulado, lo que sube y baja de media, "±"), pulso y lo que rinde cada latido. Lo último cambia según quién manda: en llano y ondulado, el aire, así que cuenta la distancia ("Por latido", metros por latido); en subida, la gravedad, así que cuenta el desnivel ("Por 100 latidos", metros de desnivel cada 100 latidos; con km/h por latido solo verías lo empinada que era). En bajada casi no pedaleas: la velocidad depende de la pendiente, las curvas y el freno, y el pulso solo dice cuánto recuperas, así que no hay cifra de forma. La VAM son los metros de desnivel que subes por hora y los W/kg salen de la física de la subida, sin potenciómetro: son una estimación.',
   correr: 'En carrera, la cifra que manda es el ritmo ajustado a la pendiente: cada tramo se pasa a su equivalente en llano con el coste energético de correr cuesta arriba y cuesta abajo (Minetti y otros, 2002), así una salida con cuestas se compara con una llana. Solo cuenta pendientes entre −10 % y +10 %, donde el modelo es fiable. "Por latido" son los metros equivalentes que recorres con cada latido: es la idea del índice pulso-velocidad, que en estudios sigue la mejora de forma (Vesterinen y otros, 2014). Debajo, el mismo cálculo por terreno.',
   skimo: 'En skimo lo que cuenta es subir: la VAM (metros de desnivel por hora) y con qué pulso la consigues. "Por 100 latidos" son los metros de desnivel que ganas cada 100 latidos: si sube, subes más con el mismo esfuerzo. En los estudios de skimo, lo que más explica el rendimiento es el VO2máx y el umbral (correlaciones de 0,7 a 0,9), y la VAM sostenida es lo más parecido que se puede medir sin laboratorio. La altitud la baja: compara salidas a cotas parecidas.',
 };
@@ -243,7 +253,40 @@ function progDep(dep) {
   const queMas = { bici: 'Eficiencia, VAM sostenida, desacople, pulso, bajadas y zonas', correr: 'Eficiencia, VAM sostenida, desacople, pulso y zonas', skimo: 'Eficiencia subiendo, pulso, disciplina y zonas' }[dep];
   return `${numeros}<div class="grid2">${top.join('')}</div>${bloqueComparar(dep, conTer)}
     <details class="mas"${S.insMas ? ' open' : ''}><summary data-a="ins-mas"><span>Para profundizar</span><small>${queMas}</small></summary>
-      <div class="grid2">${mas.join('')}</div></details>`;
+      <div class="grid2">${mas.join('')}</div></details>${bloqueRecords(dep)}`;
+}
+
+/* ===== Tus récords: curiosidades de siempre (no dependen del periodo). Cada uno abre su clasificación. =====
+   Distancia, tiempo, desnivel y velocidad máxima salen de la lista de Garmin (todo lo que tiene la app);
+   pendiente, subidas, VAM y calor, del detalle analizado (el último año). */
+const RECORDS = {
+  dist: { n: 'Distancia más larga', v: a => a.km, f: v => `${nf(v, 1)} km` },
+  tiempo: { n: 'Más tiempo en marcha', v: a => a.mov || a.min, f: v => dur(Math.round(v)) },
+  desn: { n: 'Más desnivel', v: a => a.desn, f: v => `${nf(v, 0)} m` },
+  vmax: { n: 'Velocidad máxima', deps: ['bici', 'skimo'], v: a => a.vmax, f: v => `${nf(v, 1)} km/h` },
+  ritmo: { n: 'Ritmo medio más rápido (5 km o más)', deps: ['correr'], v: a => a.km >= 5 && a.min ? a.km / ((a.mov || a.min) / 60) : null, f: v => `${ritmoC(v)} min/km` },
+  pend: { n: 'Rampa más dura', det: true, v: a => a.pmax && a.pmax[0], f: v => `${nf(v, 1)} %`, nota: 'En 200 m' },
+  subida: { n: 'Subida más grande', det: true, v: a => Math.max(0, ...(a.subs || []).map(x => x.desn)) || (a.sub && !a.sub.remonte ? a.sub.desn : null), f: v => `${nf(v, 0)} m`, nota: 'De una sola subida' },
+  vam: { n: 'Mejor VAM en 20 min', det: true, deps: ['bici', 'skimo', 'correr'], v: a => a.vs && a.vs[1], f: v => `${nf(v, 0)} m/h` },
+  calor: { n: 'Más calor', det: true, v: a => a.tc, f: v => `${nf(v, 0)} °C`, nota: 'Temperatura media' },
+};
+const recDe = dep => Object.entries(RECORDS).filter(([, r]) => !r.deps || r.deps.includes(dep));
+function clasificacion(dep, k) { const r = RECORDS[k]; return acts().filter(a => a.dep === dep).map(a => ({ a, v: r.v(a) })).filter(x => x.v != null && x.v > 0).sort((x, y) => y.v - x.v); }
+function bloqueRecords(dep) {
+  const filas = recDe(dep).map(([k, r]) => { const c = clasificacion(dep, k); if (!c.length) return ''; const { a, v } = c[0];
+    return `<button type="button" class="li" data-a="push" data-v="records" data-id="${dep}:${k}"><span class="main"><b>${r.n}</b><span>${esc(a.lugar)} · ${fDia(a.f)} ${dte(a.f).getFullYear()}</span></span><span class="rec-v">${r.f(v)}</span>${ic('chev', 18, 'chev')}</button>`; }).join('');
+  if (!filas) return '';
+  const desde = acts().filter(a => a.dep === dep).map(a => a.f).sort()[0];
+  return blk(`${blkH('Tus récords', info(`rec-${dep}`, 'Tus récords', `De siempre, no del periodo elegido: desde el ${desde ? `${fLarga(desde)} de ${dte(desde).getFullYear()}` : 'principio'}, que es lo más antiguo que ha leído la app de Garmin. La rampa, las subidas, la VAM y el calor salen del análisis de cada actividad, que se hace del último año. Toca uno para ver tu clasificación.`))}<div class="list">${filas}</div>`);
+}
+function scrRecords(scr) {
+  const [dep, k] = String(scr.id || '').split(':'), r = RECORDS[k];
+  if (!r || !SPORTS[dep]) return { title: 'Récords', html: head('Récords', '') + '<div class="content"><p>No encuentro este récord. Vuelve a Insights.</p></div>' };
+  const c = clasificacion(dep, k).slice(0, 20);
+  const filas = c.map(({ a, v }, i) => `<button type="button" class="li" data-a="push" data-v="actividad" data-id="${a.id}"><span class="rec-n" aria-label="Puesto ${i + 1}">${i + 1}</span><span class="main"><b>${esc(a.lugar)}</b><span>${fDia(a.f)} ${dte(a.f).getFullYear()}${a.km && k !== 'dist' ? ` · ${nf(a.km, 0)} km` : ''}</span></span><span class="rec-v">${r.f(v)}</span>${ic('chev', 18, 'chev')}</button>`).join('');
+  return { title: r.n, html: head(r.n, `${SPORTS[dep].n}${r.nota ? ` · ${r.nota.toLowerCase()}` : ''} · ${c.length < 20 ? `${c.length} actividad${c.length === 1 ? '' : 'es'}, de más a menos` : 'tus 20 mejores'}`) + `<div class="content" style="max-width:640px">
+    ${c.length ? `<div class="list">${filas}</div>` : '<p class="muted">Aún no hay actividades con este dato. Se completa al actualizar con Garmin.</p>'}
+    ${r.det ? '<p class="xs muted">Sale del análisis de cada actividad, que se hace del último año.</p>' : ''}</div>` };
 }
 
 /* ===== General: dónde estás (comparado con otra gente), cómo evoluciona, cuánto entrenas y tu peso ===== */

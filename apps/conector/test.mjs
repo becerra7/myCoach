@@ -1015,7 +1015,13 @@ const rpc = async (env, token, message) => {
 	const vs = r.analisis?.vam_sostenida_mh || {};
 	check("VAM sostenida de 10 min: la subida al 6 % a 15 km/h son 900 m/h", Math.abs(vs.min10 - 900) <= 120, `(${JSON.stringify(vs)})`);
 	check("VAM sostenida: sin 60 min de subida, la de 60 min es menor", vs.min60 == null || vs.min60 < vs.min10, `(${JSON.stringify(vs)})`);
-	check("por terreno: bajada a 40 km/h, sin pulso", ter.bajada && Math.abs(ter.bajada.vel_media_kmh - 40) < 3 && ter.bajada.fc_media === undefined,
+	check("por terreno: llano con su pendiente media (casi 0) y la subida con desnivel por latido", ter.llano?.pendiente_media_pct < 1 && ter.subida?.desnivel_por_100_latidos_m > 8 && ter.subida.desnivel_por_100_latidos_m < 11,
+		`(${ter.llano?.pendiente_media_pct}, ${ter.subida?.desnivel_por_100_latidos_m})`);
+	const pm = r.analisis?.pendiente_max_pct || {};
+	check("pendiente máxima en 200 m: la rampa del 6 % y la bajada", pm.subiendo >= 5 && pm.subiendo <= 7.5 && pm.bajando <= -5 && pm.bajando >= -7.5, `(${JSON.stringify(pm)})`);
+	const pa = r.analisis?.perfil_altitud || [];
+	check("perfil de 60 puntos con km, altitud y pulso", pa.length === 60 && pa.every((x) => x.length === 3) && Math.max(...pa.map((x) => x[1])) > Math.min(...pa.map((x) => x[1])) + 120, `(${pa.length})`);
+	check("por terreno: bajada a 40 km/h, con su pulso", ter.bajada && Math.abs(ter.bajada.vel_media_kmh - 40) < 3 && ter.bajada.fc_media > 0,
 		`(${JSON.stringify(ter.bajada)})`);
 	// El desacople solo tiene sentido en llano: dos horas a 30 km/h con el
 	// pulso subiendo de 130 a 143 en la segunda hora dan 1 - 130/143 ≈ 9 %.
