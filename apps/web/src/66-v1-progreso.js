@@ -89,7 +89,7 @@ function vCurvas({ series, h = 200, fmtY = v => nf(v, 0), aria, u = '', pasoY })
   const x0 = Math.min(...xs), x1 = Math.max(...xs), [y0, y1] = rango(ys, .12), yt = ticksY(y0, y1, pasoY);
   const X = v => pad.l + (v - x0) / Math.max(1, x1 - x0) * (VW - pad.l - pad.r), Y = v => pad.t + (1 - (v - y0) / (y1 - y0)) * (h - pad.t - pad.b);
   const ejeX = [...new Set(xs)].sort((a, b) => a - b).map(x => `<text x="${X(x)}" y="${h - pad.b + 14}" text-anchor="middle">${x > 0 ? '+' : x < 0 ? '−' : ''}${Math.abs(x)}</text>`).join('');
-  const lineas = series.map(s => `<polyline points="${s.pts.map(p => `${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(' ')}" fill="none" stroke="${s.color}" stroke-width="${s.dash ? 2 : 2.5}"${s.dash ? ' stroke-dasharray="5 4"' : ''} stroke-linejoin="round"/>
+  const lineas = series.map(s => `<polyline points="${s.pts.map(p => `${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(' ')}" fill="none" stroke="${s.color}" stroke-width="${s.dash ? 2 : 2.5}"${s.dash ? ` stroke-dasharray="${Array.isArray(s.dashArr) ? s.dashArr.join(' ') : '5 4'}"` : ''} stroke-linejoin="round"/>
     ${s.pts.map(p => `<g data-tip="${esc(p[2])}"><circle class="hit" cx="${X(p[0])}" cy="${Y(p[1])}" r="14"/><circle cx="${X(p[0])}" cy="${Y(p[1])}" r="${s.dash ? 3 : 4}" fill="${s.dash ? 'var(--paper)' : s.color}" stroke="${s.color}" stroke-width="1.5"/></g>`).join('')}`).join('');
   return `<svg class="chart2" viewBox="0 0 ${VW} ${h}" role="img" aria-label="${esc(aria)}">${vUnidad(u, pad)}${vEjeY(y0, y1, yt, h, pad, fmtY)}${ejeX}
     <text x="${(pad.l + VW - pad.r) / 2}" y="${h - 4}" text-anchor="middle">Pendiente (%)</text>${lineas}</svg>`;
@@ -241,34 +241,10 @@ function progDep(dep) {
     <div class="leyenda"><span><i style="background:color-mix(in srgb,${col} 35%,var(--paper))"></i>Suave</span><span><i style="background:color-mix(in srgb,${col} 65%,var(--paper))"></i>Medio</span><span><i style="background:${col}"></i>Duro</span></div>`));
   mas.push(bloqueCombustible(dep, todas));
   const queMas = { bici: 'Eficiencia, VAM sostenida, desacople, pulso, bajadas y zonas', correr: 'Eficiencia, VAM sostenida, desacople, pulso y zonas', skimo: 'Eficiencia subiendo, pulso, disciplina y zonas' }[dep];
-  return `${numeros}<div class="grid2">${top.join('')}</div>
+  return `${numeros}<div class="grid2">${top.join('')}</div>${bloqueComparar(dep, conTer)}
     <details class="mas"${S.insMas ? ' open' : ''}><summary data-a="ins-mas"><span>Para profundizar</span><small>${queMas}</small></summary>
-      ${bloqueMismaRuta(dep)}<div class="grid2">${mas.join('')}</div></details>`;
+      <div class="grid2">${mas.join('')}</div></details>`;
 }
-
-/* Dos salidas son "la misma ruta" si empiezan a menos de 500 m y la distancia se parece (±8 %) */
-function mismaRuta(dep) {
-  const rutas = (DSET && DSET.rutas) || {}; const pt = a => { const p = rutas[a.id]; if (!p) return null; try { const d = decodePoly(p); return d && d[0]; } catch (e) { return null; } };
-  const as = acts().filter(a => a.dep === dep && a.km > 3 && rutas[a.id]).slice(0, 40);
-  for (let i = 0; i < as.length; i++) { const a = as[i], pa = pt(a); if (!pa) continue;
-    for (let j = i + 1; j < as.length; j++) { const b = as[j], pb = pt(b); if (!pb) continue;
-      if (Math.abs(a.km - b.km) / a.km < .08 && hav(pa, pb) < .5) return [b, a]; } }
-  return null;
-}
-function bloqueMismaRuta(dep) {
-  const par = mismaRuta(dep); if (!par) return '';
-  const [a, b] = par, mpl = x => x.fc && x.min ? x.km * 1000 / (x.min * x.fc) : null;
-  const filas = [
-    ['FC media', 'ppm', a.fc, b.fc, v => nf(v, 0), (x, y) => y < x],
-    ['Metros por latido', '', mpl(a), mpl(b), v => nf(v, 2), (x, y) => y > x],
-    [REND[dep].n, REND[dep].u, REND[dep].v(a), REND[dep].v(b), v => nf(v, dep === 'skimo' ? 0 : 1), (x, y) => y > x],
-    ['Tiempo', '', a.min, b.min, v => dur(v), (x, y) => y < x],
-  ].filter(f => f[2] != null && f[3] != null);
-  return blk(`${blkH(`Misma ruta: ${fDia(a.f)} y ${fDia(b.f)}`, info('misma', 'Misma ruta', 'Comparar una salida con otra por el mismo recorrido es la forma más honesta de ver si mejoras: mismo terreno, distinta forma. Ojo con el viento, el calor o ir en grupo, que también cuentan.'))}
-    <p class="small muted" style="margin:-8px 0 12px">${esc(b.lugar)}, ${nf(b.km)} km</p>
-    <div class="tot">${filas.map(([n, u, x, y, fmt, mejor]) => `<div><span class="n">${n}${u ? ` (${u})` : ''}</span><b>${fmt(x)} <span class="muted" style="font-weight:500">→</span> ${fmt(y)}</b>${mejor(x, y) ? '<span class="d si">↑ Mejor</span>' : x === y ? '<span class="d">Igual</span>' : '<span class="d">Peor</span>'}</div>`).join('')}</div>`);
-}
-
 
 /* ===== General: dónde estás (comparado con otra gente), cómo evoluciona, cuánto entrenas y tu peso ===== */
 // Solo lo común a todos los deportes: lo de cada deporte (los W/kg en subida, por ejemplo) vive en su pestaña.
@@ -495,3 +471,70 @@ function bloqueCombustible(dep, todas) {
   return blk(`${vizT('Durabilidad y combustible', ayuda)}
     <div class="viz">${vPuntos({ datos: pts, x0: xa, x1: xb, y0: ya, y1: yb, xt: vTicks(xa, xb, 4), yt: [0, 25, 50, 75, 100], xl: 'Hidrato durante (g/h)', yl: 'Stamina al acabar (%)', fill: () => col, tip: d => `${d[0]}: ${nf(d[1], 0)} g/h, acabaste con un ${d[2]} % de stamina (${dur(d[3].min)})`, aria: 'Hidrato por hora frente a la stamina al acabar en las salidas largas', fmtX: v => nf(v, 0), fmtY: v => nf(v, 0) })}</div>`);
 }
+
+/* ===== Comparar actividades: las eliges tú (hasta 3) =====
+   Por defecto, la misma ruta repetida si la hay; si no, las dos últimas. Tabla lado a lado y la velocidad
+   según la pendiente de cada una (con trazo distinto, no solo color). */
+const CMP = {}; // por deporte: ids elegidos
+const CMP_MAX = 3;
+function mismaRutaEn(as) {
+  const rutas = (DSET && DSET.rutas) || {}, pt = a => { const p = rutas[a.id]; if (!p) return null; try { const d = decodePoly(p); return d && d[0]; } catch (e) { return null; } };
+  const rec = [...as].reverse().filter(a => a.km > 3 && rutas[a.id]).slice(0, 40);
+  for (let i = 0; i < rec.length; i++) { const pa = pt(rec[i]); if (!pa) continue;
+    for (let j = i + 1; j < rec.length; j++) { const pb = pt(rec[j]); if (pb && Math.abs(rec[i].km - rec[j].km) / rec[i].km < .08 && hav(pa, pb) < .5) return [rec[j], rec[i]]; } }
+  return null;
+}
+function bloqueComparar(dep, conTer) {
+  if (conTer.length < 2) return '';
+  const ids = new Set(conTer.map(a => a.id)); let sel = (CMP[dep] || []).filter(id => ids.has(id));
+  const par = mismaRutaEn(conTer);
+  if (!CMP[dep]) sel = par ? par.map(a => a.id) : conTer.slice(-2).map(a => a.id);
+  CMP[dep] = sel;
+  const elegidas = sel.map(id => conTer.find(a => a.id === id)).filter(Boolean).sort((a, b) => a.f.localeCompare(b.f));
+  const ver = V.cmpTodas === dep ? conTer : conTer.slice(-6), act = dep === 'bici' ? 'salidas' : 'actividades';
+  const fila = a => { const on = sel.includes(a.id), lleno = !on && sel.length >= CMP_MAX, ruta = par && par.some(x => x.id === a.id);
+    return `<div class="cmp-f"><label class="cmp-l" for="cmp-${a.id}"><input type="checkbox" id="cmp-${a.id}" data-cmp="${dep}" value="${a.id}" ${on ? 'checked' : ''} ${lleno ? 'disabled' : ''}>
+      <span><b>${fDia(a.f)} · ${esc(a.lugar)}</b><span class="small muted">${nf(a.km || 0, 0)} km · ${dur(a.min)}${a.desn ? ` · ${nf(a.desn, 0)} m` : ''}${ruta ? ' · misma ruta' : ''}</span></span></label>
+      <button class="iconbtn" type="button" data-a="push" data-v="actividad" data-id="${a.id}" aria-label="Ver la actividad del ${fDia(a.f)}">${ic('chev', 18)}</button></div>`; };
+  const lista = `<div class="cmp-lista">${[...ver].reverse().map(fila).join('')}</div>
+    ${conTer.length > 6 ? `<button class="link" type="button" data-a="cmp-todas" data-v="${dep}">${V.cmpTodas === dep ? 'Ver solo las últimas' : `Ver las ${conTer.length} del periodo`}</button>` : ''}`;
+  let tabla = '', curva = '';
+  if (elegidas.length >= 2) {
+    const V2 = VEL[dep], g = (a, f) => { try { return f(a); } catch (e) { return null; } };
+    const filas = [
+      ['Distancia', 'km', a => a.km, v => nf(v, 1), 0],
+      ['Tiempo', '', a => a.min, v => dur(v), 0],
+      ['Desnivel', 'm', a => a.desn, v => nf(v, 0), 0],
+      ['Pulso medio', 'ppm', a => a.fc, v => nf(v, 0), 0],
+      dep === 'correr' ? ['Ritmo ajustado', 'min/km', a => a.ter.gap && a.ter.gap.kmh, ritmoC, 1] : null,
+      dep !== 'skimo' ? [`${V2.n} en llano`, V2.u, a => a.ter.llano && a.ter.llano.kmh, V2.f, 1] : null,
+      dep !== 'skimo' ? ['Pulso en llano', 'ppm', a => a.ter.llano && a.ter.llano.fc, v => nf(v, 0), -1] : null,
+      dep !== 'skimo' ? ['Por latido (llano)', 'm', a => a.ter.llano && a.ter.llano.mpl, v => nf(v, 2), 1] : null,
+      dep !== 'skimo' ? [`${V2.n} ondulado`, V2.u, a => a.ter.ondulado && a.ter.ondulado.kmh, V2.f, 1] : null,
+      ['VAM en subida', 'm/h', a => a.ter.subida && a.ter.subida.vam, v => nf(v, 0), 1],
+      ['Mejor VAM 20 min', 'm/h', a => a.vs && a.vs[1], v => nf(v, 0), 1],
+      dep === 'bici' ? ['Velocidad en bajada', 'km/h', a => a.ter.bajada && a.ter.bajada.kmh, v => nf(v, 1), 0] : null,
+      ['Stamina al acabar', '%', a => a.st && a.st[1], v => nf(v, 0), 1],
+      ['Temperatura', '°C', a => a.tc, v => nf(v, 0), 0],
+    ].filter(Boolean).map(([n, u, f, fmt, mejor]) => { const vs = elegidas.map(a => g(a, f)); if (vs.every(v => v == null)) return '';
+      const ok = vs.filter(v => v != null), best = mejor && ok.length > 1 ? (mejor > 0 ? Math.max(...ok) : Math.min(...ok)) : null;
+      return `<tr><th scope="row">${n}${u ? ` <small>${u}</small>` : ''}</th>${vs.map(v => `<td>${v == null ? '—' : `${fmt(v)}${best != null && v === best ? ' <span class="cmp-mejor">↑ mejor</span>' : ''}`}</td>`).join('')}</tr>`; }).join('');
+    tabla = `<div class="cmp-t"><table><thead><tr><th scope="col"><span class="vh">Dato</span></th>${elegidas.map(a => `<th scope="col">${fDia(a.f)}</th>`).join('')}</tr></thead><tbody>${filas}</tbody></table></div>`;
+    if (dep !== 'skimo') {
+      const trazos = [[], [6, 4], [2, 3]], col = scol(dep), yv = dep === 'correr' ? segKm : k => k, v = x => x.km / (x.min / 60);
+      const series = elegidas.map((a, i) => { const m = sumaPendiente([a]); const pts = [...m.entries()].filter(([, x]) => x.km >= .5).sort((p, q) => p[0] - q[0]);
+        return pts.length >= 3 ? { color: i === elegidas.length - 1 ? col : `color-mix(in srgb,${col} ${55 + i * 15}%,var(--ink))`, dash: i > 0 ? trazos[i] : null, pts: pts.map(([p, x]) => [p, yv(v(x)), `${fDia(a.f)}, ${p > 0 ? '+' : p < 0 ? '−' : ''}${Math.abs(p)} %: ${dep === 'correr' ? ritmo(v(x)) : `${nf(v(x), 1)} km/h`}`]) } : null; });
+      if (series.filter(Boolean).length >= 2) {
+        const ser = series.filter(Boolean).map(sx => ({ ...sx, dash: !!sx.dash, dashArr: sx.dash }));
+        curva = `<h3 class="met-h" style="margin-top:16px">${V2.n} según la pendiente</h3><div class="viz">${vCurvas({ series: ser, fmtY: dep === 'correr' ? fmtRitmoSeg : x => nf(x, 0), pasoY: dep === 'correr' ? 'ritmo' : null, u: dep === 'correr' ? 'min/km' : 'km/h', aria: `${V2.n} según la pendiente de ${elegidas.length} actividades` })}</div>
+          <div class="leyenda">${elegidas.map((a, i) => series[i] ? `<span><i class="ln" style="border-top:2.5px ${i === 0 ? 'solid' : i === 1 ? 'dashed' : 'dotted'} ${series[i].color}"></i>${fDia(a.f)}</span>` : '').join('')}</div>`;
+      }
+    }
+  }
+  return blk(`${blkH('Comparar actividades', info(`cmp-${dep}`, 'Comparar actividades', `Elige hasta ${CMP_MAX} ${act} del periodo y las verás lado a lado: por terreno, esfuerzos y velocidad según la pendiente. Lo más honesto es comparar la misma ruta (te la marco si la encuentro); entre rutas distintas, el terreno, el viento y el calor pesan. "↑ mejor" marca la mejor cifra de cada fila cuando tiene sentido (más rápido, menos pulso a igual terreno, más metros por latido).`))}
+    <p class="small muted" style="margin:-4px 0 8px">${elegidas.length < 2 ? `Marca al menos dos ${act}.` : `${elegidas.length} elegidas${elegidas.length >= CMP_MAX ? ': quita una para elegir otra' : ''}.`}</p>
+    ${lista}${tabla}${curva}`);
+}
+document.addEventListener('change', e => { const el = e.target; if (!el || !el.dataset || !el.dataset.cmp) return; const dep = el.dataset.cmp, s = new Set(CMP[dep] || []);
+  if (el.checked) { if (s.size < CMP_MAX) s.add(el.value); } else s.delete(el.value); CMP[dep] = [...s]; render(); document.getElementById(`cmp-${el.value}`)?.focus(); });
+Object.assign(ACTIONS, { 'cmp-todas': el => { V.cmpTodas = V.cmpTodas === el.dataset.v ? null : el.dataset.v; render(); } });

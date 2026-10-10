@@ -1413,7 +1413,7 @@ function recortarGarmin(data) {
 		const datos = [];
 		let usado = 0;
 		for (const x of data) { usado += tam(x); if (usado > GARMIN_API_MAX) break; datos.push(x); }
-		return { datos, recortado: `La lista tiene ${data.length} elementos y solo caben ${datos.length}. Pida un periodo más corto o use campos.` };
+		return { datos, recortado: `La lista tiene ${data.length} elementos y solo caben ${datos.length}. Pida el resto por trozos con desde y cantidad, o un periodo más corto.` };
 	}
 	const datos = {};
 	const grandes = {};
@@ -1422,7 +1422,7 @@ function recortarGarmin(data) {
 		if (n <= 4000) datos[k] = v;
 		else grandes[k] = Array.isArray(v) ? `lista de ${v.length} (${n} caracteres)` : `${n} caracteres`;
 	}
-	return { datos, recortado: "Respuesta grande: van los campos pequeños. Para los demás use campos (p. ej. ['" + Object.keys(grandes)[0] + "']).", campos_grandes: grandes };
+	return { datos, recortado: "Respuesta grande: van los campos pequeños. Para los demás use campos (p. ej. ['" + Object.keys(grandes)[0] + "']) y, si es una lista larga, desde y cantidad para traerla por trozos.", campos_grandes: grandes };
 }
 
 // ── El día según Garmin (garmin_dia) ──
@@ -2100,10 +2100,12 @@ const TOOLS = {
 				path: { type: "string", description: "Ruta del endpoint, p. ej. /metrics-service/metrics/trainingloadbalance/latest/2026-10-04. Sin path, devuelve el catalogo." },
 				params: { type: "object", description: "Parametros de la consulta, p. ej. { startDate: '2026-09-01', endDate: '2026-10-04' }. Un valor lista se repite (metric=a&metric=b)." },
 				campos: { type: "array", items: { type: "string" }, description: "Devolver solo estas partes de la respuesta (rutas con puntos)." },
+				desde: { type: "integer", minimum: 0, description: "Con una lista larga (la respuesta o el único campo pedido): primer elemento del trozo." },
+				cantidad: { type: "integer", minimum: 1, maximum: 5000, description: "Cuántos elementos del trozo (por defecto, los que quepan)." },
 				grupo: { type: "string", description: "Sin path: solo este grupo del catalogo." },
 			},
 		},
-		run: async (env, userId, { path, params, campos, grupo } = {}) => {
+		run: async (env, userId, { path, params, campos, grupo, desde, cantidad } = {}) => {
 			if (!path) {
 				const filas = ENDPOINTS_GARMIN.filter(([g]) => !grupo || g === grupo);
 				const grupos = {};
@@ -2152,6 +2154,14 @@ const TOOLS = {
 				throw e;
 			}
 			if (data == null) return { path: ruta, datos: null, nota: "Garmin no tiene datos para eso (respuesta vacia)." };
+			// Una lista larga se puede traer por trozos (desde, cantidad): así nada grande queda fuera de alcance.
+			const lista1 = Array.isArray(campos) && campos.length === 1 ? porRuta(data, campos[0]) : data;
+			if (Array.isArray(lista1) && (desde != null || cantidad != null || JSON.stringify(lista1).length > GARMIN_API_MAX)) {
+				const ini = Math.max(0, Number(desde) || 0), trozo = lista1.slice(ini, cantidad ? ini + Number(cantidad) : undefined);
+				const r = recortarGarmin(trozo), fin = ini + (Array.isArray(r.datos) ? r.datos.length : 0);
+				return { path: ruta, ...(Array.isArray(campos) && campos.length === 1 ? { campo: campos[0] } : {}), total: lista1.length, desde: ini, hasta: fin, datos: r.datos,
+					...(fin < lista1.length ? { siguiente: { desde: fin }, nota: `Trozo ${ini}-${fin} de ${lista1.length}: pida el siguiente con desde=${fin}.` } : {}) };
+			}
 			if (Array.isArray(campos) && campos.length)
 				return { path: ruta, ...recortarGarmin(Object.fromEntries(campos.map((c) => [c, porRuta(data, c) ?? null]))) };
 			return { path: ruta, ...recortarGarmin(data) };

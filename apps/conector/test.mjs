@@ -1203,6 +1203,7 @@ const rpc = async (env, token, message) => {
 		if (u.pathname.includes("fitnessstats-service")) return r([{ activityTrainingLoad: 80 }]);
 		if (u.pathname.includes("dailySleepData")) return r({ grande: "x".repeat(70000), dailySleepDTO: { sleepScores: { overall: { value: 81 } } } });
 		if (u.pathname.includes("hrv-service")) return new Response(null, { status: 204 });
+		if (u.pathname.endsWith("/details")) return r({ metricsCount: 3000, activityDetailMetrics: Array.from({ length: 3000 }, (_, i) => ({ metrics: [i, 100 + i / 10, i * 30, "relleno-de-datos"] })) });
 		return new Response("{}", { status: 404 });
 	};
 	const llamar = async (args) => {
@@ -1252,6 +1253,11 @@ const rpc = async (env, token, message) => {
 		JSON.stringify(malas.map((m) => m.error)));
 	const no = await llamar({ path: "/nada-service/x" });
 	check("garmin_api: un 404 remite al catálogo", no.error && /catalogo/.test(JSON.stringify(no.out)), JSON.stringify(no.out));
+	// Una lista larga no queda fuera de alcance: se trae por trozos con desde y cantidad.
+	const t1 = (await llamar({ path: "/activity-service/activity/1/details", campos: ["activityDetailMetrics"] })).out;
+	check("garmin_api: una lista grande llega por trozos", t1.total === 3000 && t1.desde === 0 && t1.hasta > 100 && t1.siguiente?.desde === t1.hasta, JSON.stringify({ total: t1.total, hasta: t1.hasta }));
+	const t2 = (await llamar({ path: "/activity-service/activity/1/details", campos: ["activityDetailMetrics"], desde: 2900, cantidad: 500 })).out;
+	check("garmin_api: y el último trozo acaba la lista", t2.desde === 2900 && t2.hasta === 3000 && !t2.siguiente && t2.datos[99].metrics[0] === 2999, JSON.stringify({ desde: t2.desde, hasta: t2.hasta }));
 	globalThis.fetch = base;
 }
 

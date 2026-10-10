@@ -225,7 +225,7 @@ async function sync(manual, live = !!LIVE && S.modo === 'vivo') {
   const d60 = addDays(HOY, -60), d365 = addDays(HOY, -365);
   const faltaDet = a => !ds.det[a.id] || (ds.det[a.id].v !== DET_V && !ds.det[a.id].err && ['bici', 'correr', 'skimo'].includes(FAM[a.t]));
   const quiereDet = a => (a.d > d365 && ['bici', 'correr', 'skimo'].includes(FAM[a.t])) || (a.d > d60 && FAM[a.t] === 'montana') || FAM[a.t] === 'skimo';
-  const needDet = ds.acts.filter(a => faltaDet(a) && quiereDet(a)).slice(0, 15);
+  const needDet = ds.acts.filter(a => faltaDet(a) && quiereDet(a)).slice(0, 30);
   let i = 0; await pool(needDet, 4, async a => { msg(`Analizando actividades (${++i}/${needDet.length})…`); try { ds.det[a.id] = detalleDe(await call('garmin_activity_detail', { activity_id: a.id })); } catch (e) { ds.det[a.id] = { err: e.code || 'error' }; } });
   const needRuta = ds.acts.filter(a => !(a.id in ds.rutas) && a.km > 0.5 && ['bici', 'correr', 'skimo', 'montana', 'esqui', 'caminar'].includes(FAM[a.t])).slice(0, 25);
   i = 0; await pool(needRuta, 4, async a => { msg(`Buscando pueblos (${++i}/${needRuta.length})…`); try { const r = await call('garmin_activity_route', { activity_id: a.id, puntos: 5 }); ds.rutas[a.id] = r.polilinea || null; } catch (e) { ds.rutas[a.id] = null; } });

@@ -1122,6 +1122,19 @@ button.hp-encaje{cursor:pointer;align-items:center;min-height:44px}
 .ter-c b{font-size:26px;line-height:1.1;font-weight:700;font-stretch:75%;font-variant-numeric:tabular-nums;white-space:nowrap}
 .ter-c b small{font-size:13px;font-weight:600;font-stretch:100%;color:var(--ink-2)}
 .ter-ref{font-size:12px;color:var(--ink-2)}
+.cmp-lista{display:flex;flex-direction:column;border-top:1px solid var(--rule)}
+.cmp-f{display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--rule)}
+.cmp-l{flex:1;display:flex;align-items:center;gap:12px;min-height:var(--tap);padding:6px 0;cursor:pointer;min-width:0}
+.cmp-l input{width:22px;height:22px;flex:none;accent-color:var(--ink)}
+.cmp-l>span{display:flex;flex-direction:column;min-width:0}
+.cmp-l b{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cmp-t{margin-top:16px}
+.cmp-t table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;table-layout:fixed}
+.cmp-t th,.cmp-t td{padding:8px 4px;border-bottom:1px solid var(--rule);text-align:right;font-size:14px;vertical-align:top}
+.cmp-t thead th{font-weight:700;color:var(--ink)}
+.cmp-t tbody th{text-align:left;font-weight:600;color:var(--ink-2);width:38%}
+.cmp-t tbody th small{font-weight:500}
+.cmp-mejor{display:block;font-size:12px;font-weight:650;color:var(--good)}
 .tbar{display:flex;height:12px;border-radius:6px;overflow:hidden;gap:2px;margin-top:4px}
 .tbar span{display:block;min-width:2px}
 @container app (min-width:840px){

@@ -33,7 +33,7 @@ description: Cómo y cuándo usar las herramientas de myCoach/Garmin (coach_*, a
 | Guardar un plato que repite o le gusta | `comida_plato_guardar` (1); nutrientes estimados o `desconocido`, nunca inventados |
 | Fuerza | `entrenos tipo=fuerza` antes de proponer; al reloj, `entreno_enviar_garmin tipo=fuerza`; al acabar `fuerza_desde_garmin` o `fuerza_registrar` |
 | Series de bici o correr para el reloj | `entreno_enviar_garmin tipo=cardio` sin confirm (vista previa) → con su sí, confirm=true |
-| Un dato de Garmin que ninguna herramienta trae (récords, material, zonas, planes de Garmin…) | `garmin_api` sin path (catálogo) → `garmin_api` con la ruta (2). Nunca digas que no lo tienes sin mirarlo |
+| Un dato de Garmin que ninguna herramienta trae (récords, material, zonas, planes de Garmin…) | `garmin_api` sin path (catálogo) → `garmin_api` con la ruta (2). Nunca digas que no lo tienes sin mirarlo; si la respuesta es una lista larga, por trozos con `desde` y `cantidad` (nunca te quedes sin ella) |
 | Ver la app | `mycoach_abrir`, no dibujar tarjetas propias |
 
 ## Sin reloj (solo un Edge)

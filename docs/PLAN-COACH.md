@@ -273,6 +273,10 @@ Objetivo: que funcione sin ti delante y aprender qué enamora.
     - **Arreglos del análisis:** las subidas tras un tramo ondulado se perdían (el inicio quedaba antes de tiempo y la media bajaba del 3 %); ahora el pie del puerto se busca bien. Y "ondulado" (1,5-3 %) entra en el reparto, así el tiempo por terreno suma la salida entera. El desnivel sale del barómetro suavizado: en una salida real, el reparto por pendiente da unos 860 m de 1.061 m de Garmin.
     - El detalle de cada actividad se vuelve a pedir una vez (versión 4), de 15 en 15 al sincronizar o al abrir una actividad.
 
+25. **Comparar actividades a elección, 10 de octubre.** En Insights, por deporte, "Comparar actividades": eliges hasta 3 del periodo (por defecto, la misma ruta repetida si la hay; si no, las dos últimas) y salen lado a lado (por terreno, esfuerzos, stamina, temperatura, con "↑ mejor" por fila) y su velocidad según la pendiente con trazos distintos. Sustituye a "Misma ruta", que elegía la app sola. Desde la lista se abre cualquier actividad del periodo (hasta un año atrás).
+    - El reanálisis de las actividades viejas va de 30 en 30 por sincronización (antes 15): las mismas llamadas a Garmin, en la mitad de actualizaciones.
+    - `garmin_api` trae las listas grandes por trozos (`desde`, `cantidad`): ya no hay datos de Garmin fuera de alcance por tamaño.
+
 ## 10. Próximos pasos concretos (2 semanas)
 1. Sacar `packages/domain` con carga TRIMP, semáforo y tests.
 2. Documento `atleta/perfil` más registro de decisiones.

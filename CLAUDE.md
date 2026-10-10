@@ -65,6 +65,7 @@ Las reglas de este archivo y los tokens de `app.css` mandan siempre sobre cualqu
 - **Cada propuesta dice lo que cuesta.** Qué cambia para el usuario y para Claude, qué se pierde, cuánto cuesta (tokens, instalación, mantenimiento) y qué riesgo tiene. Lo que se puede medir, se mide antes de proponer. Lo que no está comprobado se dice como tal, no como un hecho.
 - **Nada cambia el comportamiento sin avisar.** Si al trabajar aparece algo que cambia lo que hace la app, el entrenador o Claude, y no estaba acordado, se para y se pregunta antes de hacerlo.
 - **Al acabar, la lista de cambios de comportamiento.** Antes → después, uno por uno, aparte del resumen técnico.
+- **No se tira la toalla con un acceso.** Si algo no deja leer o escribir (una herramienta del conector que recorta, una red bloqueada, un permiso), antes de rendirse se busca otra vía: pedirlo por trozos o con otros parámetros, otra herramienta, o cambiar la herramienta en el repo para que lo permita. Si de verdad no hay manera, se dice qué haría falta y quién puede darlo.
 - **Lo que se decide se apunta** en las decisiones de `docs/PLAN-COACH.md`, para que la siguiente sesión lo respete.
 
 ## Comprobaciones
