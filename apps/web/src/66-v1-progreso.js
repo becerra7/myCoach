@@ -97,29 +97,34 @@ function vCurvas({ series, h = 200, fmtY = v => nf(v, 0), aria, u = '', pasoY })
 
 /* ===== Por terreno: suma del periodo, con medias por tiempo (como hace el conector en cada salida) ===== */
 function sumaTerreno(as, peso) {
-  const z = () => ({ n: 0, km: 0, min: 0, fcm: 0, fcmin: 0, desn: 0 }); const L = z(), U = z(), B = z(), G = z();
+  const z = () => ({ n: 0, km: 0, min: 0, fcm: 0, fcmin: 0, desn: 0 }); const L = z(), U = z(), B = z(), G = z(), O = z();
   const sumar = (x, km, min, fc) => { x.n++; x.km += km; x.min += min; if (fc) { x.fcm += fc * min; x.fcmin += min; } };
   for (const a of as) { const t = a.ter; if (!t) continue;
     if (t.llano && t.llano.kmh) sumar(L, t.llano.km, t.llano.km / t.llano.kmh * 60, t.llano.fc);
     if (t.subida && t.subida.min) { sumar(U, t.subida.km, t.subida.min, t.subida.fc); U.desn += t.subida.km * t.subida.pend * 10; }
     if (t.bajada && t.bajada.kmh) { sumar(B, t.bajada.km, t.bajada.km / t.bajada.kmh * 60); B.desn += t.bajada.km * Math.abs(t.bajada.pend) * 10; }
-    if (t.gap && t.gap.min) sumar(G, t.gap.km, t.gap.min, t.gap.fc); }
+    if (t.gap && t.gap.min) sumar(G, t.gap.km, t.gap.min, t.gap.fc);
+    if (t.ondulado && t.ondulado.min) sumar(O, t.ondulado.km, t.ondulado.min, t.ondulado.fc); }
   const base = x => ({ n: x.n, km: x.km, kmh: x.km / (x.min / 60), fc: x.fcmin ? x.fcm / x.fcmin : null });
   const ll = L.n && L.min ? base(L) : null; if (ll && ll.fc) ll.mpl = (L.km * 1000 / L.min) / ll.fc;
   const su = U.n && U.min ? { ...base(U), vam: U.desn / (U.min / 60), pend: U.desn / (U.km * 10), wkg: wkgFisica(U.km, U.desn, U.min, peso) } : null;
   if (su && su.fc) su.dpl = su.vam / 60 / su.fc * 100; // metros de desnivel por cada 100 latidos
   const ba = B.n && B.min ? { ...base(B), pend: B.desn / (B.km * 10) } : null;
   const gp = G.n && G.min ? base(G) : null; if (gp && gp.fc) gp.mpl = (G.km * 1000 / G.min) / gp.fc;
-  return { llano: ll, subida: su, bajada: ba, gap: gp };
+  const on = O.n && O.min ? { ...base(O), min: O.min } : null;
+  return { llano: ll, subida: su, bajada: ba, gap: gp, ondulado: on, min: { llano: L.min, ondulado: O.min, subida: U.min, bajada: B.min } };
 }
-function tablaTerreno(dep, T) {
-  const V = VEL[dep], n = x => `${nf(x.km, 0)} km en ${x.n} ${dep === 'bici' ? 'salida' : 'actividad'}${x.n === 1 ? '' : 's'}`;
-  const celda = (nom, v, u) => `<div class="ter-c"><span class="n">${nom}</span><b>${v}${u ? ` <small>${u}</small>` : ''}</b></div>`;
+/* R: otra suma para comparar (en una actividad, tu media de los 3 meses anteriores). */
+function tablaTerreno(dep, T, R = null) {
+  const V = VEL[dep], una = T.llano && T.llano.n === 1 || T.subida && T.subida.n === 1, n = x => una ? `${nf(x.km, x.km < 10 ? 1 : 0)} km` : `${nf(x.km, 0)} km en ${x.n} ${dep === 'bici' ? 'salida' : 'actividad'}${x.n === 1 ? '' : 's'}`;
+  const celda = (nom, v, u, ref) => `<div class="ter-c"><span class="n">${nom}</span><b>${v}${u ? ` <small>${u}</small>` : ''}</b>${ref ? `<small class="ter-ref">Tu media ${ref}</small>` : ''}</div>`;
   const fila = (nom, ico, x, celdas, extra = '') => `<div class="ter-f"><div class="ter-n"><b><i aria-hidden="true">${ico}</i>${nom}</b><span>${x ? n(x) : 'Sin tramos en este periodo'}${extra}</span></div>${x ? celdas.join('') : ''}</div>`;
   const pulso = x => celda('Pulso', x.fc ? nf(x.fc, 0) : '—', 'ppm'), filas = [];
-  if (dep === 'correr') filas.push(fila('Ajustado a pendiente', '≈', T.gap, T.gap ? [celda('Ritmo', ritmoC(T.gap.kmh), 'min/km'), pulso(T.gap), celda('Por latido', T.gap.mpl ? nf(T.gap.mpl, 2) : '—', 'm')] : [], T.gap ? ' equivalentes en llano' : ''));
-  if (dep !== 'skimo') filas.push(fila('Llano', '→', T.llano, T.llano ? [celda(V.n, V.f(T.llano.kmh), V.u), pulso(T.llano), celda('Por latido', T.llano.mpl ? nf(T.llano.mpl, 2) : '—', 'm')] : []));
-  filas.push(fila('Subida', '↗', T.subida, T.subida ? [celda('VAM', nf(T.subida.vam, 0), 'm/h'), pulso(T.subida),
+  const r = (k, f) => R && R[k] ? f(R[k]) : null;
+  if (dep === 'correr') filas.push(fila('Ajustado a pendiente', '≈', T.gap, T.gap ? [celda('Ritmo', ritmoC(T.gap.kmh), 'min/km', r('gap', x => ritmoC(x.kmh))), pulso(T.gap), celda('Por latido', T.gap.mpl ? nf(T.gap.mpl, 2) : '—', 'm', r('gap', x => x.mpl && nf(x.mpl, 2)))] : [], T.gap ? ' equivalentes en llano' : ''));
+  if (dep !== 'skimo') filas.push(fila('Llano', '→', T.llano, T.llano ? [celda(V.n, V.f(T.llano.kmh), V.u, r('llano', x => V.f(x.kmh))), pulso(T.llano), celda('Por latido', T.llano.mpl ? nf(T.llano.mpl, 2) : '—', 'm', r('llano', x => x.mpl && nf(x.mpl, 2)))] : []));
+  if (dep !== 'skimo' && T.ondulado) filas.push(fila('Ondulado', '∿', T.ondulado, [celda(V.n, V.f(T.ondulado.kmh), V.u, r('ondulado', x => V.f(x.kmh))), pulso(T.ondulado)], ' entre el 1,5 y el 3 %'));
+  filas.push(fila('Subida', '↗', T.subida, T.subida ? [celda('VAM', nf(T.subida.vam, 0), 'm/h', r('subida', x => nf(x.vam, 0))), pulso(T.subida),
     dep === 'skimo' ? celda('Por 100 latidos', nf(T.subida.dpl, 1), 'm') : celda(V.n, V.f(T.subida.kmh), V.u)] : [],
     T.subida ? ` al ${nf(T.subida.pend, 1)} %${dep === 'bici' && T.subida.wkg ? ` · ≈${nf(T.subida.wkg, 1)} W/kg estimados` : ''}` : ''));
   if (dep !== 'skimo') filas.push(fila('Bajada', '↘', T.bajada, T.bajada ? [celda(V.n, V.f(T.bajada.kmh), V.u), celda('Pendiente', nf(T.bajada.pend, 1), '%')] : []));
@@ -234,8 +239,7 @@ function progDep(dep) {
   if (zon.filter(c => c[1].some(Boolean)).length >= 3) mas.push(blk(`${vizT('Suave, medio y duro por semana', info(`zon-${dep}`, 'Suave, medio y duro por semana', 'Horas de cada semana según tu pulso: suave (por debajo del 90 % de tu umbral), medio y duro. En los aficionados que mejoran, cerca del 80 % es suave.'))}
     <div class="viz">${vApiladas({ cols: zon, claves: ['suave', 'medio', 'duro'], colores: [`color-mix(in srgb,${col} 35%,var(--paper))`, `color-mix(in srgb,${col} 65%,var(--paper))`, col], tip: c => `Semana del ${c[0]}: ${nf(c[1][0])} h suaves, ${nf(c[1][1])} h medias, ${nf(c[1][2])} h duras`, aria: 'Horas suaves, medias y duras por semana', fmt: v => nf(v, 1), u: 'h', cada: Math.ceil(nSem / 6) })}</div>
     <div class="leyenda"><span><i style="background:color-mix(in srgb,${col} 35%,var(--paper))"></i>Suave</span><span><i style="background:color-mix(in srgb,${col} 65%,var(--paper))"></i>Medio</span><span><i style="background:${col}"></i>Duro</span></div>`));
-  mas.push(blk(`${blkH('Durabilidad y combustible', info('pend', 'Lo que falta por guardar', 'La stamina mínima de cada salida larga y los gramos de hidrato por hora que tomaste los calcula tu Claude al analizar una salida, pero aún no se guardan en myCoach. Cuando se guarden, saldrán aquí con su gráfica.'))}
-    <p class="muted">Aún no se guardan. Mientras, pídeselos a tu Claude.</p><div class="btns"><button class="btn tonal" type="button" data-a="v-encargo" data-v="4">Preguntárselo a Claude</button></div>`));
+  mas.push(bloqueCombustible(dep, todas));
   const queMas = { bici: 'Eficiencia, VAM sostenida, desacople, pulso, bajadas y zonas', correr: 'Eficiencia, VAM sostenida, desacople, pulso y zonas', skimo: 'Eficiencia subiendo, pulso, disciplina y zonas' }[dep];
   return `${numeros}<div class="grid2">${top.join('')}</div>
     <details class="mas"${S.insMas ? ' open' : ''}><summary data-a="ins-mas"><span>Para profundizar</span><small>${queMas}</small></summary>
@@ -463,3 +467,31 @@ async function guardarMedidas() {
   } catch (e) { st.guardando = false; st.error = /entre/.test(e && e.message || '') ? e.message : 'No he podido guardarlas. Vuelve a probar en un momento.'; fillSheet(); }
 }
 Object.assign(ACTIONS, { 'medidas-apuntar': () => hojaMedidas(), 'medidas-guardar': () => guardarMedidas(), 'medidas-recargar': () => { MZ.datos = undefined; cargarMedidas(true); } });
+
+/* ===== El análisis de cada salida (salida_guardar): lo que concluye tu Claude, guardado por actividad =====
+   Lo leen la pantalla de la actividad y "Durabilidad y combustible". */
+const SZ = { datos: undefined, fuente: null };
+function salidasDemo() {
+  const d = {}; acts().filter(a => a.dep === 'bici' && a.min >= 90).slice(0, 6).forEach((a, i) => { d[a.id] = { fecha: a.f, hidratos_g_h: [25, 40, 55, 30, 60, 45][i], rpe: [6, 7, 5, 8, 6, 6][i], resumen: ['Fondo constante: el pulso apenas subió en la segunda mitad.', 'En las subidas, VAM por encima de tu media.'], sensaciones: 'Bien hasta la última hora; las piernas, algo cargadas.', proxima_vez: 'Empieza a comer en la primera hora.' }; });
+  return d;
+}
+async function cargarSalidas(fresco) {
+  if (SZ.datos === 'cargando') return; const f = fuenteDatos(); if (f === 'espera') return; SZ.fuente = f;
+  if (f === 'demo') { SZ.datos = SZ.datos && SZ.datos.demo !== undefined ? SZ.datos : Object.assign(salidasDemo(), { demo: true }); return; }
+  SZ.datos = 'cargando'; try { SZ.datos = (await coachCall('app_leer', { doc: 'salidas/analisis' }, fresco)) || {}; } catch (e) { SZ.datos = null; } render();
+}
+const analisisDe = id => { if (SZ.datos !== undefined && SZ.datos !== 'cargando' && fuenteDatos() !== 'espera' && SZ.fuente !== fuenteDatos()) SZ.datos = undefined; if (SZ.datos === undefined) cargarSalidas(); return SZ.datos && typeof SZ.datos === 'object' ? SZ.datos[id] || null : null; };
+const pedirAnalisis = a => `Analiza mi actividad de ${SPORTS[a.dep].n.toLowerCase()} del ${fDia(a.f)} (activity_id ${a.id}) con myCoach: qué tal fue, por terreno y frente a mis salidas parecidas. Pregúntame qué comí y bebí durante y cómo me encontré, y al acabar guárdalo con salida_guardar.`;
+Object.assign(ACTIONS, { 'salida-analizar': el => { const a = actById(el.dataset.v); if (a) enClaude(pedirAnalisis(a)); } });
+
+/* Durabilidad y combustible: en las salidas largas, lo que tomaste por hora frente a la stamina con la que acabaste. */
+function bloqueCombustible(dep, todas) {
+  const col = scol(dep), largas = todas.filter(a => a.min >= 90);
+  const pts = largas.map(a => { const x = analisisDe(a.id); return x && x.hidratos_g_h != null && a.st && a.st[1] != null ? [fDia(a.f), x.hidratos_g_h, a.st[1], a] : null; }).filter(Boolean);
+  const ayuda = info(`comb-${dep}`, 'Durabilidad y combustible', 'Cada punto es una salida de hora y media o más: a la derecha, más hidrato por hora; arriba, más stamina al acabar (la estima Garmin con tu pulso). Si los puntos de la derecha quedan más arriba, comer te sirve: lo habitual en salidas largas es 60-90 g por hora a partir de la segunda hora. Lo que comiste lo guarda tu Claude al analizar la salida contigo.');
+  if (pts.length < 2) return blk(`${blkH('Durabilidad y combustible', ayuda)}<p class="muted">${largas.length ? `Tienes ${largas.length} salida${largas.length === 1 ? '' : 's'} larga${largas.length === 1 ? '' : 's'} en este periodo, pero ${pts.length ? 'solo una' : 'ninguna'} con lo que comiste. Analízalas con tu Claude y dile qué tomaste: lo guardará aquí.` : 'En este periodo no hay salidas de hora y media o más.'}</p>
+    ${largas.length ? `<div class="btns"><button class="btn tonal" type="button" data-a="salida-analizar" data-v="${largas[largas.length - 1].id}">Analizar la última con Claude</button></div>` : ''}`);
+  const [xa, xb] = [0, niceMax(Math.max(...pts.map(p => p[1]), 60))], [ya, yb] = [0, 100];
+  return blk(`${vizT('Durabilidad y combustible', ayuda)}
+    <div class="viz">${vPuntos({ datos: pts, x0: xa, x1: xb, y0: ya, y1: yb, xt: vTicks(xa, xb, 4), yt: [0, 25, 50, 75, 100], xl: 'Hidrato durante (g/h)', yl: 'Stamina al acabar (%)', fill: () => col, tip: d => `${d[0]}: ${nf(d[1], 0)} g/h, acabaste con un ${d[2]} % de stamina (${dur(d[3].min)})`, aria: 'Hidrato por hora frente a la stamina al acabar en las salidas largas', fmtX: v => nf(v, 0), fmtY: v => nf(v, 0) })}</div>`);
+}

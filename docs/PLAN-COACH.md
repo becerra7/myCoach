@@ -266,6 +266,13 @@ Objetivo: que funcione sin ti delante y aprender qué enamora.
     - **Cómo va:** push sin contenido firmado con VAPID (las claves las crea el conector la primera vez y se guardan en el KV); el aviso queda en `aviso:<id>` dos días y el service worker lo lee en `/avisos/<id>` (el id es el hash del endpoint). Solo se manda a servicios de push conocidos (Google, Mozilla, Apple, Microsoft). Herramientas `avisos` y `avisos_guardar`, solo para la app (Claude no las ve).
     - **Instalar:** botón "Instalar myCoach" en Ajustes cuando Chrome lo ofrece; iconos PNG para Android e iPhone.
 
+24. **Análisis de cada salida, 10 de octubre.** Lo que calcula el conector (cada actividad) y lo que concluye Claude se juntan en la pantalla de la actividad.
+    - **`salida_guardar`** (por fin; estaba en `PLAN-V1.md` sin hacer): resumen de 1-3 frases, hidratos, agua y sodio por hora, RPE, sensaciones y qué cambiar la próxima vez, en `salidas/analisis`. Claude lo relee en `garmin_activity_detail` (`analisis_entrenador`). La skill `analista` la llama siempre al cerrar.
+    - **Pantalla de actividad:** "Lo que dijo tu entrenador" (o "Analizar con Claude" si aún no está), "Por terreno" con el tiempo en llano, ondulado, subida y bajada, la tabla con tu media de los 3 meses anteriores y la velocidad según la pendiente frente a tu curva, y "Esfuerzos" (VAM y pulso sostenidos, desacople si fue un fondo, stamina y temperatura).
+    - **Insights:** "Durabilidad y combustible" deja de estar pendiente: hidrato por hora frente a la stamina al acabar, en salidas de 90 min o más.
+    - **Arreglos del análisis:** las subidas tras un tramo ondulado se perdían (el inicio quedaba antes de tiempo y la media bajaba del 3 %); ahora el pie del puerto se busca bien. Y "ondulado" (1,5-3 %) entra en el reparto, así el tiempo por terreno suma la salida entera. El desnivel sale del barómetro suavizado: en una salida real, el reparto por pendiente da unos 860 m de 1.061 m de Garmin.
+    - El detalle de cada actividad se vuelve a pedir una vez (versión 4), de 15 en 15 al sincronizar o al abrir una actividad.
+
 ## 10. Próximos pasos concretos (2 semanas)
 1. Sacar `packages/domain` con carga TRIMP, semáforo y tests.
 2. Documento `atleta/perfil` más registro de decisiones.

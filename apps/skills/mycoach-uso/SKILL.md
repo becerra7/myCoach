@@ -20,7 +20,7 @@ description: Cómo y cuándo usar las herramientas de myCoach/Garmin (coach_*, a
 | ¿Cuándo puedo entrenar? | `agenda` (1); si ya llamaste a `coach_semana`, su agenda viene en cada día |
 | Revisar o cambiar la semana | `coach_semana` → `coach_proponer` (validar) → con su sí, `guardar=true` → `coach_semana` para verificar (4) |
 | Primer mensaje de entreno de la conversación | `coach_perfil` (1, solo si no está en contexto). Si trae `por_conocer`, sigue `primeros-pasos` |
-| Analizar una actividad | `garmin_activities limit=3` → `garmin_activity_detail` (2); `intervals_actividad` solo si hace falta desacople o zonas |
+| Analizar una actividad | `garmin_activities limit=3` → `garmin_activity_detail` (2); `intervals_actividad` solo si hace falta desacople o zonas; al acabar, `salida_guardar` (+1) |
 | Sueño, VFC, readiness, estrés de un día | `garmin_dia` (1; con `partes` si solo hace falta una cosa) |
 | Lo mismo en varios días | `garmin_dia dias=N` (1, la serie guardada) o `intervals_bienestar` (1) si Intervals está conectado (`intervals_estado` una vez) |
 | ¿Me estoy pasando de carga? ¿Estoy en forma? VO2máx, umbral, FTP, predicciones | `garmin_forma` (1). La carga de hoy y su franja ya vienen en `coach_hoy` |

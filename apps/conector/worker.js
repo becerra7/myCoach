@@ -656,6 +656,16 @@ function detectarSubidas(puntos) {
 	let s = 0;
 	let m = 0;
 	const cerrar = (a, b) => {
+		// El pie del puerto: si la carretera venía ondulando hacia arriba, el inicio quedaba kilómetros
+		// antes y la pendiente media bajaba del 3 % (la subida se perdía). Se toma como inicio el punto
+		// que más desnivel deja por delante descontando un 2,5 % de la distancia: en lo ondulado, avanzar
+		// el inicio quita poca altura y mucha distancia; ya en el puerto, quita más altura que distancia.
+		let mejor = -Infinity, pie = a;
+		for (let i = a; i < b; i++) {
+			const v = validos[b].es - validos[i].es - 0.025 * (validos[b].d - validos[i].d);
+			if (v > mejor) { mejor = v; pie = i; }
+		}
+		a = pie;
 		const pa = validos[a];
 		const pb = validos[b];
 		const gan = pb.es - pa.es;
@@ -803,7 +813,7 @@ function detectarBajadas(puntos) {
 function porTerreno(puntos) {
 	const e = suavizarAltitud(puntos);
 	const p = puntos.map((x, i) => ({ ...x, es: e[i] })).filter((x) => x.es != null && x.t != null);
-	const acc = { llano: [], subida: [], bajada: [] };
+	const acc = { llano: [], subida: [], bajada: [], ondulado: [] };
 	// Además, por pendiente en tramos de 2 puntos (−10 % a +12 %): la curva de velocidad según desnivel.
 	const bins = new Map();
 	// Ritmo ajustado a la pendiente (carrera): cada tramo se pasa a su equivalente en llano con el
@@ -817,7 +827,8 @@ function porTerreno(puntos) {
 		const seg = p[i].t - p[a].t;
 		if (seg > 0 && largo / seg < 40) { // 144 km/h: por encima es un salto del GPS
 			const pend = (p[i].es - p[a].es) / largo;
-			const tipo = Math.abs(pend) < 0.015 ? "llano" : pend >= 0.03 ? "subida" : pend <= -0.03 ? "bajada" : null;
+			// Entre el 1,5 % y el 3 % (subiendo o bajando) es "ondulado": no se mezcla con el llano ni con las subidas.
+			const tipo = Math.abs(pend) < 0.015 ? "llano" : pend >= 0.03 ? "subida" : pend <= -0.03 ? "bajada" : "ondulado";
 			const bin = Math.max(-10, Math.min(12, Math.round((pend * 100) / 2) * 2));
 			const fcsB = p.slice(a, i + 1).map((x) => x.fc).filter(Boolean);
 			const b = bins.get(bin) || { m: 0, s: 0, fcs: 0, sfc: 0 };
@@ -848,6 +859,7 @@ function porTerreno(puntos) {
 	const llano = resumir(acc.llano, 2);
 	const subida = resumir(acc.subida, 1);
 	const bajada = resumir(acc.bajada, 1);
+	const ondulado = resumir(acc.ondulado, 0.5);
 	const limpio = ({ _gan, _m, _s, ...x }) => x;
 	return {
 		llano: llano && {
@@ -861,6 +873,7 @@ function porTerreno(puntos) {
 			return { ...limpio(subida), pendiente_pct: round(pend, 1), vam_m_h: Math.round(vam), w_kg_estimado: round(vam / (200 + 10 * pend), 2) };
 		})(),
 		bajada: bajada && { ...limpio(bajada), fc_media: undefined, pendiente_pct: round((bajada._gan / bajada._m) * 100, 1) },
+		ondulado: ondulado && limpio(ondulado),
 		ajustado_pendiente: gap.m >= 2000 && gap.s > 0 ? (() => {
 			const fc = gap.sfc ? gap.fcs / gap.sfc : null;
 			return { km_equivalentes: round(gap.m / 1000, 1), minutos: round(gap.s / 60, 1), vel_equivalente_kmh: round((gap.m / gap.s) * 3.6, 1), fc_media: fc ? Math.round(fc) : null, metros_por_latido: fc ? round((gap.m / (gap.s / 60)) / fc, 2) : null };
@@ -909,7 +922,7 @@ function analizarActividad(details) {
 		vam_sostenida_mh: { min10: vamSostenida(puntos, 10), min20: vamSostenida(puntos, 20), min60: vamSostenida(puntos, 60) },
 		histograma_fc_min: histogramaFc(puntos),
 		fc_max_sostenida: { min5: fcMaxSostenida(puntos, 5), min20: fcMaxSostenida(puntos, 20), min60: fcMaxSostenida(puntos, 60) },
-		nota: "por_terreno suma toda la salida en tramos de 500 m (llano < 1,5 %, subida ≥ 3 %, bajada ≤ −3 %). W/kg estimado con la fórmula de Ferrari (VAM / (200 + 10 · pendiente)): orientativo, sin potenciómetro.",
+		nota: "por_terreno suma toda la salida en tramos de 500 m (llano < 1,5 %, subida ≥ 3 %, bajada ≤ −3 %, ondulado lo de en medio). W/kg estimado con la fórmula de Ferrari (VAM / (200 + 10 · pendiente)): orientativo, sin potenciómetro.",
 	};
 }
 
@@ -1575,7 +1588,7 @@ const TOOLS = {
 	app_leer: {
 		title: "Leer datos de myCoach",
 		description:
-			"Lee un documento guardado por la app myCoach para este usuario. Documentos: 'estado/app' (plan de la semana y la siguiente por fecha, comidas en cuartos de plato, objetivo, deportes, nombre), 'vivo/datos' (actividades y perfil ya procesados), 'notas' (notas de validacion). Uselo antes de proponer cambios de plan o de comentar la comida.",
+			"Lee un documento guardado por la app myCoach para este usuario. Documentos: 'estado/app' (plan de la semana y la siguiente por fecha, comidas en cuartos de plato, objetivo, deportes, nombre), 'vivo/datos' (actividades y perfil ya procesados), 'notas' (notas de validacion), 'salidas/analisis' (lo guardado con salida_guardar, por actividad). Uselo antes de proponer cambios de plan o de comentar la comida.",
 		schema: { type: "object", properties: { doc: { type: "string", description: "Ruta del documento, p. ej. estado/app" } }, required: ["doc"] },
 		run: async (env, userId, { doc }) => {
 			if (!APP_DOC.test(doc || "")) throw new HttpError(400, "Documento no valido");
@@ -1768,8 +1781,11 @@ const TOOLS = {
 			const s = a?.summaryDTO || {};
 			let analisis = null;
 			try { analisis = details ? analizarActividad(details) : null; } catch (err) { analisis = { error: String(err) }; }
+			const yaAnalizada = await analisisGuardado(env, userId, activity_id).catch(() => null);
 			return {
 				activity_id,
+				// Lo que ya se concluyó de esta salida (salida_guardar): no repetirlo, partir de ahí.
+				...(yaAnalizada ? { analisis_entrenador: yaAnalizada } : {}),
 				name: a?.activityName ?? null,
 				type: a?.activityTypeDTO?.typeKey ?? null,
 				start: s.startTimeLocal ?? null,
@@ -5049,7 +5065,7 @@ const instruccionesCoach = (nombre = NOMBRE_COACH) =>
 	"para ensenar como queda el plan. Su calendario y sus compromisos ya vienen en coach_semana y agenda: no le preguntes lo que ya esta ahi. " +
 	"Nunca pongas una sesion en un dia sin hueco sin preguntarle; si entrena igualmente, coach_proponer con entrena_igualmente=true." +
 	" DATOS: garmin_dia (el dia: sueno, VFC, readiness, estres), garmin_forma (carga, Load Focus, VO2max, umbral, predicciones), garmin_activity_detail " +
-	"(una actividad con sus graficas: nunca pidas capturas). Si coach_hoy trae fuentes.sin_descanso, su dispositivo no mide el descanso: no le pidas sueno " +
+	"(una actividad con sus graficas: nunca pidas capturas); al cerrar su analisis, salida_guardar. Si coach_hoy trae fuentes.sin_descanso, su dispositivo no mide el descanso: no le pidas sueno " +
 	"ni VFC, preguntale como llega. Si ningun dato encaja, mira el catalogo de garmin_api y pidelo; no digas que no lo tienes. Para rutas de bici, propon tu los " +
 	"puntos de paso (de donde sale: garmin_activities) y mide con garmin_plan_route; la distancia es la que mide. Si algo falla por la conexion con Garmin, garmin_status." +
 	" PANTALLAS: para ensenar su plan, su semana o su progreso, abre la app con mycoach_abrir; no dibujes tu una imitacion." +
@@ -7356,6 +7372,76 @@ Object.assign(TOOLS, {
 			const registros = (Object.keys(nuevo).length > 1 ? [...resto, nuevo] : resto).sort((a, b) => a.fecha.localeCompare(b.fecha)).slice(-MEDIDAS_MAX);
 			await guardarDoc(env, userId, MEDIDAS_DOC, { registros });
 			return { fecha, guardado: nuevo, escrito: true, resumen: resumenMedidas(registros) };
+		},
+	},
+});
+
+// ──────────────────────────── El análisis de cada salida ────────────────────────────
+// Los números de una salida los calcula el conector (analizarActividad); las conclusiones, lo que
+// comió y cómo se sintió los saca Claude al analizarla con la persona. Antes se perdían en la
+// conversación: ahora se guardan aquí, por actividad, y la app los enseña (y Claude los relee).
+//   salidas/analisis  { [activity_id]: { fecha, resumen[], hidratos_g_h, agua_ml_h, sal_mg_h, rpe, sensaciones, proxima_vez, actualizado } }
+
+const SALIDAS_DOC = "salidas/analisis";
+const SALIDAS_MAX = 400;
+const texto = (v, max) => (v == null ? undefined : String(v).trim().slice(0, max) || undefined);
+const numEn = (v, min, max, nombre) => {
+	if (v == null) return undefined;
+	const n = Number(v);
+	if (!Number.isFinite(n) || n < min || n > max) throw new Error(`${nombre}: tiene que estar entre ${min} y ${max}.`);
+	return Math.round(n * 10) / 10;
+};
+
+async function analisisGuardado(env, userId, activityId) {
+	return ((await leerDoc(env, userId, SALIDAS_DOC)) || {})[String(activityId)] || null;
+}
+
+Object.assign(TOOLS, {
+	salida_guardar: {
+		title: "Guardar el análisis de una salida",
+		write: true,
+		description:
+			"Guarda en myCoach lo que concluyes al analizar UNA actividad (activity_id de garmin_activities), para que la persona lo vea en la app y tú lo releas después: " +
+			"resumen (1-3 conclusiones con cifra), lo que tomó durante (hidratos_g_h, agua_ml_h, sal_mg_h: solo si te lo ha dicho), rpe (1-10), sensaciones y proxima_vez (qué cambiar la próxima salida parecida). " +
+			"Llámala SIEMPRE al cerrar un análisis. Solo cambia los campos que pases; volver a llamarla corrige.",
+		schema: {
+			type: "object",
+			properties: {
+				activity_id: { type: "string" },
+				fecha: { type: "string", description: "AAAA-MM-DD de la actividad." },
+				resumen: { type: "array", items: { type: "string" }, maxItems: 3, description: "1-3 conclusiones cortas, con cifra." },
+				hidratos_g_h: { type: "number", description: "Gramos de hidrato por hora que tomó durante (0-150)." },
+				agua_ml_h: { type: "number", description: "Mililitros por hora (0-2000)." },
+				sal_mg_h: { type: "number", description: "Miligramos de sodio por hora (0-3000)." },
+				rpe: { type: "number", description: "Esfuerzo percibido, 1-10." },
+				sensaciones: { type: "string", description: "Cómo se encontró, en una frase." },
+				proxima_vez: { type: "string", description: "Qué cambiar la próxima salida parecida, en una frase." },
+			},
+			required: ["activity_id"],
+		},
+		run: async (env, userId, args = {}) => {
+			const id = String(args.activity_id || "").trim();
+			if (!/^\d{4,20}$/.test(id)) throw new Error("activity_id no válido: usa el de garmin_activities.");
+			const cambios = {
+				fecha: /^\d{4}-\d{2}-\d{2}$/.test(args.fecha || "") ? args.fecha : undefined,
+				resumen: Array.isArray(args.resumen) ? args.resumen.map((r) => texto(r, 220)).filter(Boolean).slice(0, 3) : typeof args.resumen === "string" ? [texto(args.resumen, 220)].filter(Boolean) : undefined,
+				hidratos_g_h: numEn(args.hidratos_g_h, 0, 150, "hidratos_g_h"),
+				agua_ml_h: numEn(args.agua_ml_h, 0, 2000, "agua_ml_h"),
+				sal_mg_h: numEn(args.sal_mg_h, 0, 3000, "sal_mg_h"),
+				rpe: numEn(args.rpe, 1, 10, "rpe"),
+				sensaciones: texto(args.sensaciones, 200),
+				proxima_vez: texto(args.proxima_vez, 200),
+			};
+			for (const k of Object.keys(cambios)) if (cambios[k] === undefined) delete cambios[k];
+			if (!Object.keys(cambios).filter((k) => k !== "fecha").length) throw new Error("No hay nada que guardar.");
+			const doc = (await leerDoc(env, userId, SALIDAS_DOC)) || {};
+			delete doc.at;
+			doc[id] = { ...(doc[id] || {}), ...cambios, actualizado: new Date().toISOString() };
+			// Se quedan las más recientes.
+			const ids = Object.keys(doc).sort((a, b) => String(doc[b].fecha || doc[b].actualizado).localeCompare(String(doc[a].fecha || doc[a].actualizado)));
+			for (const viejo of ids.slice(SALIDAS_MAX)) delete doc[viejo];
+			await guardarDoc(env, userId, SALIDAS_DOC, doc);
+			return { guardado: doc[id], activity_id: id, siguiente: "Dile que ya está en la app, en la pantalla de la actividad." };
 		},
 	},
 });

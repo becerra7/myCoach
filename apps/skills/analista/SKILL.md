@@ -7,7 +7,7 @@ description: Analiza una actividad hecha (bici, carrera, skimo, fuerza…) como 
 Sigue `reglas-coach` y `mycoach-uso` (≤5 llamadas).
 
 ## Datos
-1. `garmin_activities limit=3` (trae la carga de Garmin de cada una, `carga_garmin`) → `garmin_activity_detail` (stamina, pulso, velocidad, perfil de 24 tramos).
+1. `garmin_activities limit=3` (trae la carga de Garmin de cada una, `carga_garmin`) → `garmin_activity_detail` (stamina, pulso, velocidad, perfil de 24 tramos y `analisis`: tiempo y velocidad por terreno —llano, ondulado, subida, bajada—, por pendiente, subidas, VAM y pulso sostenidos, desacople).
 2. Solo si aporta: `intervals_actividad` (desacople, zonas, eficiencia).
 3. Progreso: `coach_progreso` del deporte (compara 4 semanas con las 4 anteriores).
 4. Plan del día: `coach_semana` si no está en contexto.
@@ -21,6 +21,7 @@ Sigue `reglas-coach` y `mycoach-uso` (≤5 llamadas).
 
 ## Salida
 - 1–3 conclusiones con cifra cada una.
+- **Guárdalo siempre con `salida_guardar`** (activity_id, fecha, resumen con esas conclusiones, rpe, sensaciones, proxima_vez y, si te dice lo que tomó durante, hidratos_g_h, agua_ml_h, sal_mg_h). Si no lo sabes, pregúntale qué comió y bebió antes de guardarlo. Queda en la app, en la pantalla de la actividad, y alimenta "Durabilidad y combustible" en Insights. Si `garmin_activity_detail` ya trae `analisis_entrenador`, parte de ahí y corrige solo lo nuevo.
 - Qué cambia en el plan (si algo) → se lo pasa al `planificador`, que es quien escribe.
 - Innegociable / ajustable para la próxima sesión parecida.
 - Si el usuario dice cómo se encontró, anótalo con `coach_anotar`.

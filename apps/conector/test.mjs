@@ -556,7 +556,7 @@ const rpc = async (env, token, message) => {
 	check("un navegador en la raiz sigue viendo la pagina", (await (await get(env, "/")).text()).includes("<h1>"));
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("tools/list devuelve 51 herramientas", list.body.result.tools.length === 51);
+	check("tools/list devuelve 52 herramientas", list.body.result.tools.length === 52);
 	check("app_guardar se anuncia como escritura", anot0(list).app_guardar.readOnlyHint === false);
 	{
 		const call = (name, args) => rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name, arguments: args } });
@@ -1031,6 +1031,27 @@ const rpc = async (env, token, message) => {
 	const plana = await call("garmin_activity_detail", { activity_id: "3" });
 	check("mide el desacople", Math.abs(plana.analisis?.desacople_pct - 9.1) < 1.5, `(${plana.analisis?.desacople_pct})`);
 	check("en llano no ve subidas", plana.analisis?.subidas?.length === 0);
+	// Una subida que empieza tras 5 km ondulando hacia arriba (+0,6 %): antes se tomaba todo
+	// como una sola "subida" al 2,5 % y se descartaba; ahora el inicio se recorta al pie del puerto.
+	{
+		const filasR = []; let dd = 0, tt = 0, ee = 100;
+		const tr = (metros, kmh, pend, fc, ola = 0) => { for (let x = 0; x < metros; x += 50) { dd += 50; tt += 50 / (kmh / 3.6); ee += 50 * pend + (ola ? Math.sin(dd / 150) * ola : 0); filasR.push({ metrics: [fc, ee, dd, tt] }); } };
+		tr(5000, 27, 0.006, 135, 1.2);
+		tr(4000, 14, 0.05, 160);
+		tr(3000, 30, 0, 130);
+		globalThis.fetch = async (url) => {
+			const u = new URL(url);
+			if (u.pathname.endsWith("/details")) return new Response(JSON.stringify({ ...details, activityDetailMetrics: filasR }));
+			if (u.pathname.endsWith("/hrTimeInZones")) return new Response("[]");
+			return new Response(JSON.stringify({ activityName: "Ondulada", summaryDTO: {} }));
+		};
+		const ond = await call("garmin_activity_detail", { activity_id: "4" });
+		const su = ond.analisis?.subidas || [];
+		check("una subida tras un tramo ondulado se detecta", su.length >= 1 && su[0].pendiente_pct >= 4 && su[0].largo_km <= 4.6, JSON.stringify(su));
+		const pt = ond.analisis?.por_terreno || {};
+		const totalMin = ["llano", "subida", "bajada", "ondulado"].reduce((q, k) => q + (pt[k]?.minutos || 0), 0);
+		check("por terreno: con el ondulado, los minutos suman toda la salida", Math.abs(totalMin - tt / 60) < 1.5, `(${totalMin} de ${(tt / 60).toFixed(1)})`);
+	}
 	check("en llano no hay subida ni bajada por terreno", plana.analisis?.por_terreno?.subida === null && plana.analisis?.por_terreno?.bajada === null);
 	check("pulso máximo sostenido 5 min", r.analisis?.fc_max_sostenida?.min5 === 160, `(${r.analisis?.fc_max_sostenida?.min5})`);
 	check("devuelve las zonas de Garmin", r.zonas_fc?.[1]?.minutos === 50);
@@ -1266,7 +1287,7 @@ const rpc = async (env, token, message) => {
 	check("el token de acceso vale sin leer del KV", init.body.result?.serverInfo?.name === "garmin");
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("las herramientas se listan igualmente", list.body.result.tools.length === 51);
+	check("las herramientas se listan igualmente", list.body.result.tools.length === 52);
 
 	// Y el dato que si vive en KV avisa en vez de mentir
 	const call = await rpc(env, tokens.access_token, {
@@ -2097,7 +2118,7 @@ const rpc = async (env, token, message) => {
 	const env = makeEnv();
 	const { tokens } = await connect(env, "ana@x.com", "a");
 	const tools = (await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 30, method: "tools/list" })).body.result.tools;
-	const FAMILIAS = /^(agenda|garmin|coach|entrenos?|entreno|fuerza|cardio|comida|comidas|peso|medidas|avisos|intervals|app|mycoach)(_[a-z0-9]+)*$/;
+	const FAMILIAS = /^(agenda|garmin|coach|entrenos?|entreno|fuerza|cardio|comida|comidas|peso|medidas|avisos|salida|intervals|app|mycoach)(_[a-z0-9]+)*$/;
 	check("convención: cada herramienta empieza por su familia", tools.every((t) => FAMILIAS.test(t.name)), tools.filter((t) => !FAMILIAS.test(t.name)).map((t) => t.name).join());
 	check("convención: todas con título, descripción y esquema de objeto", tools.every((t) => t.title && t.description?.length > 40 && t.inputSchema?.type === "object"));
 	check("convención: descripciones de menos de 1500 caracteres", tools.every((t) => t.description.length < 1500), tools.filter((t) => t.description.length >= 1500).map((t) => t.name).join());
@@ -2107,7 +2128,7 @@ const rpc = async (env, token, message) => {
 	const viejas = ["garmin_sleep", "garmin_hrv", "garmin_daily_summary", "garmin_body_battery", "garmin_training_readiness", "garmin_course_detail", "fuerza_entrenos", "cardio_entrenos", "fuerza_enviar_garmin", "cardio_enviar_garmin"];
 	check("las herramientas juntadas ya no existen", !tools.some((t) => viejas.includes(t.name)));
 	const visibles = tools.filter((t) => !t._meta?.ui?.visibility || t._meta.ui.visibility.includes("model"));
-	check("Claude ve 44 herramientas", visibles.length === 44, String(visibles.length));
+	check("Claude ve 45 herramientas", visibles.length === 45, String(visibles.length));
 }
 
 // ── 13. Intervals.icu: clave cifrada, actividades, series, bienestar y curvas ──
@@ -2751,6 +2772,27 @@ const rpc = async (env, token, message) => {
 	await llamar("avisos_guardar", { prueba: true });
 	check("avisos: una suscripción caducada se borra", (await llamar("avisos")).dispositivos === 0);
 	globalThis.fetch = garmin;
+}
+
+// ── 22. El análisis de cada salida: lo que concluye Claude queda en myCoach ──
+{
+	mockGarmin({ "ana@x.com": { password: "a", data: { displayName: "ana", hrv: 50 } }, "bob@x.com": { password: "b", data: { displayName: "bob", hrv: 60 } } });
+	const env = makeEnv();
+	const ana = (await connect(env, "ana@x.com", "a")).tokens.access_token;
+	const bob = (await connect(env, "bob@x.com", "b")).tokens.access_token;
+	const llamar = async (token, name, args = {}) => {
+		const res = (await rpc(env, token, { jsonrpc: "2.0", id: 80, method: "tools/call", params: { name, arguments: args } })).body.result;
+		return res.isError ? { error: res.content[0].text } : JSON.parse(res.content[0].text);
+	};
+	const g = await llamar(ana, "salida_guardar", { activity_id: "24588889912", fecha: "2026-10-03", resumen: ["Llano a 26,3 km/h con 140 ppm: tu mejor fondo.", "Subidas a 759 m/h."], hidratos_g_h: 55, rpe: 6 });
+	check("salida: se guarda el análisis", g.guardado?.resumen?.length === 2 && g.guardado.hidratos_g_h === 55);
+	const g2 = await llamar(ana, "salida_guardar", { activity_id: "24588889912", proxima_vez: "Come a partir de la primera hora." });
+	check("salida: volver a llamarla completa sin borrar", g2.guardado.hidratos_g_h === 55 && g2.guardado.proxima_vez && g2.guardado.resumen.length === 2);
+	check("salida: valida los rangos", /entre/.test((await llamar(ana, "salida_guardar", { activity_id: "1234", hidratos_g_h: 500 })).error || ""));
+	check("salida: pide un activity_id de Garmin", /activity_id/.test((await llamar(ana, "salida_guardar", { activity_id: "abc", rpe: 5 })).error || ""));
+	const doc = await llamar(ana, "app_leer", { doc: "salidas/analisis" });
+	check("salida: la app lo lee", doc?.["24588889912"]?.rpe === 6);
+	check("salida: cada uno ve lo suyo", (await llamar(bob, "app_leer", { doc: "salidas/analisis" })) === null);
 }
 
 // ── Plan compartido con myLuv: permiso reducido plan:leer ──
