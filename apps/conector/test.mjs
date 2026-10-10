@@ -2769,7 +2769,7 @@ const rpc = async (env, token, message) => {
 	// Domingo por la tarde: sin plan para la semana que viene → aviso de plan; los menús están desactivados.
 	pushes.length = 0;
 	const esperas = [];
-	await worker.scheduled({ cron: "0 17 * * 0" }, env, { waitUntil: (p) => esperas.push(p) });
+	await worker.scheduled({ cron: "0 17 * * SUN" }, env, { waitUntil: (p) => esperas.push(p) });
 	await Promise.all(esperas);
 	const tras = await (await get(env, `/avisos/${id}`)).json();
 	check("avisos: el domingo avisa de la semana sin plan", pushes.length === 1 && tras?.tipo === "plan", JSON.stringify(tras));

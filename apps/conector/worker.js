@@ -7472,7 +7472,7 @@ const AVISO_TIPOS = {
 };
 // Solo se manda a servicios de push conocidos: el servidor no hace peticiones a cualquier URL.
 const PUSH_HOSTS = /^(fcm\.googleapis\.com|updates\.push\.services\.mozilla\.com|web\.push\.apple\.com|[a-z0-9.-]+\.notify\.windows\.com|android\.googleapis\.com)$/;
-const CRON_DOMINGO = "0 17 * * 0";
+const CRON_DOMINGO = "0 17 * * SUN";
 const b64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 const b64uTexto = (s) => b64u(new TextEncoder().encode(s));
 

@@ -14,7 +14,7 @@ run_worker_first = true
 # Descarga diaria de Garmin para el panel de progreso. De madrugada, cuando
 # el sueño y la VFC de la noche ya están puestos.
 [triggers]
-crons = ["30 5 * * *", "0 17 * * 0"]
+crons = ["30 5 * * *", "0 17 * * SUN"]
 
 # Un solo KV con dos nombres: GARMIN (el conector: usuarios, tokens de Garmin, datos de la app)
 # y SESIONES (las sesiones de la web, con el prefijo "mc:").
