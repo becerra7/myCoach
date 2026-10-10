@@ -98,6 +98,10 @@ function actTerreno(a) {
   if (!a.ter || !REND[a.dep]) return '';
   const T = sumaTerreno([a], (M.perfil || {}).peso);
   const prev = acts().filter(x => x.dep === a.dep && x.id !== a.id && x.ter && x.f <= a.f && x.f > addDays(a.f, -90));
+  // Para el pulso, solo salidas parecidas (suaves con suaves, duras con duras) de los 6 meses anteriores:
+  // medido en tus salidas, el pulso a igual pendiente sigue sobre todo a lo fuerte que vas (r = 0,82).
+  const suave = x => ['rec', 'fondo'].includes(tipoAct(x)), esSuave = suave(a);
+  const parecidas = acts().filter(x => x.dep === a.dep && x.id !== a.id && x.ter && x.f <= a.f && x.f > addDays(a.f, -182) && suave(x) === esSuave);
   const R = prev.length >= 2 ? sumaTerreno(prev, (M.perfil || {}).peso) : null;
   const trozos = [['Llano', T.min.llano], ['Ondulado', T.min.ondulado], ['Subida', T.min.subida], ['Bajada', T.min.bajada]].filter(t => t[1] >= 1), total = trozos.reduce((s, t) => s + t[1], 0);
   const tonos = { Llano: 40, Ondulado: 60, Subida: 100, Bajada: 25 }, col = scol(a.dep);
@@ -114,16 +118,22 @@ function actTerreno(a) {
       fmtY: a.dep === 'correr' ? fmtRitmoSeg : v => nf(v, 0), pasoY: a.dep === 'correr' ? 'ritmo' : null, u: a.dep === 'correr' ? 'min/km' : 'km/h', aria: `${V.n} según la pendiente en esta actividad${ref.length >= 2 ? ', frente a tu media de los 3 meses anteriores' : ''}` })}</div>
     <div class="leyenda"><span><i class="ln" style="border-top:2.5px solid ${col}"></i>Esta ${a.dep === 'bici' ? 'salida' : 'actividad'}</span>${ref.length >= 2 ? '<span><i class="ln" style="border-top:2px dashed var(--ink-2)"></i>Tu media (3 meses)</span>' : ''}</div>` : '';
   // Pulso según la pendiente: a igual pendiente, menos pulso que tu media es que vas mejor (sin potenciómetro, la cifra más honesta).
+  const Bp = sumaPendiente(parecidas), cuantas = p => parecidas.filter(x => (x.ter.pp || []).some(b => b[0] === p && b[1] >= 0.5 && b[3])).length;
   const pf = [...A.entries()].filter(([, x]) => x.km >= 0.5 && x.fcmin).sort((p, q) => p[0] - q[0]);
-  const rf = [...B.entries()].filter(([p, x]) => x.km >= 1 && x.fcmin && A.has(p)).sort((p, q) => p[0] - q[0]);
-  const fcDe = x => x.fcm / x.fcmin;
+  const rf = [...Bp.entries()].filter(([p, x]) => x.km >= 1 && x.fcmin && A.has(p) && cuantas(p) >= 3).sort((p, q) => p[0] - q[0]);
+  const fcDe = x => x.fcm / x.fcmin, tipoTxt = esSuave ? 'suaves' : 'duras';
+  // Se dice algo solo si la diferencia pasa de 10 ppm (lo que varía de una salida a otra) en las pendientes de 0 a +6 %.
+  const dif = (() => { let w = 0, d = 0; for (const [p, x] of pf) { const y = Bp.get(p); if (p < 0 || p > 6 || !y || !y.fcmin || cuantas(p) < 3 || x.km < 1) continue; d += (fcDe(x) - fcDe(y)) * x.km; w += x.km; } return w ? d / w : null; })();
+  const leeFc = dif == null ? `Aún no hay 3 ${a.dep === 'bici' ? 'salidas' : 'actividades'} ${tipoTxt} parecidas para comparar el pulso.`
+    : Math.abs(dif) <= 10 ? `Dentro de lo normal frente a tus ${a.dep === 'bici' ? 'salidas' : 'actividades'} ${tipoTxt} (${dif > 0 ? '+' : dif < 0 ? '−' : ''}${nf(Math.abs(dif), 0)} ppm; entre salidas varía ±10).`
+    : `${nf(Math.abs(dif), 0)} ppm ${dif < 0 ? 'menos' : 'más'} que en tus ${a.dep === 'bici' ? 'salidas' : 'actividades'} ${tipoTxt}, a igual pendiente: más de lo que varía normalmente${dif > 0 ? '. El calor, el cansancio o poco sueño lo suben' : ''}.`;
   const curvaFc = pf.length >= 3 ? `<h3 class="met-h" style="margin-top:16px">Pulso según la pendiente</h3>
     <div class="viz">${vCurvas({ series: [{ color: col, pts: pf.map(([p, x]) => [p, fcDe(x), `${pc(p)}: ${nf(fcDe(x), 0)} ppm en ${nf(x.km, 1)} km${B.get(p) && B.get(p).km >= 1 && B.get(p).fcmin ? ` (tu media ${nf(fcDe(B.get(p)), 0)})` : ''}`]) },
-      ...(rf.length >= 2 ? [{ color: 'var(--ink-2)', dash: true, pts: rf.map(([p, x]) => [p, fcDe(x), `${pc(p)}, tu media: ${nf(fcDe(x), 0)} ppm`]) }] : [])],
-      u: 'ppm', aria: `Pulso según la pendiente en esta actividad${rf.length >= 2 ? ', frente a tu media de los 3 meses anteriores' : ''}` })}</div>
-    <div class="leyenda"><span><i class="ln" style="border-top:2.5px solid ${col}"></i>Esta ${a.dep === 'bici' ? 'salida' : 'actividad'}</span>${rf.length >= 2 ? '<span><i class="ln" style="border-top:2px dashed var(--ink-2)"></i>Tu media (3 meses)</span>' : ''}</div>
-    <p class="xs muted">A igual pendiente, menos pulso que tu media es que vas mejor; el calor y el cansancio lo suben.</p>` : '';
-  return `<section class="card" aria-labelledby="act-ter"><div class="act-h"><h2 class="card-t" id="act-ter">Por terreno</h2>${info(`act-ter-${a.id}`, 'Por terreno', `La actividad entera, en tramos de 500 m: llano por debajo del 1,5 % de pendiente, ondulado entre el 1,5 y el 3 %, subida desde el 3 % y bajada desde el −3 %. "Tu media" son tus ${SPORTS[a.dep].n.toLowerCase()} de los 3 meses anteriores. El desnivel sale del barómetro suavizado, así que puede quedar algo por debajo del que da Garmin.`)}</div>
+      ...(rf.length >= 2 ? [{ color: 'var(--ink-2)', dash: true, pts: rf.map(([p, x]) => [p, fcDe(x), `${pc(p)}, tus ${tipoTxt}: ${nf(fcDe(x), 0)} ppm`]) }] : [])],
+      u: 'ppm', aria: `Pulso según la pendiente en esta actividad${rf.length >= 2 ? `, frente a tus ${a.dep === 'bici' ? 'salidas' : 'actividades'} ${tipoTxt} de los 6 meses anteriores` : ''}` })}</div>
+    <div class="leyenda"><span><i class="ln" style="border-top:2.5px solid ${col}"></i>Esta ${a.dep === 'bici' ? 'salida' : 'actividad'}</span>${rf.length >= 2 ? `<span><i class="ln" style="border-top:2px dashed var(--ink-2)"></i>Tus ${a.dep === 'bici' ? 'salidas' : 'actividades'} ${tipoTxt} (6 meses)</span>` : ''}</div>
+    <p class="small">${leeFc}</p>` : '';
+  return `<section class="card" aria-labelledby="act-ter"><div class="act-h"><h2 class="card-t" id="act-ter">Por terreno</h2>${info(`act-ter-${a.id}`, 'Por terreno', `La actividad entera, en tramos de 500 m: llano por debajo del 1,5 % de pendiente, ondulado entre el 1,5 y el 3 %, subida desde el 3 % y bajada desde el −3 %. "Tu media" son tus ${SPORTS[a.dep].n.toLowerCase()} de los 3 meses anteriores. El pulso según la pendiente se compara solo con salidas del mismo tipo (suaves o duras) de los 6 meses anteriores, y solo en pendientes con 3 o más: el pulso depende sobre todo de lo fuerte que vas y varía unos ±10 ppm de una salida a otra, así que una diferencia menor no dice nada. El desnivel sale del barómetro suavizado, así que puede quedar algo por debajo del que da Garmin.`)}</div>
     ${barra}${tablaTerreno(a.dep, T, R)}${curvaFc}${curva}</section>`;
 }
 /* Perfil de la salida: la altitud con las subidas marcadas y numeradas y, debajo, el pulso con el mismo eje de km.

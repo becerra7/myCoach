@@ -162,7 +162,7 @@ function progDep(dep) {
     ${sinDet && conTer.length ? `<p class="xs muted" style="margin-top:8px">${sinDet} sin analizar todavía: se completan al actualizar con Garmin.</p>` : ''}`, 'first');
 
   const top = [], mas = [], fondo = a => ['rec', 'fondo'].includes(tipoAct(a)), temp = a => a.tc != null ? `, ${nf(a.tc, 0)} °C` : '';
-  const serie = (titulo, inf, pts, o) => blk(`${vizT(titulo, inf)}<div class="viz">${vSerie({ desde, color: col, ...o, pts })}</div>${o.modo === 'linea' ? '' : leyendaSerie(col, o.media != null)}`);
+  const serie = (titulo, inf, pts, o) => blk(`${vizT(titulo, inf)}<div class="viz">${vSerie({ desde, color: col, ...o, pts })}</div>${o.modo === 'linea' ? '' : leyendaSerie(col, o.media != null)}${o.lee ? `<p class="lee">${o.lee}</p>` : ''}`);
   const fmtV = dep === 'correr' ? ritmoC : v => nf(v, 1), uV = dep === 'correr' ? 'min/km' : 'km/h', txtV = v => dep === 'correr' ? ritmo(v) : `${nf(v, 1)} km/h`;
   const ayudaPuntos = `Cada punto es una ${act}. La línea continua es la tendencia del periodo y la discontinua, la media del periodo (la misma cifra que la tabla de arriba).`;
 
@@ -216,9 +216,19 @@ function progDep(dep) {
   const efi = dep === 'correr' ? a => a.ter.gap && a.ter.gap.mpl : dep === 'bici' ? a => a.ter.llano && a.ter.llano.mpl : a => a.ter.subida && a.ter.subida.fc && a.ter.subida.vam / 60 / a.ter.subida.fc * 100;
   const pEf = conTer.filter(a => fondo(a) && efi(a)).map(a => ({ f: a.f, v: efi(a), a }));
   const mediaEf = (() => { const x = sumaTerreno(conTer.filter(fondo), (M.perfil || {}).peso); return dep === 'correr' ? x.gap && x.gap.mpl : dep === 'bici' ? x.llano && x.llano.mpl : x.subida && x.subida.dpl; })();
-  if (pEf.length >= 2) mas.push(serie(dep === 'skimo' ? 'Eficiencia: desnivel por 100 latidos' : `Eficiencia: metros por latido${dep === 'correr' ? ' (ajustados a pendiente)' : ' en llano'}`,
-    info(`mpl-${dep}`, 'Eficiencia', `${dep === 'skimo' ? 'Los metros de desnivel que ganas cada 100 latidos en los tramos de subida.' : `Los metros que recorres ${dep === 'correr' ? '(equivalentes en llano)' : 'en llano'} con cada latido.`} Es la idea del factor de eficiencia de Intervals.icu o TrainingPeaks, sin potenciómetro. Si sube, tu motor aeróbico mejora. Solo cuenta ${act}s suaves y constantes (fondos): con series o con un grupo, el dato no sirve. En una misma ruta repetida sale casi igual, pero entre rutas distintas varía mucho (viento, calor, grupo): mira la tendencia, no un punto.`),
-    pEf.map(x => ({ ...x, tip: `${fDia(x.f)}: ${nf(x.v, dep === 'skimo' ? 1 : 2)}${temp(x.a)}` })), { fmt: v => nf(v, dep === 'skimo' ? 1 : 2), u: 'm', media: mediaEf, aria: `Eficiencia por ${act} en ${INS_TXT[dias]}` }));
+  // ¿Mejoras? La cifra que sigue la forma es lo que rindes por latido en salidas suaves (medido: el pulso a igual
+  // pendiente depende sobre todo de lo fuerte que vas, r = 0,82). Una salida suelta varía un ±11 %: solo se habla
+  // de cambio con 6 salidas suaves en 6 semanas o más y si la tendencia mueve más de un 5 % en el periodo.
+  const leeEf = (() => {
+    if (pEf.length < 6) return `Con ${pEf.length} ${act}${pEf.length === 1 ? '' : 's'} suave${pEf.length === 1 ? '' : 's'} aún no se puede decir si mejoras: hacen falta 6, repartidas en 6 semanas o más.`;
+    const tr = tendencia(pEf), d0 = dte(pEf[0].f).getTime() / 864e5, d1 = dte(pEf[pEf.length - 1].f).getTime() / 864e5, m = pEf.reduce((x, y) => x + y.v, 0) / pEf.length;
+    if (!tr || d1 - d0 < 42) return 'Las salidas suaves están muy juntas: hace falta que cubran 6 semanas o más para ver una tendencia.';
+    const c = tr.b * (d1 - d0) / m * 100;
+    return Math.abs(c) < 5 ? `Sin un cambio claro en ${INS_TXT[dias]}: lo que varía está dentro de lo normal entre salidas (±11 %).` : `${c > 0 ? 'Sube' : 'Baja'} un ${nf(Math.abs(c), 0)} % en ${INS_TXT[dias]}: ${c > 0 ? 'rindes más por latido, tu motor mejora' : 'rindes menos por latido; mira el cansancio y el calor'}.`;
+  })();
+  if (pEf.length >= 2) top.unshift(serie(dep === 'skimo' ? '¿Mejoras? Desnivel por 100 latidos' : `¿Mejoras? Metros por latido${dep === 'correr' ? ' (ajustados a pendiente)' : ' en llano'}`,
+    info(`mpl-${dep}`, 'Eficiencia', `${dep === 'skimo' ? 'Los metros de desnivel que ganas cada 100 latidos en los tramos de subida.' : `Los metros que recorres ${dep === 'correr' ? '(equivalentes en llano)' : 'en llano'} con cada latido.`} Es la idea del factor de eficiencia de Intervals.icu o TrainingPeaks, sin potenciómetro. Si sube, tu motor aeróbico mejora. Solo cuenta ${act}s suaves y constantes (fondos): con series o con un grupo, el dato no sirve; en tus salidas, el pulso a igual pendiente sigue sobre todo a lo fuerte que vas. En una misma ruta repetida sale casi igual, pero entre rutas distintas varía mucho (viento, calor, grupo): mira la tendencia, no un punto.`),
+    pEf.map(x => ({ ...x, tip: `${fDia(x.f)}: ${nf(x.v, dep === 'skimo' ? 1 : 2)}${temp(x.a)}` })), { fmt: v => nf(v, dep === 'skimo' ? 1 : 2), u: 'm', media: mediaEf, lee: leeEf, aria: `Eficiencia por ${act} suave en ${INS_TXT[dias]}` }));
   const pts = todas.map(a => [fDia(a.f), R.fc(a), R.v(a)]).filter(p => p[1] && p[2]);
   if (pts.length >= 3) { const [xa, xb] = rango(pts.map(p => p[1])), [ya, yb] = rango(pts.map(p => p[2])), n = pts.length;
     const mejor = pts.reduce((m, p, i) => p[2] / p[1] > pts[m][2] / pts[m][1] ? i : m, 0);
@@ -250,7 +260,7 @@ function progDep(dep) {
     <div class="viz">${vApiladas({ cols: zon, claves: ['suave', 'medio', 'duro'], colores: [`color-mix(in srgb,${col} 35%,var(--paper))`, `color-mix(in srgb,${col} 65%,var(--paper))`, col], tip: c => `Semana del ${c[0]}: ${nf(c[1][0])} h suaves, ${nf(c[1][1])} h medias, ${nf(c[1][2])} h duras`, aria: 'Horas suaves, medias y duras por semana', fmt: v => nf(v, 1), u: 'h', cada: Math.ceil(nSem / 6) })}</div>
     <div class="leyenda"><span><i style="background:color-mix(in srgb,${col} 35%,var(--paper))"></i>Suave</span><span><i style="background:color-mix(in srgb,${col} 65%,var(--paper))"></i>Medio</span><span><i style="background:${col}"></i>Duro</span></div>`));
   mas.push(bloqueCombustible(dep, todas));
-  const queMas = { bici: 'Eficiencia, VAM sostenida, desacople, pulso, bajadas y zonas', correr: 'Eficiencia, VAM sostenida, desacople, pulso y zonas', skimo: 'Eficiencia subiendo, pulso, disciplina y zonas' }[dep];
+  const queMas = { bici: 'VAM sostenida, desacople, pulso, bajadas y zonas', correr: 'VAM sostenida, desacople, pulso y zonas', skimo: 'Pulso, disciplina y zonas' }[dep];
   return `${numeros}<div class="grid2">${top.join('')}</div>${bloqueComparar(dep, conTer)}
     <details class="mas"${S.insMas ? ' open' : ''}><summary data-a="ins-mas"><span>Para profundizar</span><small>${queMas}</small></summary>
       <div class="grid2">${mas.join('')}</div></details>${bloqueRecords(dep)}`;
