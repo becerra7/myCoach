@@ -183,3 +183,45 @@ readiness. Enseñar esos huecos todos los días no aporta nada, así que:
 - **`{perfil}`** (para el material) se saca de `socialProfile.profileId`. Si Garmin no lo da, habrá que leerlo de otro sitio.
 - **`garmin_dia`** y la detección de `fuentes`: comprobar con una cuenta real con reloj y con otra que solo tenga un Edge.
 - **Skills de Claude:** ya viven en `apps/skills` y están al día. Hay que subirlas a Claude (`npm run skills`) cuando se despliegue el conector.
+
+## 9. La Personal API oficial (21 de octubre de 2026)
+
+Garmin reabrió su programa de desarrolladores con un nivel **Personal**: una
+clave que cada uno crea en Garmin Connect
+([Ajustes › Personal API Key](https://connect.garmin.com/app/settings/personalApiToken)),
+sin pedir permiso. Caduca a los 30, 90 o 180 días, o al año (avisan una
+semana antes), y solo se ve al crearla.
+
+- **Token:** `POST https://personal.connectapi.garmin.com/personalapitoken-service/personal-api/personal-api-key/token`
+  con `Authorization: ApiKey <clave>`. Dura 24 h; no hay refresh, se pide otro.
+- **Llamadas:** `GET https://personal.connectapi.garmin.com/<ruta>` con
+  `Authorization: Bearer <token>`. Las rutas son las mismas que las de la app,
+  pero solo 26 (las del [swagger](https://developer.garmin.com/gc-developer-program/personal/swagger-docs/)).
+- **Uso:** "no está pensada para aplicaciones comerciales con varios usuarios".
+  Para eso está el nivel Starter.
+
+| Área | Rutas oficiales | Límite por llamada |
+|---|---|---|
+| Actividades | `activitylist-service/activities/search/activities`, `activity-service/activity/{id}` y `/workouts`, `download-service/files/activity/{id}` (FIT original) | |
+| Sueño | `sleep-service/sleep/dailySleep`, `dailySleepSummariesByDate` | 31 días |
+| VFC | `hrv-service/hrv/{fecha}`, `hrv/daily/{desde}/{hasta}` | |
+| El día | `usersummary-service/usersummary/daily`, `v2/dailysummaries` (1 año), `stats/steps` y `stats/stress` (28 días), `stats/hydration` (31 días), `wellness-service/wellness/dailyHeartRate`, `bodyBattery/reports/daily` (31 días), `daily/spo2acclimation/{fecha}`, `wellnessactivity-service/activity/summary/range` | |
+| Cuerpo | `weight-service/weight/all` y `/range`, `goal-service/.../weightgoal`, `fitnessage-service/fitnessage/v2/{fecha}`, `biometric-service/heartRateZones/v2` | |
+| Otros | `userprofile-service/userprofile/settings`, `nutrition-service/food/logs/{fecha}`, `periodichealth-service/menstrualcycle/summary` y `/dayview` | |
+
+**Lo que trae y nos sirve:** el resumen de cada actividad lleva
+`activityTrainingLoad`, `aerobicTrainingEffect`/`anaerobicTrainingEffect`,
+`vO2MaxValue`, potencia y umbral de lactato; el sueño trae sus notas; Body
+Battery, estrés, pulso en reposo y VFC están.
+
+**Lo que no está en la lista:** todo `metrics-service` (Training Readiness,
+Training Status y carga aguda/crónica, Load Focus, serie de VO2máx, Endurance
+y Hill Score, predicciones), FTP, las gráficas, vueltas y series de fuerza de
+cada actividad (salvo dentro del FIT), entrenos y rutas, y cualquier escritura.
+Según the5krunner, además, Garmin quita del FIT de la API algunos datos
+propios (VO2máx, tiempo de recuperación).
+
+**Cómo probarlo:** `GARMIN_API_KEY=… node scripts/garmin-personal-api.mjs`
+(`--guardar` guarda las respuestas en `.garmin-personal/`, ignorada por git;
+`--connectapi` prueba el mismo token en el host no oficial). El informe solo
+lleva códigos, tiempos y nombres de campos.

@@ -279,6 +279,12 @@ Objetivo: que funcione sin ti delante y aprender qué enamora.
     - El reanálisis de las actividades viejas va de 30 en 30 por sincronización (antes 15): las mismas llamadas a Garmin, en la mitad de actualizaciones.
     - `garmin_api` trae las listas grandes por trozos (`desde`, `cantidad`): ya no hay datos de Garmin fuera de alcance por tamaño.
 
+### Decisiones del 24 de octubre: la API oficial de Garmin ha vuelto
+28. **Garmin reabre su programa de desarrolladores (21 de octubre de 2026)** con tres niveles: Personal (una clave para tus propios datos, gratis y sin aprobación), Starter (empresas, gratis, usuarios limitados, solo push y sin historia) y Enterprise (de pago). Detalle en `docs/GARMIN-API.md` §9.
+    - **La Personal API no sustituye a la conexión actual.** Es de solo lectura y no trae Training Readiness, Training Status, carga aguda ni Load Focus, ni deja mandar entrenos, rutas o el peso al reloj. Además es para uso propio: no vale para amigos ni para abrir la app.
+    - **Primero se mide.** `scripts/garmin-personal-api.mjs` prueba con una clave real qué contestan los 26 endpoints oficiales, cuánta historia hay y si los no oficiales que usamos contestan en el host personal. Con el informe se decide si conectar con clave sustituye al login o queda como plan B.
+    - **Starter es lo que se acordó pedir en la fase 3** ("cuando vuelva a abrir"). El formulario pide empresa, web y política de privacidad, modelo de negocio y qué servicios de IA tocan los datos (aquí, Claude). Sin empresa no se puede pedir todavía.
+
 ## 10. Próximos pasos concretos (2 semanas)
 1. Sacar `packages/domain` con carga TRIMP, semáforo y tests.
 2. Documento `atleta/perfil` más registro de decisiones.

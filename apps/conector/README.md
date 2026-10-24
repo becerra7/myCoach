@@ -35,8 +35,10 @@ Es el camino para crecer sin romper. Lo comprueban los tests (`12 ter`).
 
 ## Cómo funciona
 
-Garmin no tiene API pública para particulares (la oficial son 5.000 $ de
-alta), así que el Worker habla con los mismos endpoints que la app móvil.
+Garmin no tenía API pública para particulares, así que el Worker habla con
+los mismos endpoints que la app móvil. Desde el 21 de octubre de 2026 hay una
+oficial de solo lectura y para uso propio (ver `docs/GARMIN-API.md` §9); aún
+no se usa.
 El login intenta primero la ruta de la app iOS y, si Garmin la tiene
 limitada, cae automáticamente a la del portal web, que va en otro cubo de
 límites.

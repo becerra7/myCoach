@@ -11,3 +11,6 @@ apps/web/dist/
 
 # Skills empaquetadas para subir a Claude (npm run skills)
 apps/skills/dist/
+
+# Prueba de la Personal API de Garmin (scripts/garmin-personal-api.mjs)
+.garmin-personal/
