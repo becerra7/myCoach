@@ -5,6 +5,8 @@
    lo calcula el conector (garmin_activity_detail → analisis.por_terreno); aquí solo se suma y se dibuja. */
 
 const DEP_PROG = ['bici', 'correr', 'skimo'];
+/* En Insights el rodillo va aparte: Bici es solo lo de fuera y Rodillo, la bici en interior (esRodillo). */
+const deIns = (a, dep) => dep === 'rodillo' ? a.rod : a.dep === dep && !(dep === 'bici' && a.rod);
 const RANGOS_INS = [['28', '4 sem.'], ['90', '3 meses'], ['182', '6 meses'], ['365', '1 año']];
 const insDias = () => RANGOS_INS.some(r => r[0] === S.insRango) ? +S.insRango : 90;
 const insDesde = () => addDays(HOY, -insDias());
@@ -150,8 +152,8 @@ const AYUDA_TER = {
 /* ===== Un deporte: tus números, lo esencial en gráficas y "Para profundizar" ===== */
 function progDep(dep) {
   const desde = insDesde(), dias = insDias(), act = dep === 'bici' ? 'salida' : 'actividad';
-  const todas = acts().filter(a => a.dep === dep && a.f > desde && a.min >= 15).sort((x, y) => x.f.localeCompare(y.f));
-  const antes = acts().filter(a => a.dep === dep && a.f > addDays(desde, -dias) && a.f <= desde && a.min >= 15);
+  const todas = acts().filter(a => deIns(a, dep) && a.f > desde && a.min >= 15).sort((x, y) => x.f.localeCompare(y.f));
+  const antes = acts().filter(a => deIns(a, dep) && a.f > addDays(desde, -dias) && a.f <= desde && a.min >= 15);
   const R = REND[dep], col = scol(dep), V = VEL[dep];
   if (todas.length < 2) return blk(pendiente(`Hay pocas ${act}s de ${SPORTS[dep].n.toLowerCase()} en ${INS_TXT[dias]}`, 'Con dos ya te enseño tus números; con cuatro, tendencias. Prueba con un periodo más largo o actualiza los datos de Garmin.') + '<div class="btns"><button class="btn tonal" type="button" data-a="v-sync">Actualizar con Garmin</button></div>', 'first');
   const conTer = todas.filter(a => a.ter), sinDet = todas.length - conTer.length, T = sumaTerreno(conTer, (M.perfil || {}).peso);
@@ -205,8 +207,7 @@ function progDep(dep) {
   }
   // Volumen por semana: horas (bici y carrera) o desnivel (skimo, donde el volumen se mide subiendo)
   const nSem = Math.min(52, Math.ceil(dias / 7)), sems = Array.from({ length: nSem }, (_, i) => addDays(SEM, (i - nSem + 1) * 7));
-  const porSem = dep === 'skimo' ? sems.map(w => [fDia(w), acts().filter(a => a.dep === dep && weekOf(a.f) === w).reduce((s, a) => s + (a.desn || 0), 0), w === SEM])
-    : sems.map(w => { const wk = (M.weeks || []).find(x => x[0] === w); return [fDia(w), ((wk && wk[1][dep]) || 0) / 60, w === SEM]; });
+  const porSem = sems.map(w => { const xs = acts().filter(a => deIns(a, dep) && weekOf(a.f) === w); return [fDia(w), dep === 'skimo' ? xs.reduce((s, a) => s + (a.desn || 0), 0) : xs.reduce((s, a) => s + a.min, 0) / 60, w === SEM]; });
   const vy = niceMax(Math.max(...porSem.map(v => v[1]), 1)), skH = dep === 'skimo';
   top.push(blk(`${vizT(skH ? 'Desnivel por semana' : 'Horas por semana', info(`vol-${dep}`, skH ? 'Desnivel por semana' : 'Horas por semana', `${skH ? 'Metros de desnivel positivo' : `Horas de ${SPORTS[dep].n.toLowerCase()}`} cada semana; cada barra empieza el lunes que marca. La de esta semana va más clara porque aún no ha acabado.`))}
     <div class="viz">${vBarras({ datos: porSem, y0: 0, y1: vy, ticks: vTicks(0, vy), h: 160, u: skH ? 'm' : 'h', cada: Math.ceil(nSem / 6), color: d => d[2] ? `color-mix(in srgb,${col} 45%,var(--paper))` : col,
@@ -255,7 +256,7 @@ function progDep(dep) {
       <div class="viz">${vBarras({ datos: ult.map(a => [fDia(a.f), a.fc, fondo(a)]), y0: dy0, y1: dy1, ticks: vTicks(dy0, dy1, 4).filter(t => t >= dy0 && t <= dy1), h: 190, u: 'ppm', cada: Math.ceil(ult.length / 6),
         color: d => d[2] ? col : 'var(--line-3)', tip: d => `${d[0]}: ${d[1]} ppm${d[2] ? ', fondo' : ''}`, refs: [{ v: techo, t: `Techo ${techo}` }, { v: z2, t: `Z2 ${z2}`, cls: 'ref2' }], aria: `Pulso medio por ${act}`, fmt: v => nf(v, 0) })}</div>
       <p class="lee">${fondos.length ? `${dentro} de ${fondos.length} fondos por debajo del techo.` : 'En este periodo no hay fondos.'}</p>`)); }
-  const zon = sems.map(w => { const z = [0, 0, 0]; acts().filter(a => a.dep === dep && weekOf(a.f) === w && a.z).forEach(a => a.z.forEach((v, k) => { z[k] += v; })); return [fDia(w), z.map(v => v / 60)]; });
+  const zon = sems.map(w => { const z = [0, 0, 0]; acts().filter(a => deIns(a, dep) && weekOf(a.f) === w && a.z).forEach(a => a.z.forEach((v, k) => { z[k] += v; })); return [fDia(w), z.map(v => v / 60)]; });
   if (zon.filter(c => c[1].some(Boolean)).length >= 3) mas.push(blk(`${vizT('Suave, medio y duro por semana', info(`zon-${dep}`, 'Suave, medio y duro por semana', 'Horas de cada semana según tu pulso: suave (por debajo del 90 % de tu umbral), medio y duro. En los aficionados que mejoran, cerca del 80 % es suave.'))}
     <div class="viz">${vApiladas({ cols: zon, claves: ['suave', 'medio', 'duro'], colores: [`color-mix(in srgb,${col} 35%,var(--paper))`, `color-mix(in srgb,${col} 65%,var(--paper))`, col], tip: c => `Semana del ${c[0]}: ${nf(c[1][0])} h suaves, ${nf(c[1][1])} h medias, ${nf(c[1][2])} h duras`, aria: 'Horas suaves, medias y duras por semana', fmt: v => nf(v, 1), u: 'h', cada: Math.ceil(nSem / 6) })}</div>
     <div class="leyenda"><span><i style="background:color-mix(in srgb,${col} 35%,var(--paper))"></i>Suave</span><span><i style="background:color-mix(in srgb,${col} 65%,var(--paper))"></i>Medio</span><span><i style="background:${col}"></i>Duro</span></div>`));
@@ -264,6 +265,85 @@ function progDep(dep) {
   return `${numeros}<div class="grid2">${top.join('')}</div>${bloqueComparar(dep, conTer)}
     <details class="mas"${S.insMas ? ' open' : ''}><summary data-a="ins-mas"><span>Para profundizar</span><small>${queMas}</small></summary>
       <div class="grid2">${mas.join('')}</div></details>${bloqueRecords(dep)}`;
+}
+
+/* ===== Rodillo: ¿cómo rindo en interior? =====
+   Sin carretera no hay velocidad ni terreno que comparar: manda la potencia (si la hay) y el pulso. Fuera y dentro
+   solo se comparan en lo que significa lo mismo en los dos sitios: horas, pulso y carga por hora.
+   Las cifras de cada sesión las calcula el conector (analisis.potencia); aquí se suman y se dibujan. */
+// Zonas de potencia de Coggan, en % del FTP: [nombre, desde].
+const ZONAS_W = [['Recuperación', 0], ['Resistencia', 55], ['Tempo', 76], ['Umbral', 91], ['VO2máx', 106], ['Anaeróbico', 121]];
+function progRodillo() {
+  const desde = insDesde(), dias = insDias(), col = scol('bici');
+  const todas = acts().filter(a => a.rod && a.f > desde && a.min >= 15).sort((x, y) => x.f.localeCompare(y.f));
+  const antes = acts().filter(a => a.rod && a.f > addDays(desde, -dias) && a.f <= desde && a.min >= 15);
+  if (todas.length < 2) return blk(pendiente(`Hay pocas sesiones de rodillo en ${INS_TXT[dias]}`, 'Con dos ya te enseño tus números. Prueba con un periodo más largo o actualiza los datos de Garmin.') + '<div class="btns"><button class="btn tonal" type="button" data-a="v-sync">Actualizar con Garmin</button></div>', 'first');
+  const fuera = acts().filter(a => a.dep === 'bici' && !a.rod && a.f > desde && a.min >= 15);
+  const conW = todas.filter(a => a.pw), fondo = a => ['rec', 'fondo'].includes(tipoAct(a)), temp = a => a.tc != null ? `, ${nf(a.tc, 0)} °C` : '';
+  const ftpG = ((M.forma || {}).ftp || {}).vatios || null, ftpE = conW.length ? Math.max(0, ...conW.map(a => a.pw.ftp || 0)) || null : null, ftp = ftpG || ftpE;
+
+  // Dentro y fuera, en lo que se puede comparar: horas, pulso medio (por tiempo) y carga de Garmin por hora.
+  const resumen = as => { const min = as.reduce((s, a) => s + a.min, 0), cf = as.filter(a => a.fc), mf = cf.reduce((s, a) => s + a.min, 0), cc = as.filter(a => a.cg != null), mc = cc.reduce((s, a) => s + a.min, 0);
+    return { n: as.length, h: min / 60, fc: mf ? cf.reduce((s, a) => s + a.fc * a.min, 0) / mf : null, cgh: mc ? cc.reduce((s, a) => s + a.cg, 0) / (mc / 60) : null }; };
+  const D = resumen(todas), F = resumen(fuera), np = conW.length ? conW.reduce((s, a) => s + a.pw.np * a.min, 0) / conW.reduce((s, a) => s + a.min, 0) : null;
+  const celda = (nom, v, u) => `<div class="ter-c"><span class="n">${nom}</span><b>${v}${u && v !== '—' ? ` <small>${u}</small>` : ''}</b></div>`;
+  const fila = (nom, ico, x, w) => `<div class="ter-f"><div class="ter-n"><b><i aria-hidden="true">${ico}</i>${nom}</b><span>${x.n ? `${x.n} ${x.n === 1 ? 'sesión' : 'sesiones'} · ${dur(Math.round(x.h * 60))}` : 'Nada en este periodo'}</span></div>${x.n ? [celda('Pulso', x.fc ? nf(x.fc, 0) : '—', 'ppm'), celda('Carga por hora', x.cgh ? nf(x.cgh, 0) : '—', ''), w ? celda('Potencia', nf(w, 0), 'W') : ''].join('') : ''}</div>`;
+  const parte = D.h + F.h ? Math.round(D.h / (D.h + F.h) * 100) : 0;
+  const numeros = blk(`${blkH(`Tus números en ${INS_TXT[dias]}`, info('rod-num', 'Dentro y fuera', 'Solo se compara lo que significa lo mismo en los dos sitios: las horas, el pulso medio y la carga por hora (la Exercise Load de Garmin dividida por las horas: cuánto aprieta cada hora). La velocidad y los km del rodillo no se usan. La potencia es la normalizada media; fuera sale si llevas potenciómetro.'))}
+    <p class="small muted" style="margin:-4px 0 12px">El ${parte} % de tus horas de bici, en rodillo.</p>
+    ${fila('Rodillo', '⌂', D, np)}${fila('Bici fuera', '→', F, null)}`, 'first');
+
+  const top = [], mas = [];
+  const serie = (titulo, inf, pts, o) => blk(`${vizT(titulo, inf)}<div class="viz">${vSerie({ desde, color: col, ...o, pts })}</div>${o.modo === 'linea' ? '' : leyendaSerie(col, o.media != null)}${o.lee ? `<p class="lee">${o.lee}</p>` : ''}`);
+  if (!conW.length) top.push(blk(pendiente('Aún no hay potencia en tus sesiones', 'En cuanto grabes con potenciómetro o rodillo inteligente, aquí verás tu curva de potencia, tu FTP estimado y si rindes más por latido. Las sesiones con potencia se analizan al actualizar con Garmin.')));
+  else {
+    // ¿Mejoras? Vatios por latido en las sesiones suaves: la misma regla que fuera (6 sesiones en 6 semanas o más, y más de un 5 %).
+    const pEf = conW.filter(a => fondo(a) && a.pw.wpl).map(a => ({ f: a.f, v: a.pw.wpl, a }));
+    const lee = (() => {
+      if (pEf.length < 6) return `Con ${pEf.length} ${pEf.length === 1 ? 'sesión suave' : 'sesiones suaves'} aún no se puede decir si mejoras: hacen falta 6, repartidas en 6 semanas o más.`;
+      const tr = tendencia(pEf), d0 = dte(pEf[0].f).getTime() / 864e5, d1 = dte(pEf[pEf.length - 1].f).getTime() / 864e5, m = pEf.reduce((x, y) => x + y.v, 0) / pEf.length;
+      if (!tr || d1 - d0 < 42) return 'Las sesiones suaves están muy juntas: hace falta que cubran 6 semanas o más para ver una tendencia.';
+      const c = tr.b * (d1 - d0) / m * 100;
+      return Math.abs(c) < 5 ? `Sin un cambio claro en ${INS_TXT[dias]}.` : `${c > 0 ? 'Sube' : 'Baja'} un ${nf(Math.abs(c), 0)} % en ${INS_TXT[dias]}: ${c > 0 ? 'mueves más vatios con el mismo pulso, tu motor mejora' : 'mueves menos vatios con el mismo pulso; mira el cansancio y el calor'}.`;
+    })();
+    if (pEf.length >= 2) top.push(serie('¿Mejoras? Vatios por latido', info('rod-wpl', 'Vatios por latido', 'La potencia normalizada de cada sesión suave dividida por su pulso medio: el factor de eficiencia de Intervals.icu o TrainingPeaks, con potencia de verdad. En rodillo no hay viento ni pendiente que lo enturbie, aunque el calor de la habitación sube el pulso. Solo cuentan las sesiones suaves.'),
+      pEf.map(x => ({ ...x, tip: `${fDia(x.f)}: ${nf(x.v, 2)} W por latido (${x.a.pw.np} W a ${x.a.fc || '—'} ppm${temp(x.a)})` })), { fmt: v => nf(v, 2), u: 'W', media: pEf.reduce((s, x) => s + x.v, 0) / pEf.length, lee, aria: `Vatios por latido por sesión suave en ${INS_TXT[dias]}` }));
+    // Curva de potencia: los mejores vatios de 1, 5, 20 y 60 min, este periodo frente al anterior.
+    const mejor = (as, i) => { const v = as.map(a => a.pw && a.pw.mejor[i]).filter(Boolean); return v.length ? Math.max(...v) : null; };
+    const datos = ['1 min', '5 min', '20 min', '60 min'].map((l, i) => [l, mejor(conW, i) || 0, mejor(antes, i)]).filter(d => d[1]);
+    if (datos.length) { const vy = niceMax(Math.max(...datos.map(d => Math.max(d[1], d[2] || 0))));
+      top.push(blk(`${vizT('Tu curva de potencia', info('rod-curva', 'Curva de potencia', `Los vatios medios más altos que has mantenido durante 1, 5, 20 y 60 minutos seguidos en ${INS_TXT[dias]}. La raya es el periodo anterior, de la misma duración. Del de 20 minutos sale el FTP estimado (su 95 %).`))}
+        <div class="viz">${vBarras({ datos, y0: 0, y1: vy, ticks: vTicks(0, vy), h: 170, u: 'W', color: () => col, marcas: datos.map(d => d[2]), tip: d => `${d[0]}: ${nf(d[1], 0)} W${d[2] ? ` (antes ${nf(d[2], 0)})` : ''}`, etiqueta: d => nf(d[1], 0), aria: 'Mejores vatios durante 1, 5, 20 y 60 minutos' })}</div>
+        ${datos.some(d => d[2]) ? '<div class="leyenda"><span><i style="background:' + col + '"></i>Este periodo</span><span><i class="ln" style="border-top:2.5px solid var(--ink)"></i>Periodo anterior</span></div>' : ''}
+        ${ftpE || ftpG ? `<p class="lee">${ftpE ? `FTP estimado: ${ftpE} W` : ''}${ftpE && ftpG ? '; ' : ''}${ftpG ? `${ftpE ? 'el' : 'El'} de Garmin, ${ftpG} W` : ''}.</p>` : ''}`)); }
+    // Desacople potencia-pulso en los fondos de 40 min o más.
+    const pDc = conW.filter(a => a.pw.dc != null && a.min >= 40 && fondo(a)).map(a => ({ f: a.f, v: a.pw.dc, a }));
+    if (pDc.length >= 2) mas.push(serie('Desacople en los fondos', info('rod-dc', 'Desacople potencia-pulso', 'Cuánto cae la relación entre vatios y pulso de la primera mitad de la sesión a la segunda (Joe Friel). Por debajo del 5 % aguantas bien esa duración; por encima, el pulso se te dispara al final. En rodillo, ventila: el calor también lo sube.'),
+      pDc.map(x => ({ ...x, tip: `${fDia(x.f)}: ${x.v > 0 ? '+' : ''}${nf(x.v, 1)} % en ${dur(x.a.min)}` })), { fmt: v => nf(v, 0), u: '%', modo: 'linea', refs: [{ v: 5, t: 'Límite 5 %', siempre: true }], aria: 'Desacople por fondo en rodillo' }));
+    // Tiempo en cada zona de potencia en el periodo (con el FTP de Garmin o, si no, el estimado).
+    if (ftp) { const z = ZONAS_W.map(() => 0);
+      conW.forEach(a => Object.entries(a.pw.h).forEach(([c, m]) => { const pct = (+c + 10) / ftp * 100; let k = 0; ZONAS_W.forEach(([, d], i) => { if (pct >= d) k = i; }); z[k] += m; }));
+      const tot = z.reduce((s, v) => s + v, 0);
+      if (tot) { const datosZ = ZONAS_W.map(([n], i) => [`Z${i + 1}`, z[i] / 60, n]), vz = niceMax(Math.max(...datosZ.map(d => d[1])));
+        mas.push(blk(`${vizT('Tiempo en cada zona de potencia', info('rod-zonas', 'Zonas de potencia', `Horas del periodo en cada zona, con tu FTP ${ftpG ? 'de Garmin' : 'estimado'} (${ftp} W). Z1 recuperación (menos del 55 %), Z2 resistencia (55-75 %), Z3 tempo (76-90 %), Z4 umbral (91-105 %), Z5 VO2máx (106-120 %) y Z6 anaeróbico (más del 120 %).`))}
+          <div class="viz">${vBarras({ datos: datosZ, y0: 0, y1: vz, ticks: vTicks(0, vz), h: 160, u: 'h', color: () => col, tip: d => `${d[0]} ${d[2].toLowerCase()}: ${nf(d[1], 1)} h (${Math.round(d[1] * 60 / tot * 100)} %)`, etiqueta: d => d[1] ? nf(d[1], 1) : '', aria: `Horas en cada zona de potencia en ${INS_TXT[dias]}`, fmt: v => nf(v, 1) })}</div>
+          <p class="lee">${Math.round((z[0] + z[1]) / tot * 100)} % en Z1 y Z2.</p>`)); } }
+  }
+  // Horas por semana en rodillo.
+  const nSem = Math.min(52, Math.ceil(dias / 7)), sems = Array.from({ length: nSem }, (_, i) => addDays(SEM, (i - nSem + 1) * 7));
+  const porSem = sems.map(w => [fDia(w), acts().filter(a => a.rod && weekOf(a.f) === w).reduce((s, a) => s + a.min, 0) / 60, w === SEM]), vy = niceMax(Math.max(...porSem.map(v => v[1]), 1));
+  top.push(blk(`${vizT('Horas por semana', info('vol-rod', 'Horas por semana', 'Horas de rodillo cada semana; cada barra empieza el lunes que marca. La de esta semana va más clara porque aún no ha acabado.'))}
+    <div class="viz">${vBarras({ datos: porSem, y0: 0, y1: vy, ticks: vTicks(0, vy), h: 160, u: 'h', cada: Math.ceil(nSem / 6), color: d => d[2] ? `color-mix(in srgb,${col} 45%,var(--paper))` : col,
+      tip: d => `Semana del ${d[0]}: ${nf(d[1])} h${d[2] ? ' (en curso)' : ''}`, etiqueta: nSem <= 13 ? (d => d[1] ? nf(d[1], 1) : '') : null, aria: 'Horas de rodillo por semana', fmt: v => nf(v, 1) })}</div>`));
+  // Pulso medio de cada sesión: las suaves en color, frente al techo de los fondos (umbral de Garmin).
+  const Lt = ((M.perfil && M.perfil.lthr) || 170) - 5, techo = Math.round(Lt * .86), ult = todas.slice(-16).filter(a => a.fc);
+  if (ult.length >= 3) { const fcs = ult.map(a => a.fc), dy0 = Math.floor(Math.min(...fcs) / 10) * 10 - 5, dy1 = Math.ceil(Math.max(...fcs, techo) / 10) * 10 + 5, fondos = ult.filter(fondo);
+    mas.push(blk(`${vizT('Pulso de cada sesión', info('rod-fc', 'Pulso de cada sesión', `Pulso medio de cada sesión. En las suaves (en color) el objetivo es quedarte por debajo de ${techo} ppm, que sale de tu umbral de Garmin. En gris, las de otro tipo.`))}
+      <div class="viz">${vBarras({ datos: ult.map(a => [fDia(a.f), a.fc, fondo(a)]), y0: dy0, y1: dy1, ticks: vTicks(dy0, dy1, 4).filter(t => t >= dy0 && t <= dy1), h: 170, u: 'ppm', cada: Math.ceil(ult.length / 6),
+        color: d => d[2] ? col : 'var(--line-3)', tip: d => `${d[0]}: ${d[1]} ppm${d[2] ? ', suave' : ''}`, refs: [{ v: techo, t: `Techo ${techo}` }], aria: 'Pulso medio por sesión de rodillo', fmt: v => nf(v, 0) })}</div>
+      <p class="lee">${fondos.length ? `${fondos.filter(a => a.fc <= techo).length} de ${fondos.length} sesiones suaves por debajo del techo.` : 'En este periodo no hay sesiones suaves.'}</p>`)); }
+  return `${numeros}<div class="grid2">${top.join('')}</div>
+    ${mas.length ? `<details class="mas"${S.insMas ? ' open' : ''}><summary data-a="ins-mas"><span>Para profundizar</span><small>${conW.length ? 'Desacople, zonas y pulso' : 'Pulso'}</small></summary><div class="grid2">${mas.join('')}</div></details>` : ''}`;
 }
 
 /* ===== Tus récords: curiosidades de siempre (no dependen del periodo). Cada uno abre su clasificación. =====
@@ -281,12 +361,12 @@ const RECORDS = {
   calor: { n: 'Más calor', det: true, v: a => a.tc, f: v => `${nf(v, 0)} °C`, nota: 'Temperatura media' },
 };
 const recDe = dep => Object.entries(RECORDS).filter(([, r]) => !r.deps || r.deps.includes(dep));
-function clasificacion(dep, k) { const r = RECORDS[k]; return acts().filter(a => a.dep === dep).map(a => ({ a, v: r.v(a) })).filter(x => x.v != null && x.v > 0).sort((x, y) => y.v - x.v); }
+function clasificacion(dep, k) { const r = RECORDS[k]; return acts().filter(a => deIns(a, dep)).map(a => ({ a, v: r.v(a) })).filter(x => x.v != null && x.v > 0).sort((x, y) => y.v - x.v); }
 function bloqueRecords(dep) {
   const filas = recDe(dep).map(([k, r]) => { const c = clasificacion(dep, k); if (!c.length) return ''; const { a, v } = c[0];
     return `<button type="button" class="li" data-a="push" data-v="records" data-id="${dep}:${k}"><span class="main"><b>${r.n}</b><span>${esc(a.lugar)} · ${fDia(a.f)} ${dte(a.f).getFullYear()}</span></span><span class="rec-v">${r.f(v)}</span>${ic('chev', 18, 'chev')}</button>`; }).join('');
   if (!filas) return '';
-  const desde = acts().filter(a => a.dep === dep).map(a => a.f).sort()[0];
+  const desde = acts().filter(a => deIns(a, dep)).map(a => a.f).sort()[0];
   return blk(`${blkH('Tus récords', info(`rec-${dep}`, 'Tus récords', `De siempre, no del periodo elegido: desde el ${desde ? `${fLarga(desde)} de ${dte(desde).getFullYear()}` : 'principio'}, que es lo más antiguo que ha leído la app de Garmin. La rampa, las subidas, la VAM y el calor salen del análisis de cada actividad, que se hace del último año. Toca uno para ver tu clasificación.`))}<div class="list">${filas}</div>`);
 }
 function scrRecords(scr) {
@@ -363,13 +443,15 @@ function progForma() {
 }
 
 function tabProgresoV1() {
-  const deps = DEP_PROG.filter(d => S.sports.includes(d) || acts().some(a => a.dep === d && a.f > addDays(HOY, -365)));
+  const d365 = addDays(HOY, -365), deps = DEP_PROG.filter(d => S.sports.includes(d) || acts().some(a => a.dep === d && a.f > d365));
+  // Rodillo, al lado de Bici, solo si hay sesiones en interior en el último año.
+  if (acts().some(a => a.rod && a.f > d365)) deps.splice(deps.includes('bici') ? deps.indexOf('bici') + 1 : 0, 0, 'rodillo');
   if (!V.prog || (V.prog !== 'forma' && !deps.includes(V.prog))) V.prog = 'forma';
-  const segs = [['forma', 'General'], ...deps.map(d => [d, SPORTS[d].n])], rg = String(insDias());
+  const segs = [['forma', 'General'], ...deps.map(d => [d, d === 'rodillo' ? 'Rodillo' : SPORTS[d].n])], rg = String(insDias());
   return { title: 'Insights', html: `<div class="v1"><header class="v1-h"><h1>Insights</h1></header>
     <div class="seg-row ins-ctl">${segs.length > 1 ? `<div class="seg2" role="group" aria-label="Qué ver">${segs.map(([k, l]) => `<button type="button" data-a="v-prog" data-v="${k}" aria-pressed="${V.prog === k}">${l}</button>`).join('')}</div>` : ''}
       <label class="ins-per" for="ins-per"><span>Periodo</span><select id="ins-per">${RANGOS_INS.map(([v]) => `<option value="${v}"${rg === v ? ' selected' : ''}>${cap1(INS_TXT[v])}</option>`).join('')}</select></label></div>
-    ${V.prog === 'forma' ? progForma() : progDep(V.prog)}</div>` };
+    ${V.prog === 'forma' ? progForma() : V.prog === 'rodillo' ? progRodillo() : progDep(V.prog)}</div>` };
 }
 Object.assign(ACTIONS, {
   'v-sync': () => sync(true),

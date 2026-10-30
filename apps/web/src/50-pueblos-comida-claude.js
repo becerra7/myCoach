@@ -223,7 +223,7 @@ async function sync(manual, live = !!LIVE && S.modo === 'vivo') {
   // Detalle (pulso, terreno, subidas, llano) del último año y del skimo; trazados para pueblos. Por tandas.
   // Un detalle de una versión anterior se vuelve a pedir: le faltan datos que Insights necesita.
   const d60 = addDays(HOY, -60), d365 = addDays(HOY, -365);
-  const faltaDet = a => !ds.det[a.id] || (ds.det[a.id].v !== DET_V && !ds.det[a.id].err && ['bici', 'correr', 'skimo'].includes(FAM[a.t]));
+  const faltaDet = a => !ds.det[a.id] || ((ds.det[a.id].v || 0) < detVNecesaria(a) && !ds.det[a.id].err && ['bici', 'correr', 'skimo'].includes(FAM[a.t]));
   const quiereDet = a => (a.d > d365 && ['bici', 'correr', 'skimo'].includes(FAM[a.t])) || (a.d > d60 && FAM[a.t] === 'montana') || FAM[a.t] === 'skimo';
   const needDet = ds.acts.filter(a => faltaDet(a) && quiereDet(a)).slice(0, 30);
   let i = 0; await pool(needDet, 4, async a => { msg(`Analizando actividades (${++i}/${needDet.length})…`); try { ds.det[a.id] = detalleDe(await call('garmin_activity_detail', { activity_id: a.id })); } catch (e) { ds.det[a.id] = { err: e.code || 'error' }; } });
@@ -252,7 +252,9 @@ function evoDeForma(fm, previa) {
 /** Lo que la app guarda del detalle de una actividad: pulso por zonas, desnivel, subida y llano principales,
    cómo fue en cada terreno (ter: llano, subida y bajada de toda la salida), desacople y pulso máximo sostenido.
    v marca la versión: si cambia lo que se guarda, la sincronización vuelve a pedir el detalle. */
-const DET_V = 5;
+const DET_V = 6;
+/* El rodillo necesita la versión 6 (series en el tiempo y potencia); el resto vale con la 5, así no se vuelve a pedir todo el año. */
+const detVNecesaria = a => esRodillo(a) ? 6 : 5;
 function detalleDe(r) {
   const an = r.analisis || {}; const sb = (an.subidas || [])[0], t = an.por_terreno || {}, fs = an.fc_max_sostenida || {}, m = r.metricas || {}, pm = an.pendiente_max_pct || {};
   return { v: DET_V, h: an.histograma_fc_min || null, desn: r.elevation_gain_m ?? null, sub: sb ? [sb.largo_km, sb.desnivel_m, sb.minutos, sb.fc_media] : null, llano: an.llano ? [an.llano.km, an.llano.vel_media_kmh, an.llano.fc_media] : null,
@@ -263,7 +265,8 @@ function detalleDe(r) {
     vx: m.velocidad_max_kmh ?? null, mv: m.en_movimiento_min ?? null, tt: m.total_min ?? null,
     ef: m.efecto_aerobico != null ? [m.efecto_aerobico, m.efecto_anaerobico ?? null, r.tipo_sesion_garmin || null] : null, ag: m.otros_campos_garmin?.waterEstimated ?? null,
     st: m.stamina_potencial_inicio_pct != null ? [m.stamina_potencial_inicio_pct, m.stamina_potencial_final_pct ?? null, m.stamina_disponible_min_pct ?? null] : null,
-    vs: an.vam_sostenida_mh ? [an.vam_sostenida_mh.min10, an.vam_sostenida_mh.min20, an.vam_sostenida_mh.min60] : null, dc: an.desacople_pct ?? null, tc: m.temperatura_media_c ?? null, fs: [fs.min5 ?? null, fs.min20 ?? null, fs.min60 ?? null] };
+    vs: an.vam_sostenida_mh ? [an.vam_sostenida_mh.min10, an.vam_sostenida_mh.min20, an.vam_sostenida_mh.min60] : null, dc: an.desacople_pct ?? null, tc: m.temperatura_media_c ?? null, fs: [fs.min5 ?? null, fs.min20 ?? null, fs.min60 ?? null],
+    pw: (p => p ? [p.media_w, p.normalizada_w, [p.mejor_w?.min1 ?? null, p.mejor_w?.min5 ?? null, p.mejor_w?.min20 ?? null, p.mejor_w?.min60 ?? null], p.ftp_estimado_w ?? null, p.vatios_por_latido ?? null, p.desacople_pct ?? null, p.cadencia_media_rpm ?? null, p.histograma_w_min || {}] : null)(an.potencia) };
 }
 
 /* Detalle a demanda: al abrir una actividad que este navegador aún no ha analizado (la sincronización

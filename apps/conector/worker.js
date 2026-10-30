@@ -955,10 +955,99 @@ function perfilAltitud(puntos, n = 60) {
 	return out;
 }
 
+/**
+ * Las mismas series en el tiempo (pulso, potencia y cadencia), sin pasar por la distancia: en rodillo
+ * no hay distancia ni "tiempo en movimiento", y sin esto se perdían el pulso y los vatios de la sesión.
+ */
+function seriesTiempo(details) {
+	const desc = details?.metricDescriptors || [];
+	const indice = (...claves) => { for (const c of claves) { const d = desc.find((x) => x.key === c); if (d) return d.metricsIndex; } return -1; };
+	const iTs = indice("directTimestamp"), iDur = indice("sumElapsedDuration", "sumDuration");
+	const iFc = indice("directHeartRate"), iW = indice("directPower"), iCad = indice("directBikeCadence");
+	const filas = (details?.activityDetailMetrics || []).map((m) => m.metrics || []);
+	const t0 = iTs >= 0 ? filas.find((f) => typeof f[iTs] === "number")?.[iTs] : null;
+	const num = (f, i, min = 0) => (i >= 0 && typeof f[i] === "number" && f[i] >= min ? f[i] : null);
+	const puntos = [];
+	for (const f of filas) {
+		const t = t0 != null && typeof f[iTs] === "number" ? (f[iTs] - t0) / 1000 : num(f, iDur);
+		if (t == null) continue;
+		puntos.push({ t, fc: num(f, iFc, 31), w: num(f, iW), cad: num(f, iCad) });
+	}
+	return puntos.sort((a, b) => a.t - b.t);
+}
+
+/** Media más alta de un campo durante N segundos seguidos (media móvil en el tiempo). */
+function mejorMedia(puntos, campo, segundos) {
+	const p = puntos.filter((x) => x[campo] != null);
+	if (p.length < 2 || p.at(-1).t - p[0].t < segundos) return null;
+	let mejor = null, ini = 0, suma = 0;
+	for (let i = 0; i < p.length; i++) {
+		suma += p[i][campo];
+		while (p[i].t - p[ini].t >= segundos) { suma -= p[ini][campo]; ini++; }
+		if (p[i].t - p[ini].t >= segundos * 0.95) { const m = suma / (i - ini + 1); if (mejor == null || m > mejor) mejor = m; }
+	}
+	return mejor != null ? Math.round(mejor) : null;
+}
+
+/**
+ * Lo que dice el potenciómetro (rodillo o fuera): media, normalizada (Coggan: media móvil de 30 s a la
+ * cuarta), mejores vatios en 1, 5, 20 y 60 min, vatios por latido y desacople potencia-pulso (Friel:
+ * cuánto cae la relación vatios/pulso de la primera mitad a la segunda). Con la potencia el desacople
+ * vale en cualquier terreno, porque los vatios ya incluyen el viento y la pendiente. Las series llegan
+ * cada pocos segundos, así que no hay marca de 5 s: sería un pico de muestreo, no un sprint.
+ */
+function analizarPotencia(puntos) {
+	const p = puntos.filter((x) => x.w != null);
+	if (p.length < 30 || !p.some((x) => x.w > 0) || p.at(-1).t - p[0].t < 600) return null;
+	const media = MEDIA(p.map((x) => x.w));
+	// Normalizada: media de 30 s en el tiempo, a la cuarta, y su raíz cuarta.
+	let ini = 0, suma = 0, cuartas = 0, n = 0;
+	for (let i = 0; i < p.length; i++) {
+		suma += p[i].w;
+		while (p[i].t - p[ini].t > 30) { suma -= p[ini].w; ini++; }
+		if (p[i].t - p[0].t >= 30) { cuartas += (suma / (i - ini + 1)) ** 4; n++; }
+	}
+	const np = n ? (cuartas / n) ** 0.25 : media;
+	const conFc = p.filter((x) => x.fc), fcMedia = MEDIA(conFc.map((x) => x.fc));
+	const mitad = (p[0].t + p.at(-1).t) / 2, ef = (xs) => { const fc = MEDIA(xs.map((x) => x.fc)); return fc ? MEDIA(xs.map((x) => x.w)) / fc : null; };
+	const a = conFc.filter((x) => x.t <= mitad), b = conFc.filter((x) => x.t > mitad), efA = a.length >= 30 ? ef(a) : null, efB = b.length >= 30 ? ef(b) : null;
+	// Minutos en cada cubo de 20 W (como el histograma de pulso): las zonas las pone quien sabe el FTP.
+	const cubos = {};
+	for (let i = 1; i < p.length; i++) { const dt = Math.min(30, Math.max(0, p[i].t - p[i - 1].t)), c = Math.floor(p[i].w / 20) * 20; cubos[c] = (cubos[c] || 0) + dt; }
+	const cads = puntos.map((x) => x.cad).filter((c) => c > 0);
+	const mejor20 = mejorMedia(p, "w", 1200);
+	return {
+		media_w: Math.round(media),
+		normalizada_w: Math.round(np),
+		mejor_w: { min1: mejorMedia(p, "w", 60), min5: mejorMedia(p, "w", 300), min20: mejor20, min60: mejorMedia(p, "w", 3600) },
+		ftp_estimado_w: mejor20 ? Math.round(mejor20 * 0.95) : null,
+		vatios_por_latido: fcMedia ? round(np / fcMedia, 2) : null,
+		desacople_pct: efA && efB && p.at(-1).t - p[0].t >= 2400 ? round(((efA - efB) / efA) * 100, 1) : null,
+		histograma_w_min: Object.fromEntries(Object.entries(cubos).filter(([, sg]) => sg >= 30).map(([c, sg]) => [c, round(sg / 60, 1)])),
+		cadencia_media_rpm: cads.length ? Math.round(MEDIA(cads)) : null,
+	};
+}
+
 function analizarActividad(details) {
 	const puntos = seriesDeActividad(details);
+	const tiempo = seriesTiempo(details);
+	let potencia = null;
+	try { potencia = analizarPotencia(tiempo); } catch { potencia = null; }
+	// Sin distancia (rodillo, bici de gimnasio): no hay terreno; pulso y vatios salen de las series en el tiempo.
+	if (!puntos.some((p) => p.d >= 1000)) {
+		if (tiempo.length < 10) return { muestras: tiempo.length, nota: "Sin series suficientes." };
+		return {
+			muestras: tiempo.length,
+			sin_distancia: true,
+			histograma_fc_min: histogramaFc(tiempo),
+			fc_max_sostenida: { min5: fcMaxSostenida(tiempo, 5), min20: fcMaxSostenida(tiempo, 20), min60: fcMaxSostenida(tiempo, 60) },
+			potencia,
+			nota: "Sin distancia (rodillo o bici estática): no hay terreno ni velocidad. potencia: vatios medios y normalizados, mejores de 1, 5, 20 y 60 min, FTP estimado (95 % de los 20 min), vatios por latido (normalizada / pulso medio) y desacople potencia-pulso entre mitades.",
+		};
+	}
 	if (puntos.length < 10) return { muestras: puntos.length, nota: "Sin series suficientes." };
 	return {
+		potencia,
 		muestras: puntos.length,
 		subidas: detectarSubidas(puntos).slice(0, 8),
 		bajadas: detectarBajadas(puntos).slice(0, 8),
@@ -1815,7 +1904,7 @@ const TOOLS = {
 			"desnivel, velocidad vertical, dinamicas de carrera, temperatura, efecto de entrenamiento y stamina de Garmin cuando " +
 			"existan. 'series' resume cada grafica (min, media, max, inicio, final) y 'perfil' da sus valores a lo largo de la " +
 			"actividad (24 tramos): uselo para contestar sobre graficas (stamina, pulso, potencia...) en vez de pedir capturas. " +
-			"'analisis.por_terreno' da velocidad y pulso en llano, subida y bajada de toda la salida, por_pendiente, la velocidad según el desnivel, y ajustado_pendiente, el ritmo equivalente en llano (carrera); 'analisis.vam_sostenida_mh', la mejor VAM de 10, 20 y 60 min; 'analisis.subidas', todas las subidas; 'analisis.pendiente_max_pct', la rampa más dura en 200 m; 'analisis.perfil_altitud', [km, altitud, pulso].",
+			"'analisis.por_terreno' da velocidad y pulso en llano, subida y bajada de toda la salida, por_pendiente, la velocidad según el desnivel, y ajustado_pendiente, el ritmo equivalente en llano (carrera); 'analisis.vam_sostenida_mh', la mejor VAM de 10, 20 y 60 min; 'analisis.subidas', todas las subidas; 'analisis.pendiente_max_pct', la rampa más dura en 200 m; 'analisis.perfil_altitud', [km, altitud, pulso]; 'analisis.potencia', si hay potenciómetro: vatios medios y normalizados, mejores de 1, 5, 20 y 60 min, FTP estimado, vatios por latido y desacople. En rodillo (analisis.sin_distancia) no hay terreno: solo pulso y potencia.",
 		schema: {
 			type: "object",
 			properties: { activity_id: { type: "string", description: "El activity_id devuelto por garmin_activities." } },

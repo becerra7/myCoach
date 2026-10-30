@@ -1065,6 +1065,33 @@ const rpc = async (env, token, message) => {
 	check("histograma de pulso por cubos de 5 ppm", Math.abs(r.analisis?.histograma_fc_min?.["130"] - 10) < 1,
 		`(${JSON.stringify(r.analisis?.histograma_fc_min)})`);
 
+	// Rodillo: sin distancia ni tiempo en movimiento, cada 3 s. 20 min a 200 W y 130 ppm, 5 min a 300 W
+	// y 20 min a 200 W con el pulso 10 ppm más alto (desacople). El pulso y los vatios salen igual.
+	{
+		const filasR = []; let ts = 1_700_000_000_000;
+		const tr = (seg, w, fc) => { for (let x = 0; x < seg; x += 3) { ts += 3000; filasR.push({ metrics: [fc, 0, ts, w, 90] }); } };
+		tr(1200, 200, 130); tr(300, 300, 160); tr(1200, 200, 140);
+		const detR = { metricDescriptors: [{ key: "directHeartRate", metricsIndex: 0 }, { key: "sumMovingDuration", metricsIndex: 1 },
+			{ key: "directTimestamp", metricsIndex: 2 }, { key: "directPower", metricsIndex: 3 }, { key: "directBikeCadence", metricsIndex: 4 }], activityDetailMetrics: filasR };
+		globalThis.fetch = async (url) => {
+			const u = new URL(url);
+			if (u.pathname.endsWith("/details")) return new Response(JSON.stringify(detR));
+			if (u.pathname.endsWith("/hrTimeInZones")) return new Response("[]");
+			return new Response(JSON.stringify({ activityName: "Rodillo", activityTypeDTO: { typeKey: "indoor_cycling" }, summaryDTO: { distance: 0, duration: 2700 } }));
+		};
+		const rod = await call("garmin_activity_detail", { activity_id: "5" });
+		const pw = rod.analisis?.potencia || {};
+		check("rodillo: se analiza sin distancia", rod.analisis?.sin_distancia === true && !rod.analisis.por_terreno, JSON.stringify(rod.analisis).slice(0, 200));
+		check("rodillo: pulso máximo de 5 min", rod.analisis?.fc_max_sostenida?.min5 === 160, `(${rod.analisis?.fc_max_sostenida?.min5})`);
+		check("rodillo: histograma de pulso", rod.analisis?.histograma_fc_min?.["130"] >= 19, JSON.stringify(rod.analisis?.histograma_fc_min));
+		check("rodillo: mejores vatios de 5 y 20 min", pw.mejor_w?.min5 === 300 && pw.mejor_w.min20 >= 220 && pw.mejor_w.min20 <= 230, JSON.stringify(pw.mejor_w));
+		check("rodillo: FTP estimado al 95 % de los 20 min", pw.ftp_estimado_w === Math.round(pw.mejor_w?.min20 * 0.95));
+		check("rodillo: normalizada por encima de la media", pw.normalizada_w > pw.media_w && pw.media_w >= 210 && pw.media_w <= 213, `(${pw.media_w}/${pw.normalizada_w})`);
+		check("rodillo: desacople potencia-pulso positivo", pw.desacople_pct > 3, `(${pw.desacople_pct})`);
+		check("rodillo: cadencia y cubos de 20 W", pw.cadencia_media_rpm === 90 && pw.histograma_w_min?.["200"] >= 39, JSON.stringify(pw.histograma_w_min));
+		check("sin potenciómetro no hay bloque de potencia", r.analisis?.potencia === null);
+	}
+
 	// Si las series fallan, el detalle básico sale igual.
 	globalThis.fetch = async (url) => {
 		const u = new URL(url);

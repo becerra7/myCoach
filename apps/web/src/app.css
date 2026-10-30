@@ -979,6 +979,8 @@ button.hp-encaje{cursor:pointer;align-items:center;min-height:44px}
 .seg2 button:last-child{border-right:0}
 .seg2 button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
 .seg-row{padding-bottom:8px}
+/* Insights llega a cinco pestañas (General, Bici, Rodillo, Correr, Skimo): en móvil caben todas sin desplazar. */
+@container app (max-width:420px){.ins-ctl .seg2{width:100%}.ins-ctl .seg2 button{flex:1 1 auto;padding:0 8px}}
 @media (prefers-reduced-motion:reduce){.fr-mark{transition:none}}
 
 /* Tu día: comidas y sesión en orden */
