@@ -27,10 +27,11 @@ function geoRuta(poly) {
 const PAIS_ES = { Spain: 'España', France: 'Francia', Andorra: 'Andorra', Portugal: 'Portugal', Italy: 'Italia', Switzerland: 'Suiza', Austria: 'Austria', Germany: 'Alemania', 'United Kingdom': 'Reino Unido', Belgium: 'Bélgica', Netherlands: 'Países Bajos', Norway: 'Noruega', Sweden: 'Suecia', Morocco: 'Marruecos', 'United States of America': 'Estados Unidos', Slovenia: 'Eslovenia', Croatia: 'Croacia', Greece: 'Grecia', Ireland: 'Irlanda', Iceland: 'Islandia', Mexico: 'México', Canada: 'Canadá', Japan: 'Japón' };
 /* ===== Dataset: vivo (tu conector de Garmin) o demo (instantánea) ===== */
 const FAM = { road_biking: 'bici', cycling: 'bici', indoor_cycling: 'bici', gravel_cycling: 'bici', mountain_biking: 'bici', virtual_ride: 'bici', running: 'correr', trail_running: 'correr', treadmill_running: 'correr', backcountry_skiing: 'skimo', skate_skiing_ws: 'skimo', hiking: 'montana', mountaineering: 'montana', snow_shoe_ws: 'montana', resort_skiing: 'esqui', resort_skiing_snowboarding_ws: 'esqui', tennis_v2: 'raqueta', tennis: 'raqueta', paddelball: 'raqueta', padel: 'raqueta', strength_training: 'fuerza', hiit: 'fuerza', indoor_cardio: 'fuerza', walking: 'caminar' };
-/* Rodillo: lo que Garmin marca como bici en interior y la bici sin distancia (la estática del gimnasio).
+/* Rodillo: lo que Garmin marca como bici en interior (Zwift y MyWhoosh suben virtual_ride), la bici sin trazado GPS
+   (el reloj, el ciclocomputador o una app como la de Elite) y la bici sin distancia (la estática del gimnasio).
    Para el plan y la carga sigue siendo bici; en Insights va aparte, porque sin carretera la velocidad y el terreno no dicen nada. */
 const RODILLO_T = ['indoor_cycling', 'virtual_ride'];
-const esRodillo = a => FAM[a.t] === 'bici' && (RODILLO_T.includes(a.t) || (a.km || 0) < 1);
+const esRodillo = a => FAM[a.t] === 'bici' && (RODILLO_T.includes(a.t) || a.gps === false || (a.km || 0) < 1);
 let DSET = null; // dataset crudo activo
 let M = {};      // todo lo derivado (lo que pinta la app)
 function cargarCache() { try { return JSON.parse(localStorage.getItem('trazo-vivo') || 'null'); } catch (e) { return null; } }

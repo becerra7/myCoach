@@ -1028,13 +1028,16 @@ function analizarPotencia(puntos) {
 	};
 }
 
-function analizarActividad(details) {
+// Bici en interior según Garmin: Zwift y MyWhoosh suben virtual_ride, con distancia y desnivel inventados.
+const TIPOS_RODILLO = new Set(["indoor_cycling", "virtual_ride"]);
+
+function analizarActividad(details, tipo = null) {
 	const puntos = seriesDeActividad(details);
 	const tiempo = seriesTiempo(details);
 	let potencia = null;
 	try { potencia = analizarPotencia(tiempo); } catch { potencia = null; }
-	// Sin distancia (rodillo, bici de gimnasio): no hay terreno; pulso y vatios salen de las series en el tiempo.
-	if (!puntos.some((p) => p.d >= 1000)) {
+	// Rodillo o sin distancia (bici de gimnasio): no hay terreno de verdad; pulso y vatios salen de las series en el tiempo.
+	if (TIPOS_RODILLO.has(tipo) || !puntos.some((p) => p.d >= 1000)) {
 		if (tiempo.length < 10) return { muestras: tiempo.length, nota: "Sin series suficientes." };
 		return {
 			muestras: tiempo.length,
@@ -1042,7 +1045,7 @@ function analizarActividad(details) {
 			histograma_fc_min: histogramaFc(tiempo),
 			fc_max_sostenida: { min5: fcMaxSostenida(tiempo, 5), min20: fcMaxSostenida(tiempo, 20), min60: fcMaxSostenida(tiempo, 60) },
 			potencia,
-			nota: "Sin distancia (rodillo o bici estática): no hay terreno ni velocidad. potencia: vatios medios y normalizados, mejores de 1, 5, 20 y 60 min, FTP estimado (95 % de los 20 min), vatios por latido (normalizada / pulso medio) y desacople potencia-pulso entre mitades.",
+			nota: "Rodillo o bici estática: no hay terreno ni velocidad (en Zwift y apps parecidas son inventados). potencia: vatios medios y normalizados, mejores de 1, 5, 20 y 60 min, FTP estimado (95 % de los 20 min), vatios por latido (normalizada / pulso medio) y desacople potencia-pulso entre mitades.",
 		};
 	}
 	if (puntos.length < 10) return { muestras: puntos.length, nota: "Sin series suficientes." };
@@ -1875,6 +1878,8 @@ const TOOLS = {
 					desn: a.elevationGain != null ? Math.round(a.elevationGain) : null,
 					vmax: kmh(a.maxSpeed),
 					n: a.activityName,
+					// Bici sin trazado: rodillo o estática, la grabe el reloj, el ciclocomputador o una app.
+					...(a.hasPolyline === false && DEPORTES_BICI.has(a.activityType?.typeKey) ? { gps: false } : {}),
 				}));
 			return list.map((a) => ({
 				activity_id: a.activityId,
@@ -1921,7 +1926,7 @@ const TOOLS = {
 			]);
 			const s = a?.summaryDTO || {};
 			let analisis = null;
-			try { analisis = details ? analizarActividad(details) : null; } catch (err) { analisis = { error: String(err) }; }
+			try { analisis = details ? analizarActividad(details, a?.activityTypeDTO?.typeKey) : null; } catch (err) { analisis = { error: String(err) }; }
 			const yaAnalizada = await analisisGuardado(env, userId, activity_id).catch(() => null);
 			return {
 				activity_id,

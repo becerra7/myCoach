@@ -218,7 +218,7 @@ async function sync(manual, live = !!LIVE && S.modo === 'vivo') {
   try {
     msg('Leyendo tu histórico…');
     const list = await call('garmin_activities', { limit: 300 }, manual || !ds.acts.length);
-    if (Array.isArray(list)) { const prev = new Set(ds.acts.map(a => String(a.id))); ds.acts = list.map(x => ({ id: String(x.id), t: x.t, d: x.d, km: x.km, min: x.min, fc: x.fc, te: x.te, cg: x.cg ?? null, desn: x.desn ?? null, vmax: x.vmax ?? null, n: x.n })); nuevas = ds.acts.filter(a => !prev.has(a.id)).length; }
+    if (Array.isArray(list)) { const prev = new Set(ds.acts.map(a => String(a.id))); ds.acts = list.map(x => ({ id: String(x.id), t: x.t, d: x.d, km: x.km, min: x.min, fc: x.fc, te: x.te, cg: x.cg ?? null, desn: x.desn ?? null, vmax: x.vmax ?? null, n: x.n, ...(x.gps === false ? { gps: false } : {}) })); nuevas = ds.acts.filter(a => !prev.has(a.id)).length; }
   } catch (e) { errs.push(e); }
   // Detalle (pulso, terreno, subidas, llano) del último año y del skimo; trazados para pueblos. Por tandas.
   // Un detalle de una versión anterior se vuelve a pedir: le faltan datos que Insights necesita.

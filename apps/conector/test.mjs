@@ -1090,6 +1090,27 @@ const rpc = async (env, token, message) => {
 		check("rodillo: desacople potencia-pulso positivo", pw.desacople_pct > 3, `(${pw.desacople_pct})`);
 		check("rodillo: cadencia y cubos de 20 W", pw.cadencia_media_rpm === 90 && pw.histograma_w_min?.["200"] >= 39, JSON.stringify(pw.histograma_w_min));
 		check("sin potenciómetro no hay bloque de potencia", r.analisis?.potencia === null);
+
+		// Zwift o MyWhoosh (virtual_ride): traen distancia y desnivel inventados, pero se analiza como rodillo.
+		globalThis.fetch = async (url) => {
+			const u = new URL(url);
+			if (u.pathname.endsWith("/details")) return new Response(JSON.stringify(details));
+			if (u.pathname.endsWith("/hrTimeInZones")) return new Response("[]");
+			return new Response(JSON.stringify({ activityName: "Zwift", activityTypeDTO: { typeKey: "virtual_ride" }, summaryDTO: { distance: d, duration: t } }));
+		};
+		const zw = await call("garmin_activity_detail", { activity_id: "6" });
+		check("virtual_ride: sin terreno aunque traiga distancia", zw.analisis?.sin_distancia === true && !zw.analisis.subidas, JSON.stringify(zw.analisis).slice(0, 120));
+
+		// En la lista larga, la bici sin trazado GPS lo dice (gps: false); la de fuera y el resto, no.
+		globalThis.fetch = async (url) => new URL(url).pathname.includes("/activities/search/")
+			? new Response(JSON.stringify([
+				{ activityId: 1, activityType: { typeKey: "cycling" }, distance: 25000, duration: 3600, hasPolyline: false },
+				{ activityId: 2, activityType: { typeKey: "road_biking" }, distance: 60000, duration: 7200, hasPolyline: true },
+				{ activityId: 3, activityType: { typeKey: "strength_training" }, distance: 0, duration: 3000, hasPolyline: false },
+			]))
+			: new Response("{}", { status: 404 });
+		const lista = await call("garmin_activities", { limit: 60 });
+		check("lista: la bici sin GPS lleva gps: false", lista[0]?.gps === false && !("gps" in lista[1]) && !("gps" in lista[2]), JSON.stringify(lista));
 	}
 
 	// Si las series fallan, el detalle básico sale igual.
