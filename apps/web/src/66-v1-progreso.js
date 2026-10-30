@@ -280,14 +280,16 @@ function progRodillo() {
   if (todas.length < 2) return blk(pendiente(`Hay pocas sesiones de rodillo en ${INS_TXT[dias]}`, 'Con dos ya te enseño tus números. Prueba con un periodo más largo o actualiza los datos de Garmin.') + '<div class="btns"><button class="btn tonal" type="button" data-a="v-sync">Actualizar con Garmin</button></div>', 'first');
   const fuera = acts().filter(a => a.dep === 'bici' && !a.rod && a.f > desde && a.min >= 15);
   const conW = todas.filter(a => a.pw), fondo = a => ['rec', 'fondo'].includes(tipoAct(a)), temp = a => a.tc != null ? `, ${nf(a.tc, 0)} °C` : '';
-  const ftpG = ((M.forma || {}).ftp || {}).vatios || null, ftpE = conW.length ? Math.max(0, ...conW.map(a => a.pw.ftp || 0)) || null : null, ftp = ftpG || ftpE;
+  const ftpG = ((M.forma || {}).ftp || {}).vatios || null, ftpE = conW.length ? Math.max(0, ...conW.map(a => a.pw.ftp || 0)) || null : null;
+  // El 95 % de los mejores 20 min solo es un FTP si esos 20 min fueron a tope: de una sesión suave sale muy por debajo.
+  const deE = ftpE && conW.find(a => a.pw.ftp === ftpE), ftpEok = ftpE && (ftpG ? ftpE >= ftpG * 0.9 : deE && ['tempo', 'int'].includes(tipoAct(deE))), ftp = ftpG || (ftpEok ? ftpE : null);
 
   // Dentro y fuera, en lo que se puede comparar: horas, pulso medio (por tiempo) y carga de Garmin por hora.
   const resumen = as => { const min = as.reduce((s, a) => s + a.min, 0), cf = as.filter(a => a.fc), mf = cf.reduce((s, a) => s + a.min, 0), cc = as.filter(a => a.cg != null), mc = cc.reduce((s, a) => s + a.min, 0);
     return { n: as.length, h: min / 60, fc: mf ? cf.reduce((s, a) => s + a.fc * a.min, 0) / mf : null, cgh: mc ? cc.reduce((s, a) => s + a.cg, 0) / (mc / 60) : null }; };
   const D = resumen(todas), F = resumen(fuera), np = conW.length ? conW.reduce((s, a) => s + a.pw.np * a.min, 0) / conW.reduce((s, a) => s + a.min, 0) : null;
-  const celda = (nom, v, u) => `<div class="ter-c"><span class="n">${nom}</span><b>${v}${u && v !== '—' ? ` <small>${u}</small>` : ''}</b></div>`;
-  const fila = (nom, ico, x, w) => `<div class="ter-f"><div class="ter-n"><b><i aria-hidden="true">${ico}</i>${nom}</b><span>${x.n ? `${x.n} ${x.n === 1 ? 'sesión' : 'sesiones'} · ${dur(Math.round(x.h * 60))}` : 'Nada en este periodo'}</span></div>${x.n ? [celda('Pulso', x.fc ? nf(x.fc, 0) : '—', 'ppm'), celda('Carga por hora', x.cgh ? nf(x.cgh, 0) : '—', ''), w ? celda('Potencia', nf(w, 0), 'W') : ''].join('') : ''}</div>`;
+  const celda = (nom, v, u, ref) => `<div class="ter-c"><span class="n">${nom}</span><b>${v}${u && v !== '—' ? ` <small>${u}</small>` : ''}</b>${ref ? `<small class="ter-ref">${ref}</small>` : ''}</div>`;
+  const fila = (nom, ico, x, w) => `<div class="ter-f"><div class="ter-n"><b><i aria-hidden="true">${ico}</i>${nom}</b><span>${x.n ? `${x.n} ${x.n === 1 ? 'sesión' : 'sesiones'} · ${dur(Math.round(x.h * 60))}` : 'Nada en este periodo'}</span></div>${x.n ? [celda('Pulso', x.fc ? nf(x.fc, 0) : '—', 'ppm'), celda('Carga por hora', x.cgh ? nf(x.cgh, 0) : '—', ''), w ? celda('Potencia', nf(w, 0), 'W', conW.length < x.n ? `En ${conW.length} de ${x.n} sesiones` : '') : ''].join('') : ''}</div>`;
   const parte = D.h + F.h ? Math.round(D.h / (D.h + F.h) * 100) : 0;
   const numeros = blk(`${blkH(`Tus números en ${INS_TXT[dias]}`, info('rod-num', 'Dentro y fuera', 'Solo se compara lo que significa lo mismo en los dos sitios: las horas, el pulso medio y la carga por hora (la Exercise Load de Garmin dividida por las horas: cuánto aprieta cada hora). La velocidad y los km del rodillo no se usan. La potencia es la normalizada media; fuera sale si llevas potenciómetro.'))}
     <p class="small muted" style="margin:-4px 0 12px">El ${parte} % de tus horas de bici, en rodillo.</p>
@@ -312,10 +314,10 @@ function progRodillo() {
     const mejor = (as, i) => { const v = as.map(a => a.pw && a.pw.mejor[i]).filter(Boolean); return v.length ? Math.max(...v) : null; };
     const datos = ['1 min', '5 min', '20 min', '60 min'].map((l, i) => [l, mejor(conW, i) || 0, mejor(antes, i)]).filter(d => d[1]);
     if (datos.length) { const vy = niceMax(Math.max(...datos.map(d => Math.max(d[1], d[2] || 0))));
-      top.push(blk(`${vizT('Tu curva de potencia', info('rod-curva', 'Curva de potencia', `Los vatios medios más altos que has mantenido durante 1, 5, 20 y 60 minutos seguidos en ${INS_TXT[dias]}. La raya es el periodo anterior, de la misma duración. Del de 20 minutos sale el FTP estimado (su 95 %).`))}
+      top.push(blk(`${vizT('Tu curva de potencia', info('rod-curva', 'Curva de potencia', `Los vatios medios más altos que has mantenido durante 1, 5, 20 y 60 minutos seguidos en ${INS_TXT[dias]}. La raya es el periodo anterior, de la misma duración. Del de 20 minutos sale el FTP estimado (su 95 %), si esos 20 minutos fueron a tope.`))}
         <div class="viz">${vBarras({ datos, y0: 0, y1: vy, ticks: vTicks(0, vy), h: 170, u: 'W', color: () => col, marcas: datos.map(d => d[2]), tip: d => `${d[0]}: ${nf(d[1], 0)} W${d[2] ? ` (antes ${nf(d[2], 0)})` : ''}`, etiqueta: d => nf(d[1], 0), aria: 'Mejores vatios durante 1, 5, 20 y 60 minutos' })}</div>
         ${datos.some(d => d[2]) ? '<div class="leyenda"><span><i style="background:' + col + '"></i>Este periodo</span><span><i class="ln" style="border-top:2.5px solid var(--ink)"></i>Periodo anterior</span></div>' : ''}
-        ${ftpE || ftpG ? `<p class="lee">${ftpE ? `FTP estimado: ${ftpE} W` : ''}${ftpE && ftpG ? '; ' : ''}${ftpG ? `${ftpE ? 'el' : 'El'} de Garmin, ${ftpG} W` : ''}.</p>` : ''}`)); }
+        <p class="lee">${ftpEok ? `FTP estimado: ${ftpE} W${ftpG ? `; el de Garmin, ${ftpG} W` : ''}.` : `${ftpG ? `Tu FTP de Garmin: ${ftpG} W. ` : ''}Tus mejores 20 min aún no salen de un esfuerzo a tope, así que no dan tu FTP: para eso, un test de 20 min o una sesión de umbral.`}</p>`)); }
     // Desacople potencia-pulso en los fondos de 40 min o más.
     const pDc = conW.filter(a => a.pw.dc != null && a.min >= 40 && fondo(a)).map(a => ({ f: a.f, v: a.pw.dc, a }));
     if (pDc.length >= 2) mas.push(serie('Desacople en los fondos', info('rod-dc', 'Desacople potencia-pulso', 'Cuánto cae la relación entre vatios y pulso de la primera mitad de la sesión a la segunda (Joe Friel). Por debajo del 5 % aguantas bien esa duración; por encima, el pulso se te dispara al final. En rodillo, ventila: el calor también lo sube.'),
@@ -324,9 +326,9 @@ function progRodillo() {
     if (ftp) { const z = ZONAS_W.map(() => 0);
       conW.forEach(a => Object.entries(a.pw.h).forEach(([c, m]) => { const pct = (+c + 10) / ftp * 100; let k = 0; ZONAS_W.forEach(([, d], i) => { if (pct >= d) k = i; }); z[k] += m; }));
       const tot = z.reduce((s, v) => s + v, 0);
-      if (tot) { const datosZ = ZONAS_W.map(([n], i) => [`Z${i + 1}`, z[i] / 60, n]), vz = niceMax(Math.max(...datosZ.map(d => d[1])));
-        mas.push(blk(`${vizT('Tiempo en cada zona de potencia', info('rod-zonas', 'Zonas de potencia', `Horas del periodo en cada zona, con tu FTP ${ftpG ? 'de Garmin' : 'estimado'} (${ftp} W). Z1 recuperación (menos del 55 %), Z2 resistencia (55-75 %), Z3 tempo (76-90 %), Z4 umbral (91-105 %), Z5 VO2máx (106-120 %) y Z6 anaeróbico (más del 120 %).`))}
-          <div class="viz">${vBarras({ datos: datosZ, y0: 0, y1: vz, ticks: vTicks(0, vz), h: 160, u: 'h', color: () => col, tip: d => `${d[0]} ${d[2].toLowerCase()}: ${nf(d[1], 1)} h (${Math.round(d[1] * 60 / tot * 100)} %)`, etiqueta: d => d[1] ? nf(d[1], 1) : '', aria: `Horas en cada zona de potencia en ${INS_TXT[dias]}`, fmt: v => nf(v, 1) })}</div>
+      if (tot) { const enH = tot >= 180, uz = enH ? 'h' : 'min', datosZ = ZONAS_W.map(([n], i) => [`Z${i + 1}`, enH ? z[i] / 60 : z[i], n]), vz = niceMax(Math.max(...datosZ.map(d => d[1]))), fz = v => nf(v, enH ? 1 : 0);
+        mas.push(blk(`${vizT('Tiempo en cada zona de potencia', info('rod-zonas', 'Zonas de potencia', `Tiempo del periodo en cada zona, con tu FTP ${ftpG ? 'de Garmin' : 'estimado'} (${ftp} W). Z1 recuperación (menos del 55 %), Z2 resistencia (55-75 %), Z3 tempo (76-90 %), Z4 umbral (91-105 %), Z5 VO2máx (106-120 %) y Z6 anaeróbico (más del 120 %).`))}
+          <div class="viz">${vBarras({ datos: datosZ, y0: 0, y1: vz, ticks: vTicks(0, vz), h: 160, u: uz, color: () => col, tip: d => `${d[0]} ${d[2].toLowerCase()}: ${fz(d[1])} ${uz} (${Math.round(d[1] * (enH ? 60 : 1) / tot * 100)} %)`, etiqueta: d => d[1] * (enH ? 60 : 1) >= 1 ? fz(d[1]) : '', aria: `Tiempo en cada zona de potencia en ${INS_TXT[dias]}`, fmt: v => nf(v, enH ? 1 : 0) })}</div>
           <p class="lee">${Math.round((z[0] + z[1]) / tot * 100)} % en Z1 y Z2.</p>`)); } }
   }
   // Horas por semana en rodillo.

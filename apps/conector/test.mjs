@@ -1077,8 +1077,9 @@ const rpc = async (env, token, message) => {
 			const u = new URL(url);
 			if (u.pathname.endsWith("/details")) return new Response(JSON.stringify(detR));
 			if (u.pathname.endsWith("/hrTimeInZones")) return new Response("[]");
-			return new Response(JSON.stringify({ activityName: "Rodillo", activityTypeDTO: { typeKey: "indoor_cycling" }, summaryDTO: { distance: 0, duration: 2700 } }));
+			return new Response(JSON.stringify({ activityName: "Rodillo", activityTypeDTO: { typeKey: "indoor_cycling" }, summaryDTO: { distance: 0, duration: 2700, ...(conResumen ? { normalizedPower: 214.6, maxPowerTwentyMinutes: 228.4 } : {}) } }));
 		};
+		let conResumen = false;
 		const rod = await call("garmin_activity_detail", { activity_id: "5" });
 		const pw = rod.analisis?.potencia || {};
 		check("rodillo: se analiza sin distancia", rod.analisis?.sin_distancia === true && !rod.analisis.por_terreno, JSON.stringify(rod.analisis).slice(0, 200));
@@ -1090,6 +1091,9 @@ const rpc = async (env, token, message) => {
 		check("rodillo: desacople potencia-pulso positivo", pw.desacople_pct > 3, `(${pw.desacople_pct})`);
 		check("rodillo: cadencia y cubos de 20 W", pw.cadencia_media_rpm === 90 && pw.histograma_w_min?.["200"] >= 39, JSON.stringify(pw.histograma_w_min));
 		check("sin potenciómetro no hay bloque de potencia", r.analisis?.potencia === null);
+		conResumen = true;
+		const rodG = (await call("garmin_activity_detail", { activity_id: "5" })).analisis?.potencia || {};
+		check("rodillo: la normalizada y los 20 min de Garmin mandan", rodG.normalizada_w === 215 && rodG.mejor_w?.min20 === 228 && rodG.ftp_estimado_w === 217, JSON.stringify(rodG).slice(0, 160));
 
 		// Zwift o MyWhoosh (virtual_ride): traen distancia y desnivel inventados, pero se analiza como rodillo.
 		globalThis.fetch = async (url) => {

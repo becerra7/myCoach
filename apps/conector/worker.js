@@ -976,50 +976,60 @@ function seriesTiempo(details) {
 	return puntos.sort((a, b) => a.t - b.t);
 }
 
-/** Media más alta de un campo durante N segundos seguidos (media móvil en el tiempo). */
-function mejorMedia(puntos, campo, segundos) {
-	const p = puntos.filter((x) => x[campo] != null);
-	if (p.length < 2 || p.at(-1).t - p[0].t < segundos) return null;
-	let mejor = null, ini = 0, suma = 0;
+/**
+ * Potencia segundo a segundo: Garmin manda las series cada pocos segundos y de forma irregular, y las
+ * ventanas de 1 o 20 minutos solo son justas sobre una rejilla de 1 s. Cada valor se mantiene hasta la
+ * muestra siguiente. Un hueco de más de 30 s es una pausa y se quita, como hace Garmin con sus medias.
+ */
+function rejillaPotencia(p) {
+	const w = [];
 	for (let i = 0; i < p.length; i++) {
-		suma += p[i][campo];
-		while (p[i].t - p[ini].t >= segundos) { suma -= p[ini][campo]; ini++; }
-		if (p[i].t - p[ini].t >= segundos * 0.95) { const m = suma / (i - ini + 1); if (mejor == null || m > mejor) mejor = m; }
+		const dt = i + 1 < p.length ? Math.round(p[i + 1].t - p[i].t) : 1;
+		if (dt > 30) { w.push(p[i].w); continue; }
+		for (let s = 0; s < dt; s++) w.push(p[i].w);
 	}
-	return mejor != null ? Math.round(mejor) : null;
+	return w;
+}
+
+/** Media más alta de la rejilla durante N segundos seguidos. */
+function mejorVentana(w, segundos) {
+	if (w.length < segundos) return null;
+	let suma = 0, mejor = 0;
+	for (let i = 0; i < w.length; i++) {
+		suma += w[i];
+		if (i >= segundos) suma -= w[i - segundos];
+		if (i >= segundos - 1) mejor = Math.max(mejor, suma / segundos);
+	}
+	return Math.round(mejor);
 }
 
 /**
  * Lo que dice el potenciómetro (rodillo o fuera): media, normalizada (Coggan: media móvil de 30 s a la
  * cuarta), mejores vatios en 1, 5, 20 y 60 min, vatios por latido y desacople potencia-pulso (Friel:
  * cuánto cae la relación vatios/pulso de la primera mitad a la segunda). Con la potencia el desacople
- * vale en cualquier terreno, porque los vatios ya incluyen el viento y la pendiente. Las series llegan
- * cada pocos segundos, así que no hay marca de 5 s: sería un pico de muestreo, no un sprint.
+ * vale en cualquier terreno, porque los vatios ya incluyen el viento y la pendiente. No hay marca de
+ * 5 s: con muestras cada pocos segundos sería un pico de muestreo, no un sprint.
  */
 function analizarPotencia(puntos) {
 	const p = puntos.filter((x) => x.w != null);
 	if (p.length < 30 || !p.some((x) => x.w > 0) || p.at(-1).t - p[0].t < 600) return null;
-	const media = MEDIA(p.map((x) => x.w));
-	// Normalizada: media de 30 s en el tiempo, a la cuarta, y su raíz cuarta.
-	let ini = 0, suma = 0, cuartas = 0, n = 0;
-	for (let i = 0; i < p.length; i++) {
-		suma += p[i].w;
-		while (p[i].t - p[ini].t > 30) { suma -= p[ini].w; ini++; }
-		if (p[i].t - p[0].t >= 30) { cuartas += (suma / (i - ini + 1)) ** 4; n++; }
-	}
-	const np = n ? (cuartas / n) ** 0.25 : media;
+	const w = rejillaPotencia(p), media = w.reduce((s, v) => s + v, 0) / w.length;
+	// Normalizada: media de 30 s, a la cuarta, y su raíz cuarta.
+	let suma = 0, cuartas = 0;
+	for (let i = 0; i < w.length; i++) { suma += w[i]; if (i >= 30) suma -= w[i - 30]; if (i >= 29) cuartas += (suma / 30) ** 4; }
+	const np = w.length >= 30 ? (cuartas / (w.length - 29)) ** 0.25 : media;
 	const conFc = p.filter((x) => x.fc), fcMedia = MEDIA(conFc.map((x) => x.fc));
 	const mitad = (p[0].t + p.at(-1).t) / 2, ef = (xs) => { const fc = MEDIA(xs.map((x) => x.fc)); return fc ? MEDIA(xs.map((x) => x.w)) / fc : null; };
 	const a = conFc.filter((x) => x.t <= mitad), b = conFc.filter((x) => x.t > mitad), efA = a.length >= 30 ? ef(a) : null, efB = b.length >= 30 ? ef(b) : null;
 	// Minutos en cada cubo de 20 W (como el histograma de pulso): las zonas las pone quien sabe el FTP.
 	const cubos = {};
-	for (let i = 1; i < p.length; i++) { const dt = Math.min(30, Math.max(0, p[i].t - p[i - 1].t)), c = Math.floor(p[i].w / 20) * 20; cubos[c] = (cubos[c] || 0) + dt; }
+	for (const v of w) { const c = Math.floor(v / 20) * 20; cubos[c] = (cubos[c] || 0) + 1; }
 	const cads = puntos.map((x) => x.cad).filter((c) => c > 0);
-	const mejor20 = mejorMedia(p, "w", 1200);
+	const mejor20 = mejorVentana(w, 1200);
 	return {
 		media_w: Math.round(media),
 		normalizada_w: Math.round(np),
-		mejor_w: { min1: mejorMedia(p, "w", 60), min5: mejorMedia(p, "w", 300), min20: mejor20, min60: mejorMedia(p, "w", 3600) },
+		mejor_w: { min1: mejorVentana(w, 60), min5: mejorVentana(w, 300), min20: mejor20, min60: mejorVentana(w, 3600) },
 		ftp_estimado_w: mejor20 ? Math.round(mejor20 * 0.95) : null,
 		vatios_por_latido: fcMedia ? round(np / fcMedia, 2) : null,
 		desacople_pct: efA && efB && p.at(-1).t - p[0].t >= 2400 ? round(((efA - efB) / efA) * 100, 1) : null,
@@ -1927,6 +1937,15 @@ const TOOLS = {
 			const s = a?.summaryDTO || {};
 			let analisis = null;
 			try { analisis = details ? analizarActividad(details, a?.activityTypeDTO?.typeKey) : null; } catch (err) { analisis = { error: String(err) }; }
+			// Lo que Garmin ya calcula con cada segundo (media, normalizada y mejores 20 min) manda sobre lo de las series.
+			const pw = analisis?.potencia;
+			if (pw) {
+				const np0 = pw.normalizada_w;
+				if (s.averagePower) pw.media_w = Math.round(s.averagePower);
+				if (s.normalizedPower) pw.normalizada_w = Math.round(s.normalizedPower);
+				if (s.maxPowerTwentyMinutes) { pw.mejor_w.min20 = Math.round(s.maxPowerTwentyMinutes); pw.ftp_estimado_w = Math.round(s.maxPowerTwentyMinutes * 0.95); }
+				if (pw.vatios_por_latido && np0) pw.vatios_por_latido = round(pw.vatios_por_latido * (pw.normalizada_w / np0), 2);
+			}
 			const yaAnalizada = await analisisGuardado(env, userId, activity_id).catch(() => null);
 			return {
 				activity_id,
