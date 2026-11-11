@@ -1095,6 +1095,30 @@ const rpc = async (env, token, message) => {
 		const rodG = (await call("garmin_activity_detail", { activity_id: "5" })).analisis?.potencia || {};
 		check("rodillo: la normalizada y los 20 min de Garmin mandan", rodG.normalizada_w === 215 && rodG.mejor_w?.min20 === 228 && rodG.ftp_estimado_w === 217, JSON.stringify(rodG).slice(0, 160));
 
+		// FTP de rodillo: un test lo fija, una sesión posterior más fuerte lo sube; una floja o anterior al test, no.
+		const sesiones = {
+			t1: ["Zwift - FTP Test [Standard]", "2026-11-03", 217], s0: ["Zwift - Steady", "2026-11-01", 260],
+			s1: ["Zwift - Z2", "2026-11-05", 160], s2: ["Zwift - Umbral", "2026-11-10", 230],
+		};
+		globalThis.fetch = async (url) => {
+			const u = new URL(url);
+			if (u.pathname.endsWith("/details")) return new Response(JSON.stringify(detR));
+			if (u.pathname.endsWith("/hrTimeInZones")) return new Response("[]");
+			const id = u.pathname.split("/").pop(), [nombre, dia, w20] = sesiones[id] || ["x", "2026-01-01", 100];
+			return new Response(JSON.stringify({ activityName: nombre, activityTypeDTO: { typeKey: "virtual_ride" }, summaryDTO: { startTimeLocal: `${dia}T19:00:00.0`, duration: 2700, maxPowerTwentyMinutes: w20 } }));
+		};
+		const t1 = await call("garmin_activity_detail", { activity_id: "t1" });
+		check("ftp: el test de 20 min lo fija (95 %)", t1.ftp_actualizado?.vatios === 206 && t1.ftp_actualizado.fuente === "test de 20 min", JSON.stringify(t1.ftp_actualizado));
+		check("ftp: una sesión anterior al test no lo cambia", !(await call("garmin_activity_detail", { activity_id: "s0" })).ftp_actualizado);
+		check("ftp: una sesión floja no lo baja", !(await call("garmin_activity_detail", { activity_id: "s1" })).ftp_actualizado);
+		const s2 = await call("garmin_activity_detail", { activity_id: "s2" });
+		check("ftp: una sesión posterior más fuerte lo sube", s2.ftp_actualizado?.vatios === 219 && s2.ftp_actualizado.anterior === 206 && s2.ftp_actualizado.fuente === "sesión", JSON.stringify(s2.ftp_actualizado));
+		check("ftp: repetir el mismo análisis no lo vuelve a anunciar", !(await call("garmin_activity_detail", { activity_id: "s2" })).ftp_actualizado);
+		const hoyF = await call("coach_hoy", { fecha: "2026-11-11" });
+		check("ftp: coach_hoy lo trae, con las semanas desde el test", hoyF.ftp_rodillo?.vatios === 219 && hoyF.ftp_rodillo.semanas_desde_test === 1 && hoyF.ftp_rodillo.repetir_test === false, JSON.stringify(hoyF.ftp_rodillo));
+		const mano = await call("coach_perfil_guardar", { cambios: { ftp_rodillo: 210 } });
+		check("ftp: a mano también vale (cuenta como un test de hoy)", mano.ftp_rodillo?.vatios === 210 && mano.ftp_rodillo.fuente === "a mano", JSON.stringify(mano));
+
 		// Zwift o MyWhoosh (virtual_ride): traen distancia y desnivel inventados, pero se analiza como rodillo.
 		globalThis.fetch = async (url) => {
 			const u = new URL(url);
@@ -2231,6 +2255,7 @@ const rpc = async (env, token, message) => {
 		if (u.pathname === "/api/v1/athlete/i77/wellness.json") return json([{ id: "2026-09-28", ctl: 55.12, atl: 60.3, restingHR: 47, hrv: 58, sleepSecs: 27000, readiness: 71, weight: 70.2 }]);
 		if (u.pathname === "/api/v1/athlete/i77/power-curves.json") return json({ list: [{ id: "42d", label: "42 dias", secs: [5, 15, 30, 60, 300, 600, 1200, 3600], values: [900, 700, 500, 400, 300, 280, 260, 230] }] });
 		if (u.pathname === "/api/v1/athlete/i77/pace-curves.json") return json({ list: [{ id: "1y", distance: [400, 1000, 5000, 10000], values: [80, 220, 1200, 2520] }] });
+		if (u.pathname === "/api/v1/athlete/i77/sport-settings/Ride" && init?.method === "PUT") { escritos.push(["FTP", JSON.parse(init.body), u.search]); return json({ type: "Ride" }); }
 		if (u.pathname === "/api/v1/athlete/i77/sport-settings/Ride") return json({ type: "Ride", lthr: 170, ftp: 250, indoor_ftp: 206 });
 		if (u.pathname === "/api/v1/athlete/i77/events" && init?.method === "POST") { escritos.push(["POST", JSON.parse(init.body)]); return json({ id: 9001 }); }
 		if (u.pathname === "/api/v1/athlete/i77/events/9001" && init?.method === "PUT") { escritos.push(["PUT", JSON.parse(init.body)]); return json({ id: 9001 }); }
@@ -2295,6 +2320,9 @@ const rpc = async (env, token, message) => {
 	await llamar(ana, "entreno_enviar_intervals", { id: "umbral-3x10", fecha: "2026-11-13", confirm: true });
 	check("intervals: volver a mandarlo actualiza el mismo (sin duplicar)", escritos.length === 2 && escritos[1][0] === "PUT" && escritos[1][1].start_date_local === "2026-11-13T00:00:00");
 	check("intervals: un entreno que no existe da error", Boolean((await llamar(ana, "entreno_enviar_intervals", { id: "no-esta" })).error));
+	await llamar(ana, "coach_perfil_guardar", { cambios: { ftp_rodillo: 212 } });
+	const ftpIcu = escritos.find((x) => x[0] === "FTP");
+	check("intervals: el FTP de rodillo se copia como FTP de interior, sin tocar las zonas de pulso", ftpIcu?.[1]?.indoor_ftp === 212 && Object.keys(ftpIcu[1]).length === 1 && ftpIcu[2].includes("recalcHrZones=false"), JSON.stringify(ftpIcu));
 
 	check("otro usuario no ve el Intervals de ana", (await llamar(bob, "intervals_estado")).conectado === false);
 	await llamar(ana, "intervals_desconectar");

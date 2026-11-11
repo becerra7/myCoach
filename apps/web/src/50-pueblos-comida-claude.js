@@ -226,13 +226,15 @@ async function sync(manual, live = !!LIVE && S.modo === 'vivo') {
   const faltaDet = a => !ds.det[a.id] || ((ds.det[a.id].v || 0) < detVNecesaria(a) && !ds.det[a.id].err && ['bici', 'correr', 'skimo'].includes(FAM[a.t]));
   const quiereDet = a => (a.d > d365 && ['bici', 'correr', 'skimo'].includes(FAM[a.t])) || (a.d > d60 && FAM[a.t] === 'montana') || FAM[a.t] === 'skimo';
   const needDet = ds.acts.filter(a => faltaDet(a) && quiereDet(a)).slice(0, 30);
-  let i = 0; await pool(needDet, 4, async a => { msg(`Analizando actividades (${++i}/${needDet.length})…`); try { ds.det[a.id] = detalleDe(await call('garmin_activity_detail', { activity_id: a.id })); } catch (e) { ds.det[a.id] = { err: e.code || 'error' }; } });
+  let i = 0, ftpNuevo = null; await pool(needDet, 4, async a => { msg(`Analizando actividades (${++i}/${needDet.length})…`); try { const r = await call('garmin_activity_detail', { activity_id: a.id }); ds.det[a.id] = detalleDe(r); if (r.ftp_actualizado && (!ftpNuevo || r.ftp_actualizado.fecha >= ftpNuevo.fecha)) ftpNuevo = r.ftp_actualizado; } catch (e) { ds.det[a.id] = { err: e.code || 'error' }; } });
   const needRuta = ds.acts.filter(a => !(a.id in ds.rutas) && a.km > 0.5 && ['bici', 'correr', 'skimo', 'montana', 'esqui', 'caminar'].includes(FAM[a.t])).slice(0, 25);
   i = 0; await pool(needRuta, 4, async a => { msg(`Buscando pueblos (${++i}/${needRuta.length})…`); try { const r = await call('garmin_activity_route', { activity_id: a.id, puntos: 5 }); ds.rutas[a.id] = r.polilinea || null; } catch (e) { ds.rutas[a.id] = null; } });
   fin(); ds.at = Date.now(); construir(ds); guardarCache(ds);
   if (!S.sports.length) S.sports = Object.keys(horasPorDeporte()).filter(k => ENTRENABLES.includes(k));
   S.lastSync = Date.now(); S.liveOk = errs.length < 2; save(); render(); markFlow('sync'); cargarCoach(manual);
   const pendientes = ds.acts.filter(a => faltaDet(a) && quiereDet(a) && ['bici', 'correr', 'skimo'].includes(FAM[a.t])).length + ds.acts.filter(a => !(a.id in ds.rutas) && a.km > 0.5 && FAM[a.t] && FAM[a.t] !== 'fuerza' && FAM[a.t] !== 'raqueta').length;
+  // Si una sesión ha puesto o subido el FTP de rodillo, se dice (con el antes) y se ve en Insights → Rodillo.
+  if (ftpNuevo) setTimeout(() => toast(`Tu FTP de rodillo: ${ftpNuevo.anterior ? `${ftpNuevo.anterior} → ` : ''}${ftpNuevo.vatios} W (${ftpNuevo.fuente})`, { ms: 8000 }), 6500);
   if (!errs.length) toast(`${nuevas ? `${nuevas} actividad${nuevas === 1 ? '' : 'es'} nueva${nuevas === 1 ? '' : 's'}. ` : ''}${pendientes ? `Faltan ${pendientes} por analizar: vuelve a actualizar.` : 'Todo al día con Garmin.'}`, { ms: 6000 });
   else { const e = errs[0] || {}; const m = { needs_reauth: 'Vuelve a conectar Garmin en claude.ai → Ajustes → Conectores', server_not_connected: 'Añade el conector de Garmin en claude.ai → Conectores', not_in_manifest: 'No has dado permiso a esta página para usar Garmin', selection_required: 'Elige qué conector de Garmin usar', server_unavailable: 'Garmin no responde ahora; prueba en un rato' + (e.message && e.message !== 'error' ? ` (${e.message})` : ''), tool_error: 'Garmin ha devuelto un error: ' + (e.message || '') }[e.code] || 'No he podido leer Garmin (' + (e.code || 'error') + ')'; toast(m, { ms: 8000 }); }
 }

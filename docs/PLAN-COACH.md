@@ -289,6 +289,12 @@ Objetivo: que funcione sin ti delante y aprender qué enamora.
     - Herramienta `entreno_enviar_intervals` (un entreno de bici o correr ya guardado + fecha) y botón "Enviar a Intervals" junto a "Enviar al reloj" en el día del plan y en Tus entrenos, solo si Intervals.icu está conectado. Claude también la ve (unos 200 tokens más por conversación).
     - Va en el formato de texto de Intervals (`- Serie 10m 195-210w`, bloques `3x`). En bici se marca de interior (`indoor`), que es lo que Zwift exige; Intervals la sube a Zwift (y, según su foro, a MyWhoosh) en los 7 días antes. El pulso en ppm se escribe en % del umbral de Intervals; lo que Intervals no tiene (hasta pulsar vuelta, velocidad) se avisa en la vista previa. Se guarda el id del evento y volver a mandarlo actualiza ese mismo: la búsqueda por `external_id` no vale con una clave personal.
     - El FTP estimado de Insights también vale si los 20 min salen de una sesión de tempo o intensa (un test), aunque quede por debajo del 90 % del FTP de Garmin: el test del 3 de noviembre (206 W) quedaba a 0,1 W.
+30. **FTP de rodillo automático, 11 de noviembre.** A petición del usuario (test de Zwift del 3 de noviembre: 206 W; Garmin tenía 229 e Intervals 250). Un solo FTP en myCoach, el de interior (`atleta/ftp`):
+    - Un **test lo fija**, suba o baje: el de 20 min, el 95 % de esos 20 min; el de rampa, el 75 % del mejor minuto. Se reconoce por el nombre ("FTP Test", "Ramp Test").
+    - Una **sesión de rodillo solo lo sube**, si el 95 % de sus mejores 20 min lo supera, y nunca una anterior al último test. **No baja solo**: a las 8 semanas del último test se propone repetirlo (`coach_hoy` → `ftp_rodillo.repetir_test`).
+    - Se puede poner a mano (`coach_perfil_guardar` con `ftp_rodillo`; cuenta como un test de hoy).
+    - Cada cambio se **copia a Intervals.icu como FTP de interior** (`indoor_ftp`, sin recalcular zonas de pulso), para que los entrenos lleguen a Zwift o MyWhoosh con los mismos vatios. El FTP de Garmin no se toca (el Edge tiene su propia detección).
+    - Se calcula al analizar cada sesión (`garmin_activity_detail`); la web avisa al sincronizar ("Tu FTP de rodillo: 206 → 212 W") y lo enseña en Insights → Rodillo, que lo usa para las zonas de potencia.
 
 ## 10. Próximos pasos concretos (2 semanas)
 1. Sacar `packages/domain` con carga TRIMP, semáforo y tests.

@@ -1946,6 +1946,10 @@ const TOOLS = {
 				if (s.maxPowerTwentyMinutes) { pw.mejor_w.min20 = Math.round(s.maxPowerTwentyMinutes); pw.ftp_estimado_w = Math.round(s.maxPowerTwentyMinutes * 0.95); }
 				if (pw.vatios_por_latido && np0) pw.vatios_por_latido = round(pw.vatios_por_latido * (pw.normalizada_w / np0), 2);
 			}
+			// Una sesión de rodillo con potencia puede poner o subir el FTP de rodillo (un test lo fija).
+			let ftpNuevo = null;
+			if (pw && analisis.sin_distancia)
+				ftpNuevo = await actualizarFtpRodillo(env, userId, { id: activity_id, fecha: String(s.startTimeLocal || "").slice(0, 10), nombre: a?.activityName, potencia: pw }).catch(() => null);
 			const yaAnalizada = await analisisGuardado(env, userId, activity_id).catch(() => null);
 			return {
 				activity_id,
@@ -1971,6 +1975,7 @@ const TOOLS = {
 					? zonas.map((z) => ({ zona: z.zoneNumber, desde_ppm: z.zoneLowBoundary, minutos: round((z.secsInZone ?? 0) / 60, 1) }))
 					: null,
 				analisis,
+				...(ftpNuevo ? { ftp_actualizado: resumenFtp(ftpNuevo) } : {}),
 			};
 		},
 	},
@@ -4237,13 +4242,14 @@ function anotadoDelDia(diario, dia) {
 
 async function calcularHoy(env, userId, { fecha } = {}) {
 	const hoy = fecha || fechaLocal();
-	const [estadoApp, perfil, diario, hist, datosHoy, estadoG] = await Promise.all([
+	const [estadoApp, perfil, diario, hist, datosHoy, estadoG, ftp] = await Promise.all([
 		leerDoc(env, userId, "estado/app"),
 		leerDoc(env, userId, "atleta/perfil"),
 		leerDoc(env, userId, "atleta/diario"),
 		historico(env, userId),
 		datosDeHoy(env, userId, hoy),
 		apiGet(env, userId, `/metrics-service/metrics/trainingstatus/aggregated/${hoy}`).catch(() => null),
+		leerDoc(env, userId, FTP_DOC).catch(() => null),
 	]);
 	const plan = planCompleto(estadoApp);
 	const sesion = plan[hoy] || null;
@@ -4276,6 +4282,8 @@ async function calcularHoy(env, userId, { fecha } = {}) {
 		tono: perfil?.entrenador?.tono ?? null,
 		por_conocer: porConocer(perfil || {})[0] ?? null,
 		anotado_hoy: anotadoDelDia(diario || [], hoy),
+		// El FTP de rodillo (con un test lo fija; las sesiones solo lo suben): para los vatios de las sesiones.
+		ftp_rodillo: resumenFtp(ftp, hoy),
 		mensaje: mensajeDelDia(sem, sesion, ajuste) +
 			(fuentes?.sin_descanso && !anotadoDelDia(diario || [], hoy).sensacion ? " Tu Garmin no mide el descanso: cuéntame cómo llegas y lo tengo en cuenta." : ""),
 		calculado_en: new Date().toISOString(),
@@ -4458,7 +4466,8 @@ const COACH_TOOLS = {
 			"la propuesta de ajuste del motor (cambiar, recortar o mover la sesion). Incluye forma, fatiga y frescura, y un " +
 			"mensaje corto ya redactado. Es la primera herramienta para '¿que hago hoy?', '¿puedo apretar?' o '¿como estoy?'. " +
 			"La decision la toma el motor: explíquela con sus razones, no la cambie por su cuenta. Trae tambien tono (como quiere que le hablen), " +
-			"por_conocer (la siguiente pregunta que conviene hacerle, si encaja) y fuentes (sin_descanso: su dispositivo no mide sueno ni VFC).",
+			"por_conocer (la siguiente pregunta que conviene hacerle, si encaja), fuentes (sin_descanso: su dispositivo no mide sueno ni VFC) " +
+			"y ftp_rodillo (su FTP de interior: con el pon los vatios de las sesiones; repetir_test=true, proponle repetir el test).",
 		schema: { type: "object", properties: { fecha: { type: "string", description: "YYYY-MM-DD. Por defecto hoy (hora de Madrid)." } } },
 		run: async (env, userId, { fecha } = {}) => {
 			const [hoy, agenda] = await Promise.all([
@@ -4686,7 +4695,8 @@ const COACH_TOOLS = {
 			"franjas }, lesiones (lista completa de { zona, desde, estado: activa|mejorando|curada }; [] si ninguna), experiencia " +
 			"(por deporte, con sus palabras), preferencias, material, notas, entrenador { nombre, tono: { estilo, humor 0-3, emojis } }, " +
 			"no_le_gusta (lista completa de { ejercicio, motivo, alternativa }) y nutricion { alergias, no_gustos, gustos (listas completas), " +
-			"tiempo_min, para_cuantos, quien_cocina, tupper }. Guarde lo que el usuario cuente y deba recordarse, diciendole que lo guarda.",
+			"tiempo_min, para_cuantos, quien_cocina, tupper }. ftp_rodillo (vatios): su FTP de interior si lo dice el (cuenta como un test de hoy; normalmente se pone solo con sus tests). " +
+			"Guarde lo que el usuario cuente y deba recordarse, diciendole que lo guarda.",
 		schema: {
 			type: "object",
 			properties: {
@@ -4697,6 +4707,19 @@ const COACH_TOOLS = {
 		run: async (env, userId, { cambios } = {}) => {
 			if (!cambios || typeof cambios !== "object" || Array.isArray(cambios)) throw new HttpError(400, "cambios debe ser un objeto");
 			const permitidos = ["objetivo", "disponibilidad", "lesiones", "experiencia", "preferencias", "material", "notas", "entrenador", "no_le_gusta", "nutricion"];
+			// El FTP de rodillo a mano (si el usuario dice el suyo): cuenta como un test de hoy.
+			if (cambios.ftp_rodillo !== undefined) {
+				const w = Math.round(Number(cambios.ftp_rodillo));
+				if (!(w >= 50 && w <= 600)) throw new HttpError(400, "ftp_rodillo va en vatios, entre 50 y 600.");
+				const actual = await leerDoc(env, userId, FTP_DOC), hoy = fechaLocal();
+				const f = { vatios: w, fecha: hoy, fuente: "a mano", actividad_id: null, actividad: null, fecha_test: hoy,
+					anterior: actual ? { vatios: actual.vatios, fecha: actual.fecha, fuente: actual.fuente } : null,
+					historial: [...(actual?.historial || []), { fecha: hoy, vatios: w, fuente: "a mano" }].slice(-20) };
+				f.intervals = await copiarFtpAIntervals(env, userId, w);
+				await guardarDoc(env, userId, FTP_DOC, f);
+				delete cambios.ftp_rodillo;
+				if (!Object.keys(cambios).length) return { guardado: true, ftp_rodillo: resumenFtp(f) };
+			}
 			if (cambios.nutricion !== undefined && (!cambios.nutricion || typeof cambios.nutricion !== "object" || Array.isArray(cambios.nutricion)
 				|| ["alergias", "no_gustos", "gustos"].some((k) => cambios.nutricion[k] !== undefined && !Array.isArray(cambios.nutricion[k]))))
 				throw new HttpError(400, "nutricion debe ser { alergias, no_gustos, gustos (listas completas), tiempo_min, para_cuantos, quien_cocina, tupper }");
@@ -5320,9 +5343,9 @@ async function icuGet(env, userId, ruta, params) {
 }
 
 /** Escribe en Intervals.icu (POST o PUT con cuerpo JSON). */
-async function icuEnviar(env, userId, method, ruta, body) {
+async function icuEnviar(env, userId, method, ruta, body, params = null) {
 	const { atleta, clave } = await credencialesIcu(env, userId);
-	return icuFetch(atleta, clave, ruta, null, { method, body });
+	return icuFetch(atleta, clave, ruta, params, { method, body });
 }
 
 const sinNulos = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v != null && v !== "" && !(Array.isArray(v) && !v.length)));
@@ -7358,6 +7381,60 @@ async function enviarCardioGarmin(env, userId, args) {
 	? `"${entreno.nombre}" esta en tu calendario de Garmin para el ${fecha}. Sincroniza el reloj y lo tendras en Entrenamientos.`
 	: `"${entreno.nombre}" esta en tus entrenos de Garmin, pero no he podido ponerlo en el calendario: buscalo en Entrenamientos del reloj.`,
 	};
+}
+
+// ──────────────── FTP de rodillo: se pone con un test y sube cuando lo demuestras ────────────────
+//
+// Un solo FTP para myCoach, el de interior (es donde hay potenciómetro). Un test lo fija (sube o
+// baja): el de 20 min da el 95 % de esos 20 min y el de rampa, el 75 % del mejor minuto. Una
+// sesión cualquiera solo lo sube, si el 95 % de sus mejores 20 min lo supera, y nunca por algo
+// anterior al último test. No baja solo: si pasa mucho sin test, se propone repetirlo. Cada
+// cambio se copia como FTP de interior en Intervals.icu, para que Zwift o MyWhoosh reciban los
+// entrenos con los mismos vatios.
+
+const FTP_DOC = "atleta/ftp";
+const SEMANAS_REPETIR_TEST = 8;
+
+/** ¿Es un test de FTP? Por el nombre que le pone la app: "rampa" o "20min". */
+const testFtp = (nombre) => {
+	const n = String(nombre || "");
+	if (/\b(ramp|rampa)\b/i.test(n) && /test|prueba/i.test(n)) return "rampa";
+	return /\bftp\b/i.test(n) && /test|prueba/i.test(n) ? "20min" : null;
+};
+
+/** Mira una sesión de rodillo con potencia y, si toca, cambia el FTP. Devuelve el FTP nuevo o null. */
+async function actualizarFtpRodillo(env, userId, { id, fecha, nombre, potencia }) {
+	const test = testFtp(nombre), m = potencia?.mejor_w || {};
+	const valor = test === "rampa" ? (m.min1 ? Math.round(m.min1 * 0.75) : null) : m.min20 ? Math.round(m.min20 * 0.95) : null;
+	if (!valor || valor < 50 || valor > 600 || !/^\d{4}-\d{2}-\d{2}$/.test(fecha || "")) return null;
+	const actual = await leerDoc(env, userId, FTP_DOC);
+	if (actual?.actividad_id === String(id) && actual.vatios === valor) return null;
+	const cuenta = test ? !actual || fecha >= (actual.fecha_test || "") : actual && valor > actual.vatios && fecha > (actual.fecha_test || "");
+	if (!cuenta) return null;
+	const fuente = test === "rampa" ? "test de rampa" : test ? "test de 20 min" : "sesión";
+	const nuevo = {
+		vatios: valor, fecha, fuente, actividad_id: String(id), actividad: String(nombre || "").slice(0, 80),
+		fecha_test: test ? fecha : actual?.fecha_test ?? null,
+		anterior: actual ? { vatios: actual.vatios, fecha: actual.fecha, fuente: actual.fuente } : null,
+		historial: [...(actual?.historial || []), { fecha, vatios: valor, fuente }].slice(-20),
+	};
+	nuevo.intervals = await copiarFtpAIntervals(env, userId, valor);
+	await guardarDoc(env, userId, FTP_DOC, nuevo);
+	return nuevo;
+}
+
+/** El FTP, como FTP de interior en Intervals.icu (sin tocar las zonas de pulso). Si no está conectado, no pasa nada. */
+async function copiarFtpAIntervals(env, userId, vatios) {
+	try { await icuEnviar(env, userId, "PUT", "/athlete/{id}/sport-settings/Ride", { indoor_ftp: vatios }, { recalcHrZones: false }); return true; }
+	catch { return false; }
+}
+
+/** Lo que se enseña del FTP: cifra, de dónde sale y si toca repetir el test. */
+function resumenFtp(f, hoy = fechaLocal()) {
+	if (!f?.vatios) return null;
+	const semanas = f.fecha_test ? Math.floor((Date.parse(hoy) - Date.parse(f.fecha_test)) / (7 * 864e5)) : null;
+	return { vatios: f.vatios, fecha: f.fecha, fuente: f.fuente, actividad: f.actividad || null, anterior: f.anterior?.vatios ?? null,
+		semanas_desde_test: semanas, repetir_test: semanas != null && semanas >= SEMANAS_REPETIR_TEST };
 }
 
 // ──────────── El mismo entreno, a Intervals.icu (y de ahí a Zwift o MyWhoosh) ────────────
