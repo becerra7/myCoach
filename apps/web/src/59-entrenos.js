@@ -55,7 +55,7 @@ function hojaCardioEntreno(id) {
     return `<p class="small muted">${SPORTS[e.deporte]?.n || ''}${e.min_estimados ? ` · ≈ ${dur(e.min_estimados)}` : ''}${e.nota ? ` · ${esc(e.nota)}` : ''}</p>
       ${pasosCardio(e.resumen || [])}
       <fieldset class="caras-f"><legend>¿Para qué día?</legend><div class="filters" style="flex-wrap:wrap">${prox.map(f => `<button type="button" class="fchip" data-a="cent-dia" data-v="${f}" aria-pressed="${f === dia}">${f === HOY ? 'Hoy' : cap1(fCorta(f))}</button>`).join('')}</div></fieldset>
-      <div class="btns"><button class="btn fill" type="button" data-a="cent-enviar" data-v="${esc(id)}" data-f="${dia}">${ic('watch', 18)} Enviar para ${dia === HOY ? 'hoy' : `el ${fCorta(dia).toLowerCase()}`}</button></div>`;
+      <div class="btns"><button class="btn fill" type="button" data-a="cent-enviar" data-v="${esc(id)}" data-f="${dia}">${ic('watch', 18)} Enviar para ${dia === HOY ? 'hoy' : `el ${fCorta(dia).toLowerCase()}`}</button>${botonIcu('cent-icu', id, dia, e.intervals && e.intervals.fecha === dia)}</div>`;
   };
   const nombre = Array.isArray(CENTS) ? (CENTS.find(x => x.id === id) || {}).nombre : null;
   openSheet({ title: nombre || 'Entreno', size: 'large', id: 'cent', body: cuerpo });
@@ -201,6 +201,7 @@ Object.assign(ACTIONS, {
   'cent-abrir': el => hojaCardioEntreno(el.dataset.v),
   'cent-dia': el => hojaCardioEntreno.elegir(el.dataset.v),
   'cent-enviar': el => enviarCardioId(el.dataset.v, el.dataset.f),
+  'cent-icu': el => enviarCardioAIntervals(el.dataset.v, el.dataset.f, () => { CENTS = undefined; }),
   // Cada vez que se abre, fresco: puede haberlo cambiado Claude.
   'ent-abrir': el => { delete ENT[el.dataset.v]; push({ s: 'entreno', id: el.dataset.v }); },
   'ent-lugar': el => { const st = entAbierto(); if (!st) return; st.borrador.lugar = el.dataset.v; $$('[data-a="ent-lugar"]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === el.dataset.v))); marcarSucio(st); },

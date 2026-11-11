@@ -556,7 +556,7 @@ const rpc = async (env, token, message) => {
 	check("un navegador en la raiz sigue viendo la pagina", (await (await get(env, "/")).text()).includes("<h1>"));
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("tools/list devuelve 52 herramientas", list.body.result.tools.length === 52);
+	check("tools/list devuelve 53 herramientas", list.body.result.tools.length === 53);
 	check("app_guardar se anuncia como escritura", anot0(list).app_guardar.readOnlyHint === false);
 	{
 		const call = (name, args) => rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name, arguments: args } });
@@ -1351,7 +1351,7 @@ const rpc = async (env, token, message) => {
 	check("el token de acceso vale sin leer del KV", init.body.result?.serverInfo?.name === "garmin");
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("las herramientas se listan igualmente", list.body.result.tools.length === 52);
+	check("las herramientas se listan igualmente", list.body.result.tools.length === 53);
 
 	// Y el dato que si vive en KV avisa en vez de mentir
 	const call = await rpc(env, tokens.access_token, {
@@ -2192,14 +2192,14 @@ const rpc = async (env, token, message) => {
 	const viejas = ["garmin_sleep", "garmin_hrv", "garmin_daily_summary", "garmin_body_battery", "garmin_training_readiness", "garmin_course_detail", "fuerza_entrenos", "cardio_entrenos", "fuerza_enviar_garmin", "cardio_enviar_garmin"];
 	check("las herramientas juntadas ya no existen", !tools.some((t) => viejas.includes(t.name)));
 	const visibles = tools.filter((t) => !t._meta?.ui?.visibility || t._meta.ui.visibility.includes("model"));
-	check("Claude ve 45 herramientas", visibles.length === 45, String(visibles.length));
+	check("Claude ve 46 herramientas", visibles.length === 46, String(visibles.length));
 }
 
 // ── 13. Intervals.icu: clave cifrada, actividades, series, bienestar y curvas ──
 {
 	mockGarmin({ "ana@x.com": { password: "a", data: { displayName: "ana", hrv: 50 } }, "bob@x.com": { password: "b", data: { displayName: "bob", hrv: 60 } } });
 	const abajo = globalThis.fetch;
-	const vistas = [];
+	const vistas = [], escritos = [];
 	const CLAVE = "clave-secreta-de-intervals-123";
 	globalThis.fetch = async (url, init) => {
 		const u = new URL(url);
@@ -2231,6 +2231,9 @@ const rpc = async (env, token, message) => {
 		if (u.pathname === "/api/v1/athlete/i77/wellness.json") return json([{ id: "2026-09-28", ctl: 55.12, atl: 60.3, restingHR: 47, hrv: 58, sleepSecs: 27000, readiness: 71, weight: 70.2 }]);
 		if (u.pathname === "/api/v1/athlete/i77/power-curves.json") return json({ list: [{ id: "42d", label: "42 dias", secs: [5, 15, 30, 60, 300, 600, 1200, 3600], values: [900, 700, 500, 400, 300, 280, 260, 230] }] });
 		if (u.pathname === "/api/v1/athlete/i77/pace-curves.json") return json({ list: [{ id: "1y", distance: [400, 1000, 5000, 10000], values: [80, 220, 1200, 2520] }] });
+		if (u.pathname === "/api/v1/athlete/i77/sport-settings/Ride") return json({ type: "Ride", lthr: 170, ftp: 250, indoor_ftp: 206 });
+		if (u.pathname === "/api/v1/athlete/i77/events" && init?.method === "POST") { escritos.push(["POST", JSON.parse(init.body)]); return json({ id: 9001 }); }
+		if (u.pathname === "/api/v1/athlete/i77/events/9001" && init?.method === "PUT") { escritos.push(["PUT", JSON.parse(init.body)]); return json({ id: 9001 }); }
 		return new Response("{}", { status: 404 });
 	};
 
@@ -2274,6 +2277,24 @@ const rpc = async (env, token, message) => {
 	check("pide el tipo de deporte de Intervals", vistas.some((v) => v.startsWith("/api/v1/athlete/i77/power-curves.json") && v.includes("type=Ride")));
 	const rit = await llamar(ana, "intervals_curvas", { deporte: "correr", tipo: "ritmo" });
 	check("curva de ritmo por distancias", rit.curvas[0].mejores.find((x) => x.distancia === "5 km")?.ritmo === "4:00 /km", JSON.stringify(rit.curvas[0]));
+
+	// Un entreno de bici guardado, a Intervals.icu (de ahí a Zwift o MyWhoosh).
+	const idAna = [...env._store.keys()].find((k) => k.startsWith("intervals:")).slice("intervals:".length);
+	await env.GARMIN.put(`app:${idAna}:cardio/entrenos`, JSON.stringify({ entrenos: { "umbral-3x10": { id: "umbral-3x10", nombre: "Umbral 3 × 10", deporte: "bici", nota: "Para subir el FTP.",
+		pasos: [{ tipo: "calentamiento", duracion_s: 600, objetivo: { tipo: "potencia", zona: 1 } },
+			{ repetir: 3, pasos: [{ tipo: "intervalo", duracion_s: 600, objetivo: { tipo: "potencia", min: 195, max: 210 } }, { tipo: "recuperacion", duracion_s: 300, objetivo: { tipo: "fc", min: 110, max: 125 } }] },
+			{ tipo: "vuelta_calma", hasta_boton: true, objetivo: { tipo: "cadencia", min: 85, max: 95 } }] } } }));
+	const prev = await llamar(ana, "entreno_enviar_intervals", { id: "umbral-3x10", fecha: "2026-11-12" });
+	check("intervals: sin confirm, vista previa sin escribir", prev.escrito === false && prev.vista_previa.interior === true && !escritos.length, JSON.stringify(prev).slice(0, 200));
+	check("intervals: texto con series, vatios, pulso en % del umbral y cadencia",
+		prev.vista_previa.texto_intervals === "- Calentamiento 10m Z1\n\n3x\n- Serie 10m 195-210w\n- Recuperación 5m 65-74% LTHR\n\n- Vuelta a la calma 5m 85-95rpm", JSON.stringify(prev.vista_previa.texto_intervals));
+	check("intervals: avisa de lo que no tiene (hasta pulsar vuelta)", prev.vista_previa.avisos?.some((a) => a.includes("vuelta")));
+	const env1 = await llamar(ana, "entreno_enviar_intervals", { id: "umbral-3x10", fecha: "2026-11-12", confirm: true });
+	const [m1, b1] = escritos[0] || [];
+	check("intervals: con confirm crea el evento de interior", env1.enviado && m1 === "POST" && b1.category === "WORKOUT" && b1.type === "Ride" && b1.indoor === true && b1.start_date_local === "2026-11-12T00:00:00" && b1.description.startsWith("Para subir el FTP."), JSON.stringify(b1));
+	await llamar(ana, "entreno_enviar_intervals", { id: "umbral-3x10", fecha: "2026-11-13", confirm: true });
+	check("intervals: volver a mandarlo actualiza el mismo (sin duplicar)", escritos.length === 2 && escritos[1][0] === "PUT" && escritos[1][1].start_date_local === "2026-11-13T00:00:00");
+	check("intervals: un entreno que no existe da error", Boolean((await llamar(ana, "entreno_enviar_intervals", { id: "no-esta" })).error));
 
 	check("otro usuario no ve el Intervals de ana", (await llamar(bob, "intervals_estado")).conectado === false);
 	await llamar(ana, "intervals_desconectar");

@@ -6,7 +6,8 @@ let ICU = undefined; // undefined: sin comprobar · null: sin conector · { cone
 async function cargarIcu() {
   if (!LIVE || S.modo !== 'vivo') { ICU = null; return; }
   try { ICU = await coachCall('intervals_estado', {}, true); } catch (e) { ICU = null; }
-  if (S.stack.some(x => x.s === 'ajustes')) render();
+  // Ajustes y los entrenos de bici (el botón de enviar a Intervals) dependen de esto.
+  render(); if (sheetState && (sheetState.id === 'dia' || sheetState.id === 'cent')) fillSheet();
 }
 
 function cardIntervals() {

@@ -282,7 +282,7 @@ function progRodillo() {
   const conW = todas.filter(a => a.pw), fondo = a => ['rec', 'fondo'].includes(tipoAct(a)), temp = a => a.tc != null ? `, ${nf(a.tc, 0)} °C` : '';
   const ftpG = ((M.forma || {}).ftp || {}).vatios || null, ftpE = conW.length ? Math.max(0, ...conW.map(a => a.pw.ftp || 0)) || null : null;
   // El 95 % de los mejores 20 min solo es un FTP si esos 20 min fueron a tope: de una sesión suave sale muy por debajo.
-  const deE = ftpE && conW.find(a => a.pw.ftp === ftpE), ftpEok = ftpE && (ftpG ? ftpE >= ftpG * 0.9 : deE && ['tempo', 'int'].includes(tipoAct(deE))), ftp = ftpG || (ftpEok ? ftpE : null);
+  const deE = ftpE && conW.find(a => a.pw.ftp === ftpE), ftpEok = ftpE && ((ftpG && ftpE >= ftpG * 0.9) || (deE && ['tempo', 'int'].includes(tipoAct(deE)))), ftp = ftpG || (ftpEok ? ftpE : null);
 
   // Dentro y fuera, en lo que se puede comparar: horas, pulso medio (por tiempo) y carga de Garmin por hora.
   const resumen = as => { const min = as.reduce((s, a) => s + a.min, 0), cf = as.filter(a => a.fc), mf = cf.reduce((s, a) => s + a.min, 0), cc = as.filter(a => a.cg != null), mc = cc.reduce((s, a) => s + a.min, 0);

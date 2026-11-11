@@ -5301,10 +5301,12 @@ async function credencialesIcu(env, userId) {
 	return { atleta: guardado.athlete_id, clave: await descifrar(env, guardado.key), nombre: guardado.nombre };
 }
 
-async function icuFetch(atleta, clave, ruta, params) {
+async function icuFetch(atleta, clave, ruta, params, { method = "GET", body } = {}) {
 	const url = new URL(`${ICU}/api/v1${ruta.replace("{id}", encodeURIComponent(atleta))}`);
 	for (const [k, v] of Object.entries(params || {})) if (v != null) url.searchParams.set(k, String(v));
-	const r = await fetch(url, { headers: { Authorization: `Basic ${btoa(`API_KEY:${clave}`)}`, Accept: "application/json" } });
+	const headers = { Authorization: `Basic ${btoa(`API_KEY:${clave}`)}`, Accept: "application/json" };
+	if (body !== undefined) headers["Content-Type"] = "application/json";
+	const r = await fetch(url, { method, headers, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
 	if (r.status === 401 || r.status === 403) throw new HttpError(401, "Intervals.icu no acepta la clave: vuelve a conectarlo en myCoach → Ajustes.");
 	if (r.status === 404) throw new HttpError(404, "Intervals.icu no encuentra eso (¿id correcto?).");
 	if (r.status === 429) throw new HttpError(429, "Intervals.icu pide esperar un poco (demasiadas peticiones).");
@@ -5315,6 +5317,12 @@ async function icuFetch(atleta, clave, ruta, params) {
 async function icuGet(env, userId, ruta, params) {
 	const { atleta, clave } = await credencialesIcu(env, userId);
 	return icuFetch(atleta, clave, ruta, params);
+}
+
+/** Escribe en Intervals.icu (POST o PUT con cuerpo JSON). */
+async function icuEnviar(env, userId, method, ruta, body) {
+	const { atleta, clave } = await credencialesIcu(env, userId);
+	return icuFetch(atleta, clave, ruta, null, { method, body });
 }
 
 const sinNulos = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v != null && v !== "" && !(Array.isArray(v) && !v.length)));
@@ -7351,6 +7359,108 @@ async function enviarCardioGarmin(env, userId, args) {
 	: `"${entreno.nombre}" esta en tus entrenos de Garmin, pero no he podido ponerlo en el calendario: buscalo en Entrenamientos del reloj.`,
 	};
 }
+
+// ──────────── El mismo entreno, a Intervals.icu (y de ahí a Zwift o MyWhoosh) ────────────
+//
+// Intervals.icu sube a Zwift los entrenos de su calendario de los próximos 7 días si llevan
+// la marca de interior, y MyWhoosh los recibe por la misma vía. myCoach escribe el entreno en
+// ese calendario con el formato de texto de Intervals ("- 4m 200-220w"), que Intervals
+// convierte en el entreno guiado de cada app. Se guarda el id del evento para actualizar ese
+// mismo y no duplicarlo (la búsqueda por external_id no vale con una clave personal).
+
+/** Duración en el formato de Intervals.icu: 1h30m, 4m30s, 45s. */
+const durIcu = (seg) => {
+	const h = Math.floor(seg / 3600), m = Math.floor((seg % 3600) / 60), x = Math.round(seg % 60);
+	return `${h ? `${h}h` : ""}${m ? `${m}m` : ""}${x ? `${x}s` : ""}` || "1s";
+};
+
+/** Un paso en texto de Intervals: "- Serie 4m 200-220w". El texto antes de la duración es lo que lee en pantalla. */
+function pasoIntervals(p, lthr, avisos) {
+	const dur = p.duracion_s ? durIcu(p.duracion_s)
+		: p.distancia_m ? (p.distancia_m % 1000 === 0 ? `${p.distancia_m / 1000}km` : `${p.distancia_m}mtr`)
+			: (avisos.add("Intervals.icu no tiene pasos «hasta pulsar vuelta»: van de 5 min."), "5m");
+	const o = p.objetivo;
+	let obj = "";
+	if (o?.tipo === "potencia") obj = o.zona ? `Z${o.zona}` : `${Math.round(o.min)}-${Math.round(o.max)}w`;
+	else if (o?.tipo === "fc") {
+		if (o.zona) obj = `Z${o.zona} HR`;
+		else if (lthr) obj = `${Math.round((o.min / lthr) * 100)}-${Math.round((o.max / lthr) * 100)}% LTHR`;
+		else avisos.add("Los pasos por pulso van sin objetivo: no he podido leer tu umbral en Intervals.icu.");
+	} else if (o?.tipo === "ritmo") obj = `${o.max}-${o.min}/km Pace`;
+	else if (o?.tipo === "cadencia") obj = `${Math.round(o.min)}-${Math.round(o.max)}rpm`;
+	else if (o?.tipo === "velocidad") avisos.add("Intervals.icu no tiene objetivos de velocidad: esos pasos van sin objetivo.");
+	return `- ${NOMBRE_PASO[p.tipo]} ${dur}${obj ? ` ${obj}` : ""}`;
+}
+
+/** El entreno entero en texto de Intervals. Las series van en bloques "5x"; un bloque dentro de otro se despliega. */
+function cardioParaIntervals(entreno, lthr) {
+	const avisos = new Set(), grupos = [];
+	const plano = (pasos) => pasos.flatMap((p) => (p.repetir ? Array.from({ length: p.repetir }, () => plano(p.pasos)).flat() : [p]));
+	let suelto = [];
+	for (const p of entreno.pasos) {
+		if (p.repetir) {
+			if (suelto.length) { grupos.push(suelto.join("\n")); suelto = []; }
+			grupos.push([`${p.repetir}x`, ...plano(p.pasos).map((x) => pasoIntervals(x, lthr, avisos))].join("\n"));
+		} else suelto.push(pasoIntervals(p, lthr, avisos));
+	}
+	if (suelto.length) grupos.push(suelto.join("\n"));
+	return { texto: grupos.join("\n\n"), avisos: [...avisos] };
+}
+
+async function enviarCardioIntervals(env, userId, args) {
+	const fecha = /^\d{4}-\d{2}-\d{2}$/.test(args.fecha || "") ? args.fecha : fechaLocal();
+	const doc = (await leerDoc(env, userId, CARDIO_ENTRENOS)) || { entrenos: {} };
+	const entreno = doc.entrenos?.[slugFuerza(args.id || "")];
+	if (!entreno) throw new HttpError(404, `No hay ningun entreno de bici o correr "${args.id}". Créelo antes con entreno_enviar_garmin (sin confirm basta para verlo; con confirm se guarda).`);
+	await credencialesIcu(env, userId); // si no está conectado, que lo diga antes de nada
+	const tipo = entreno.deporte === "bici" ? "Ride" : "Run";
+	const interior = entreno.deporte === "bici" ? args.interior !== false : args.interior === true;
+	// El umbral de pulso de Intervals, para los pasos por pulso en ppm (se escriben en % del umbral).
+	const ajustes = await icuGet(env, userId, `/athlete/{id}/sport-settings/${tipo}`).catch(() => null);
+	const { texto, avisos } = cardioParaIntervals(entreno, ajustes?.lthr || null);
+	const vista = { nombre: entreno.nombre, deporte: entreno.deporte, fecha, interior, min_estimados: Math.round(minutosCardio(entreno.pasos)), pasos: resumenCardio(entreno.pasos), texto_intervals: texto, ...(avisos.length ? { avisos } : {}) };
+	if (args.confirm !== true)
+		return { vista_previa: vista, escrito: false, siguiente: "Enseñeselo al usuario y, si dice que si, llame otra vez con confirm=true." };
+
+	const evento = { category: "WORKOUT", type: tipo, name: entreno.nombre, description: [entreno.nota, texto].filter(Boolean).join("\n\n"), start_date_local: `${fecha}T00:00:00`, indoor: interior, external_id: `mycoach-${entreno.id}` };
+	const previo = entreno.intervals?.event_id;
+	let r = null, actualizado = false;
+	if (previo) {
+		try { r = await icuEnviar(env, userId, "PUT", `/athlete/{id}/events/${encodeURIComponent(previo)}`, evento); actualizado = true; }
+		catch (err) { if (err.status !== 404) throw err; } // lo borró en Intervals: se crea otro
+	}
+	if (!r) r = await icuEnviar(env, userId, "POST", "/athlete/{id}/events", evento);
+	doc.entrenos[entreno.id] = { ...entreno, intervals: { event_id: r?.id ?? previo ?? null, fecha } };
+	await guardarDoc(env, userId, CARDIO_ENTRENOS, doc);
+	return {
+		enviado: true, ...vista, event_id: r?.id ?? null, actualizado,
+		mensaje: `"${entreno.nombre}" esta en tu calendario de Intervals.icu para el ${fecha}.` +
+			(interior ? " Si tienes Zwift o MyWhoosh conectados en Intervals, lo reciben en los 7 dias antes (en Zwift: Custom Workouts → intervals.icu)." : ""),
+	};
+}
+
+Object.assign(TOOLS, {
+	entreno_enviar_intervals: {
+		title: "Mandar un entreno a Intervals.icu (y a Zwift o MyWhoosh)",
+		write: true,
+		description:
+			"Pone un entreno de bici o correr ya guardado (id de entrenos tipo=cardio) en el calendario de Intervals.icu para la fecha. ESCRIBE en la cuenta de Intervals.icu del usuario. " +
+			"En bici va marcado de interior: si el usuario tiene Zwift o MyWhoosh conectados en Intervals, lo reciben como entreno guiado (Intervals los sube 7 dias antes). " +
+			"Si ya se mando, actualiza ese mismo. Sin confirm devuelve la vista previa (con el texto que vera Intervals y avisos) y NO escribe: enseñela. Con confirm=true, tras su si, lo escribe. " +
+			"Para los objetivos de potencia, mejor en vatios (min/max) o zona: Zwift los pasa a % de su FTP.",
+		schema: {
+			type: "object",
+			properties: {
+				id: { type: "string", description: "Id del entreno guardado (entrenos tipo=cardio)." },
+				fecha: { type: "string", description: "AAAA-MM-DD; por defecto hoy." },
+				interior: { type: "boolean", description: "Marcarlo de interior (para Zwift/MyWhoosh). Por defecto si en bici, no en correr." },
+				confirm: { type: "boolean" },
+			},
+			required: ["id"],
+		},
+		run: (env, userId, args) => enviarCardioIntervals(env, userId, args),
+	},
+});
 
 // ──────────────────────────────── Comida ────────────────────────────────
 // Las comidas viven en estado/app.meals, en el formato de la app:

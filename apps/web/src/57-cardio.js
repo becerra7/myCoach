@@ -14,6 +14,29 @@ async function cargarCardio(id, fresco) {
   render(); if (sheetState && (sheetState.id === 'dia' || sheetState.id === 'cent')) fillSheet();
 }
 
+/* Intervals.icu: si está conectado, el mismo entreno va a su calendario y de ahí a Zwift o MyWhoosh. */
+const icuListo = () => { if (ICU === undefined) cargarIcu(); return !!(ICU && ICU.conectado); };
+const botonIcu = (accion, id, f, yaEsta) => icuListo() ? `<button class="btn tonal" type="button" data-a="${accion}" data-v="${esc(id)}" data-f="${f}">${ic('chart', 18)} ${yaEsta ? 'Volver a enviar a Intervals' : 'Enviar a Intervals'}</button>` : '';
+
+/** Enseña lo que se va a escribir en Intervals.icu (con sus avisos) y lo escribe con el sí. */
+async function enviarCardioAIntervals(id, f, alAcabar) {
+  let v;
+  try { v = (await coachCall('entreno_enviar_intervals', { id, fecha: f }, true)).vista_previa; }
+  catch (err) { toast('No he podido prepararlo: ' + (err.message || 'error')); return; }
+  const cuando = f === HOY ? 'hoy' : `el ${fDia(f)}`;
+  ask({
+    title: 'Enviar a Intervals.icu',
+    text: `"${v.nombre}" va a tu calendario de Intervals.icu para ${cuando}${v.interior ? ', como entreno de interior. Si tienes Zwift o MyWhoosh conectados allí, lo reciben en los 7 días antes' : ''}.${(v.avisos || []).length ? ` Ojo: ${v.avisos.join(' ')}` : ''}`,
+    actions: [
+      { label: 'Enviar a Intervals', kind: 'fill', fn: async () => {
+        try { await coachCall('entreno_enviar_intervals', { id, fecha: f, confirm: true }, true); toast(`En Intervals.icu para ${cuando}`); CZ[id] = undefined; cargarCardio(id, true); alAcabar && alAcabar(); }
+        catch (err) { toast('No he podido enviarlo: ' + (err.message || 'error')); }
+      } },
+      { label: 'Cancelar' },
+    ],
+  });
+}
+
 /** Los pasos en filas; los de un bloque que se repite, sangrados debajo de "5 ×". */
 function pasosCardio(resumen) {
   return `<ol class="pasos">${resumen.map(l => {
@@ -38,13 +61,14 @@ function bloqueCardio(f) {
   if (CZ[id] === undefined || CZ[id] === 'cargando') return '<p class="small muted" role="status">Cargando los pasos…</p>';
   const e = CZ[id];
   if (!e) return `<p class="small">Este día apunta al entreno <b>${esc(id)}</b>, que no encuentro. Pídele a Claude que lo vuelva a crear.</p>`;
-  const enReloj = e.garmin && e.garmin.fecha === f;
+  const enReloj = e.garmin && e.garmin.fecha === f, enIcu = e.intervals && e.intervals.fecha === f;
   return `<div class="stack" style="gap:8px">
     <div class="card-h" style="margin:0"><span class="grow"><b>${esc(e.nombre)}</b></span>${e.min_estimados ? `<span class="small muted">≈ ${dur(e.min_estimados)}</span>` : ''}</div>
     ${e.nota ? `<p class="small muted">${esc(e.nota)}</p>` : ''}
     ${pasosCardio(e.resumen || [])}
-    ${f >= HOY ? `<div class="btns"><button class="btn tonal" type="button" data-a="cz-reloj" data-v="${f}">${ic('watch', 18)} ${enReloj ? 'Volver a enviar al reloj' : 'Enviar al reloj'}</button></div>
-      ${enReloj ? '<p class="small muted">Ya está en tu reloj para este día: sincronízalo y búscalo en Entrenamientos.</p>' : ''}` : ''}
+    ${f >= HOY ? `<div class="btns"><button class="btn tonal" type="button" data-a="cz-reloj" data-v="${f}">${ic('watch', 18)} ${enReloj ? 'Volver a enviar al reloj' : 'Enviar al reloj'}</button>${botonIcu('cz-icu', e.id, f, enIcu)}</div>
+      ${enReloj ? '<p class="small muted">Ya está en tu reloj para este día: sincronízalo y búscalo en Entrenamientos.</p>' : ''}
+      ${enIcu ? '<p class="small muted">Ya está en Intervals.icu para este día: de ahí pasa a Zwift o MyWhoosh si los tienes conectados.</p>' : ''}` : ''}
   </div>`;
 }
 
@@ -63,4 +87,4 @@ function enviarCardioAlReloj(f) {
   });
 }
 
-Object.assign(ACTIONS, { 'cz-reloj': el => enviarCardioAlReloj(el.dataset.v) });
+Object.assign(ACTIONS, { 'cz-reloj': el => enviarCardioAlReloj(el.dataset.v), 'cz-icu': el => enviarCardioAIntervals(el.dataset.v, el.dataset.f) });
