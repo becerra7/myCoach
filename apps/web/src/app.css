@@ -420,8 +420,25 @@ body.framed .toasts{top:50px}
 .rel-perfil{position:relative;height:72px}
 .rel-perfil svg{display:block;width:100%;height:100%}
 .rel-perfil line{stroke:var(--label);stroke-width:2;vector-effect:non-scaling-stroke}
-.rel-perfil input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:ew-resize;touch-action:none}
-.rel-perfil:has(input:focus-visible){outline:2px solid var(--tint);outline-offset:3px;border-radius:4px}
+.rel-perfil #rel-rango{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:ew-resize;touch-action:none}
+.rel-perfil #rel-rango[hidden],.rel-perfil.tramo #rel-cursor,.rel-cifras[hidden],.rel-tramo[hidden],.rel-tipo[hidden]{display:none}
+/* Medir un tramo: banda entre dos asas sobre el perfil */
+.rel-perfil.tramo{touch-action:none;cursor:col-resize;margin-top:10px}
+.rel-banda{position:absolute;top:0;bottom:0;background:color-mix(in srgb,var(--label) 18%,transparent);pointer-events:none}
+.rel-asa{position:absolute;top:-4px;bottom:0;width:2px;margin-left:-1px;background:var(--label);pointer-events:none}
+.rel-asa::before{content:"";position:absolute;top:-6px;left:-7px;width:16px;height:16px;border-radius:50%;background:var(--label);border:2px solid var(--card);box-sizing:border-box}
+.rel-perfil:has(#rel-t0:focus-visible) #rel-asa0::before,.rel-perfil:has(#rel-t1:focus-visible) #rel-asa1::before{outline:2px solid var(--tint);outline-offset:3px}
+.rel-tramo-h{margin:0 0 8px;font-size:15px;font-weight:650}
+.rel-tramo .fields{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 8px}
+@container app (min-width:840px){.rel-tramo .fields{grid-template-columns:repeat(auto-fill,minmax(130px,1fr))}}
+.rel-tramo .field .v{font-size:22px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.rel-tramo .field .v small{font-size:11px}
+.rel-ext{width:12px;height:12px;background:#fff;border:3px solid #15191E;border-radius:2px}
+.relieve .rel-tipo{position:absolute;left:12px;top:12px;z-index:2;background:var(--card);box-shadow:0 4px 14px rgba(0,0,0,.2)}
+.relieve .rel-tipo button{min-height:40px;font-size:13px;padding:0 12px}
+/* Sobre el mapa, los botones sin elegir necesitan fondo: sin él, el texto se pierde */
+.app[data-os] .relieve .rel-tipo button:not([aria-pressed="true"]){background:var(--card);color:var(--label)}
+.rel-perfil:has(#rel-rango:focus-visible){outline:2px solid var(--tint);outline-offset:3px;border-radius:4px}
 .rel-eje,.rel-ley div{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;color:var(--label-2);white-space:nowrap}
 .rel-ley i{display:block;height:6px;border-radius:3px}
 .rel-ley div{margin-top:4px}

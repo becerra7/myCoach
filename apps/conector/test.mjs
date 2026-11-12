@@ -1035,9 +1035,18 @@ const rpc = async (env, token, message) => {
 		const t = await call("garmin_activity_track", { activity_id: "7" });
 		const en = (km) => t.puntos.reduce((m, p) => (Math.abs(p[2] - km) < Math.abs(m[2] - km) ? p : m));
 		check("trazado: como mucho 1.200 puntos, del km 0 al 10", t.puntos.length <= 1201 && t.puntos[0][2] === 0 && t.puntos.at(-1)[2] === 10, `(${t.puntos.length})`);
-		check("trazado: cada punto lleva lon, lat, km, altitud, pendiente, velocidad y pulso", t.columnas.join() === "lon,lat,km,alt,pend,vel,fc" && t.puntos.every((p) => p.length === 7) && t.tiene.vel && t.tiene.fc && t.tiene.alt);
+		check("trazado: cada punto lleva lon, lat, km, altitud, pendiente, velocidad y pulso", t.columnas.join() === "lon,lat,km,alt,pend,vel,fc,t,asc,des,sfc,sw" && t.puntos.every((p) => p.length === 12) && t.tiene.vel && t.tiene.fc && t.tiene.alt);
 		check("trazado: pendiente 0 en el llano, +6 % subiendo y −6 % bajando", Math.abs(en(2)[4]) < 0.5 && Math.abs(en(5.5)[4] - 6) < 0.5 && Math.abs(en(8.5)[4] + 6) < 0.5, `(${en(2)[4]}, ${en(5.5)[4]}, ${en(8.5)[4]})`);
 		check("trazado: velocidad en km/h y pulso de cada tramo", Math.abs(en(2)[5] - 30) < 0.5 && Math.abs(en(5.5)[5] - 15) < 0.5 && en(5.5)[6] === 160 && en(2)[6] === 130, `(${en(2)[5]}, ${en(5.5)[5]})`);
+		// Las medias de un tramo salen de restar dos puntos: la subida del km 4 al 7 (fixture: 8 m/s de reloj, 160 ppm, +180 m).
+		const ini = en(4), fin = en(7), dtT = fin[7] - ini[7];
+		check("trazado: tiempo, desnivel y pulso de un tramo, restando acumulados", Math.abs(dtT - 375) <= 3 && Math.abs(fin[8] - ini[8] - 180) <= 12 && fin[9] - ini[9] < 3 && Math.abs((fin[10] - ini[10]) / dtT - 160) < 1 && t.tiene.t && !t.tiene.w && fin[11] === null, `(${dtT}, ${fin[8] - ini[8]}, ${(fin[10] - ini[10]) / dtT})`);
+		const conW = { ...trDetails, metricDescriptors: [...trDetails.metricDescriptors, { key: "directPower", metricsIndex: 7 }], activityDetailMetrics: tr.map((x, k) => ({ metrics: [...x.metrics, k * 5 < 4000 ? 150 : 250] })) };
+		globalThis.fetch = async () => new Response(JSON.stringify(conW));
+		const tw = await call("garmin_activity_track", { activity_id: "7w" });
+		const eW = (km) => tw.puntos.reduce((m, p) => (Math.abs(p[2] - km) < Math.abs(m[2] - km) ? p : m));
+		check("trazado: con potenciómetro, los vatios medios de un tramo", tw.tiene.w && Math.abs((eW(7)[11] - eW(4.5)[11]) / (eW(7)[7] - eW(4.5)[7]) - 250) < 1 && Math.abs((eW(3)[11] - eW(1)[11]) / (eW(3)[7] - eW(1)[7]) - 150) < 1);
+		globalThis.fetch = async () => new Response(JSON.stringify(trDetails));
 		check("trazado: la posición avanza hacia el norte", t.puntos.at(-1)[1] > t.puntos[0][1] + 0.08 && t.puntos[0][0] === 1.9);
 		globalThis.fetch = async () => new Response(JSON.stringify({ geoPolylineDTO: { polyline: [{ lat: 42, lon: 1.9, altitude: 1000, speed: 5 }, { lat: 42.01, lon: 1.9, altitude: 1100, speed: 5 }] } }));
 		const sinSeries = await call("garmin_activity_track", { activity_id: "8" });

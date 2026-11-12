@@ -1724,6 +1724,7 @@ function trazadoDeActividad(details, max = 1200) {
 	const indice = (...claves) => { for (const c of claves) { const d = desc.find((x) => x.key === c); if (d) return d.metricsIndex; } return -1; };
 	const iLat = indice("directLatitude"), iLon = indice("directLongitude"), iDist = indice("sumDistance");
 	const iAlt = indice("directElevation", "directCorrectedElevation"), iVel = indice("directSpeed"), iFc = indice("directHeartRate");
+	const iDur = indice("sumMovingDuration", "sumDuration", "sumElapsedDuration"), iW = indice("directPower");
 	const num = (f, i) => (i >= 0 && typeof f[i] === "number" ? f[i] : null);
 	let pts = [];
 	if (iLat >= 0 && iLon >= 0 && iDist >= 0) {
@@ -1732,7 +1733,7 @@ function trazadoDeActividad(details, max = 1200) {
 			const lat = num(f, iLat), lon = num(f, iLon), d = num(f, iDist);
 			if (lat == null || lon == null || d == null || (!lat && !lon)) continue;
 			const fc = num(f, iFc);
-			pts.push({ lat, lon, d, e: num(f, iAlt), v: num(f, iVel), fc: fc > 30 ? fc : null });
+			pts.push({ lat, lon, d, e: num(f, iAlt), v: num(f, iVel), fc: fc > 30 ? fc : null, t: num(f, iDur), w: num(f, iW) });
 		}
 		pts.sort((a, b) => a.d - b.d);
 	}
@@ -1765,20 +1766,36 @@ function trazadoDeActividad(details, max = 1200) {
 		while (pts[i].d - pts[c].d > 30) { if (pts[c].v != null) { suma -= pts[c].v; n--; } c++; }
 		vel[i] = n ? (suma / n) * 3.6 : null;
 	}
+	// Acumulados con todas las muestras, antes de reducir: la web saca las medias de un tramo restando dos puntos
+	// (tiempo, desnivel subido y bajado, latidos y julios), y así no dependen de cuántos puntos se le mandan.
+	const hayT = pts.some((p) => p.t != null), hayW = pts.some((p) => p.w != null);
+	const acum = [{ t: hayT ? pts[0].t ?? 0 : null, asc: 0, des: 0, sfc: 0, sw: 0 }];
+	let fcUlt = pts[0].fc, wUlt = pts[0].w ?? 0, tUlt = pts[0].t ?? 0;
+	for (let i = 1; i < pts.length; i++) {
+		const ant = acum[i - 1], p = pts[i];
+		const tAhora = p.t ?? tUlt, dt = Math.max(0, tAhora - tUlt);
+		const dAlt = alt[i] != null && alt[i - 1] != null ? alt[i] - alt[i - 1] : 0;
+		if (p.fc != null) fcUlt = p.fc;
+		if (p.w != null) wUlt = p.w;
+		acum.push({ t: hayT ? tAhora : null, asc: ant.asc + Math.max(0, dAlt), des: ant.des + Math.max(0, -dAlt), sfc: ant.sfc + (fcUlt ?? 0) * dt, sw: ant.sw + wUlt * dt });
+		tUlt = tAhora;
+	}
 	const paso = Math.max(1, Math.ceil(pts.length / max));
 	const puntos = [];
 	for (let i = 0; i < pts.length; i += paso) puntos.push(i);
 	if (puntos.at(-1) !== pts.length - 1) puntos.push(pts.length - 1);
 	const hay = (arr) => arr.some((x) => x != null);
 	return {
-		// [lon, lat, km, altitud m, pendiente %, velocidad km/h, pulso ppm]; null donde no hay dato.
-		columnas: ["lon", "lat", "km", "alt", "pend", "vel", "fc"],
+		// [lon, lat, km, altitud m, pendiente %, velocidad km/h, pulso ppm] y, acumulados desde la salida,
+		// [segundos en movimiento, m subidos, m bajados, latidos (ppm·s), julios (W·s)]; null donde no hay dato.
+		columnas: ["lon", "lat", "km", "alt", "pend", "vel", "fc", "t", "asc", "des", "sfc", "sw"],
 		puntos: puntos.map((i) => [
 			round(pts[i].lon, 5), round(pts[i].lat, 5), round(pts[i].d / 1000, 3),
 			alt[i] != null ? round(alt[i], 1) : null, pend[i] != null ? round(pend[i], 1) : null,
 			vel[i] != null ? round(vel[i], 1) : null, pts[i].fc != null ? Math.round(pts[i].fc) : null,
+			acum[i].t != null ? Math.round(acum[i].t) : null, round(acum[i].asc, 1), round(acum[i].des, 1), Math.round(acum[i].sfc), hayW ? Math.round(acum[i].sw) : null,
 		]),
-		tiene: { alt: hay(alt), vel: hay(vel), fc: pts.some((p) => p.fc != null) },
+		tiene: { alt: hay(alt), vel: hay(vel), fc: pts.some((p) => p.fc != null), t: hayT, w: hayW },
 	};
 }
 
@@ -5742,10 +5759,11 @@ const RECURSOS_UI = [{
 	_meta: {
 		ui: {
 			prefersBorder: true,
-			// Los dos servidores de mapas son para el recorrido en relieve: Mapterhorn (altitud) y OpenFreeMap (mapa base).
+			// Los servidores de mapas son para el recorrido en relieve: Mapterhorn (altitud), OpenFreeMap (mapa base),
+			// Esri (foto aérea) y OpenTopoMap (topográfico).
 			csp: {
-				resourceDomains: ["https://fonts.googleapis.com", "https://fonts.gstatic.com", "https://tiles.mapterhorn.com", "https://tiles.openfreemap.org"],
-				connectDomains: ["https://tiles.mapterhorn.com", "https://tiles.openfreemap.org"],
+				resourceDomains: ["https://fonts.googleapis.com", "https://fonts.gstatic.com", "https://tiles.mapterhorn.com", "https://tiles.openfreemap.org", "https://server.arcgisonline.com", "https://tile.opentopomap.org"],
+				connectDomains: ["https://tiles.mapterhorn.com", "https://tiles.openfreemap.org", "https://server.arcgisonline.com", "https://tile.opentopomap.org"],
 			},
 			// El codigo de la app se carga de la web (ver metaApp).
 		},

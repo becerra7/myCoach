@@ -84,7 +84,7 @@ El inventario salió de leer el código con un agente; los puntos marcados ✔ l
 | Mapa de pueblos | Municipios cruzados por comunidad, España o Mundo, por deporte; lista por kilómetros con buscador | Garmin (`garmin_activity_route`) + IGN | ✅ (Mundo solo países) | Quedarse |
 | Calendario por meses | En Calendario (antes Plan): cada día con el deporte hecho o lo previsto; tocar un día enseña sus actividades | Garmin (lo ya descargado) | ✅ | Límite: últimas 300 actividades |
 | Más | Entrenos, Rutas y Pueblos, fuera de la barra | — | ✅ | Lo nuevo va aquí |
-| Recorrido en relieve | En cada actividad con GPS: mapa 3D con el trazado pintado por pendiente, velocidad o pulso, el perfil con cursor y "Repasar la ruta" (la cámara sigue al punto) | Garmin (`garmin_activity_track`) + Mapterhorn + OpenFreeMap | 🟡 prototipo | Probar dentro de Claude; después, repasar la ruta y satélite |
+| Recorrido en relieve | En cada actividad con GPS: mapa 3D con el trazado pintado por pendiente, velocidad o pulso, el perfil con cursor, "Repasar la ruta" (la cámara sigue al punto), "Medir un tramo" (medias entre dos puntos) y tres tipos de mapa (Mapa, Satélite, Topo) | Garmin (`garmin_activity_track`) + Mapterhorn + OpenFreeMap + Esri + OpenTopoMap | 🟡 prototipo | Probar dentro de Claude; después, repasar la ruta y satélite |
 | Mapa a pantalla completa | Zoom, ficha del pueblo con km por deporte y primera vez. "Núcleos: pendiente de OpenStreetMap" | Garmin | 🟡 | Mejorar: quitar el texto pendiente |
 | Banner "+3 pueblos" | Aviso de actividad nueva | Demo | 🧪 | Mejorar: hacerlo real tras sincronizar |
 | **Planificar una ruta de bici** | No existe en la app. Claude puede hacerlo con `garmin_plan_route` | Coach | ❌ | Añadir: ver y revisar rutas en la app |
