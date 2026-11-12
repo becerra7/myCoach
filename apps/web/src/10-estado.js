@@ -234,6 +234,7 @@ const ic = (n, s = 24, cls = '') => `<svg class="${cls}" width="${s}" height="${
 const chip = (k, extra = '') => `<span class="chip ${TIPOS[k].k}">${TIPOS[k].n}${extra}</span>`;
 const simTag = (txt = 'Simulado') => `<span class="sim" title="Dato simulado para el prototipo">${txt}</span>`;
 const aiTag = (txt = 'IA') => `<span class="ai" title="Usa IA: tu Claude">${ic('sparkle', 12)}${txt}</span>`;
+ICP.play = '<path d="M8 5.5v13l10.5-6.5z"/>'; ICP.pausa = '<path d="M8.5 5.5v13M15.5 5.5v13"/>';
 ICP.mas = '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>';
 ICP.sparkle = '<path d="M12 4l1.6 4.4L18 10l-4.4 1.6L12 16l-1.6-4.4L6 10l4.4-1.6z"/>';
 const labTag = (txt = 'En investigación') => `<span class="lab">${txt}</span>`;

@@ -4,7 +4,7 @@
    Relieve: Mapterhorn. Mapa base: OpenFreeMap (datos de OpenStreetMap). Ninguno recibe el recorrido, solo la zona que se mira. */
 
 const ORIGEN_WEB = (() => { try { const s = document.currentScript; return s && s.src ? new URL(s.src).origin : ''; } catch (e) { return ''; } })();
-const REL = { a: null, t: null, modo: 'pend', map: null, punto: null, i: 0, foco: null };
+const REL = { a: null, t: null, modo: 'pend', map: null, punto: null, i: 0, foco: null, play: false, f: 0, vel: 1, rumbo: 0, raf: 0, ts: 0 };
 const REL_TRAZAS = new Map(); // en memoria: no se guarda en el navegador (son cientos de puntos por salida)
 const REL_DEM = 'https://tiles.mapterhorn.com/tilejson.json', REL_EXAG = 1.4;
 // Mapa en color (bosque, agua, carreteras) también con la app en oscuro: en gris o en negro no se lee el terreno.
@@ -83,13 +83,14 @@ function relAltitudDeEjemplo(map, t) {
 
 function abrirRelieve(id) {
   const a = actById(id); if (!a) return;
-  cerrarRelieve(true); REL.a = a; REL.t = null; REL.i = 0; REL.modo = 'pend'; REL.foco = document.activeElement;
+  cerrarRelieve(true); REL.a = a; REL.t = null; REL.i = 0; REL.f = 0; REL.vel = 1; REL.play = false; REL.modo = 'pend'; REL.foco = document.activeElement;
   const el = document.createElement('div'); el.className = 'mapfull relieve'; el.id = 'relieve'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true'); el.setAttribute('aria-label', `Recorrido en relieve: ${a.lugar}`);
   el.innerHTML = `<div class="mf-top"><button class="close" type="button" aria-label="Cerrar el mapa" data-a="rel-cerrar">${ic('close', 18)}</button>
       <div class="seg" role="group" aria-label="Pintar el recorrido según" id="rel-seg" style="flex:1" hidden></div><h2 class="rel-titulo" id="rel-titulo">${esc(a.lugar)}</h2></div>
     <div class="rel-view"><div class="rel-map" id="rel-map"></div>
       <p class="rel-estado" id="rel-estado" role="status">Cargando el relieve…</p>
-      <div class="mf-zoom rel-zoom" hidden><button type="button" aria-label="Acercar" data-a="rel-zoom" data-v="1">${ic('plus', 22)}</button><button type="button" aria-label="Alejar" data-a="rel-zoom" data-v="-1">${ic('minus', 22)}</button><button type="button" aria-label="Ver el recorrido entero" data-a="rel-entero">${ic('sync', 20)}</button></div></div>
+      <div class="mf-zoom rel-zoom" hidden><button type="button" aria-label="Acercar" data-a="rel-zoom" data-v="1">${ic('plus', 22)}</button><button type="button" aria-label="Alejar" data-a="rel-zoom" data-v="-1">${ic('minus', 22)}</button><button type="button" aria-label="Ver el recorrido entero" data-a="rel-entero">${ic('sync', 20)}</button></div>
+      <div class="rel-play" id="rel-play" hidden></div></div>
     <div class="rel-panel" id="rel-panel" hidden></div>`;
   app.append(el); requestAnimationFrame(() => el.classList.add('in')); el.querySelector('.close').focus();
   Promise.all([relTraza(a), cargarMapLibre()]).then(([t]) => { if (REL.a !== a || !$('#relieve')) return; REL.t = t; relMontar(t); }, e => relFallo(e));
@@ -102,6 +103,7 @@ function relFallo(e) {
 }
 function cerrarRelieve(instant) {
   const el = $('#relieve'); if (!el) return;
+  REL.play = false; cancelAnimationFrame(REL.raf);
   if (REL.map) { try { REL.map.remove(); } catch (e) { } REL.map = null; REL.punto = null; }
   if (instant) el.remove(); else { el.classList.remove('in'); setTimeout(() => el.remove(), 250); }
   if (REL.foco && REL.foco.isConnected) REL.foco.focus(); REL.foco = null;
@@ -119,6 +121,7 @@ function relMontar(t) {
     return;
   }
   map.on('error', () => { }); // una tesela que falla no rompe el mapa
+  map.on('dragstart', e => { if (e.originalEvent && REL.play) relPausar(); }); // si mueves el mapa con el dedo, el repaso se para: mandas tú
   map.on('load', () => {
     const rotulos = (map.getStyle().layers.find(l => l.type === 'symbol') || {}).id;
     map.addSource('relieve', { type: 'raster-dem', url: REL_DEM });
@@ -132,7 +135,7 @@ function relMontar(t) {
     const marca = (cls, p, txt) => { const d = document.createElement('div'); d.className = cls; d.setAttribute('role', 'img'); d.setAttribute('aria-label', txt); return new maplibregl.Marker({ element: d }).setLngLat([p[0], p[1]]).addTo(map); };
     marca('rel-salida', t.puntos[0], 'Salida');
     REL.punto = marca('rel-punto', t.puntos[0], 'Punto que estás mirando');
-    $('#rel-estado').hidden = true; $('.rel-zoom').hidden = false;
+    $('#rel-estado').hidden = true; $('.rel-zoom').hidden = false; $('#rel-play').hidden = false; relBotones();
     const atr = $('#rel-map .maplibregl-ctrl-attrib'); if (atr) atr.classList.remove('maplibregl-compact-show'); // los créditos, plegados tras el botón ⓘ
     relPintar();
     if (t.ejemplo) map.once('idle', () => { if (REL.map === map && relAltitudDeEjemplo(map, t)) relPintar(); });
@@ -168,8 +171,9 @@ function relPintar() {
   relIr(REL.i);
 }
 /* Mueve el punto del mapa y las cifras al punto i del trazado. */
-function relIr(i) {
-  const t = REL.t; if (!t) return; REL.i = i; const p = t.puntos[i], corre = REL.a.dep === 'correr';
+function relIr(i, enMarcha) {
+  const t = REL.t; if (!t) return; REL.i = i; if (!enMarcha) REL.f = t.frac[i]; // al arrastrar por el perfil, el repaso sigue desde ahí
+  const p = t.puntos[i], corre = REL.a.dep === 'correr';
   const sig = v => `${v > 0 ? '+' : v < 0 ? '−' : ''}${nf(Math.abs(v), 1)}`;
   const c = [['', 'Km', nf(p[2], 1), ''], ['', 'Altitud', p[3] != null ? nf(p[3], 0) : '—', 'm'], ['pend', 'Pendiente', p[4] != null ? sig(p[4]) : '—', '%'],
     ['vel', corre ? 'Ritmo' : 'Velocidad', p[5] != null ? (corre ? ritmoC(p[5]) : nf(p[5], 1)) : '—', corre ? 'min/km' : 'km/h'], ['fc', 'Pulso', p[6] != null ? p[6] : '—', 'ppm']]
@@ -177,13 +181,56 @@ function relIr(i) {
   $('#rel-cifras').innerHTML = c.map(([k, l, v, u]) => `<div class="field${k && k === REL.modo ? ' on' : ''}"><span class="l">${l}</span><span class="v">${v}${u ? ` <small>${u}</small>` : ''}</span></div>`).join('');
   const x = p[2] / (t.puntos[t.puntos.length - 1][2] || 1) * 1000, cur = $('#rel-cursor'); cur.setAttribute('x1', x); cur.setAttribute('x2', x);
   $('#rel-rango').setAttribute('aria-valuetext', c.map(([, l, v, u]) => `${l} ${v}${u ? ' ' + u : ''}`).join(', '));
-  if (REL.punto) { REL.punto.setLngLat([p[0], p[1]]); const m = REL.map; if (m && !m.getBounds().contains([p[0], p[1]])) m.easeTo({ center: [p[0], p[1]], duration: reduced ? 0 : 400 }); }
+  if (REL.punto && !enMarcha) { REL.punto.setLngLat([p[0], p[1]]); const m = REL.map; if (m && !m.getBounds().contains([p[0], p[1]])) m.easeTo({ center: [p[0], p[1]], duration: reduced ? 0 : 400 }); }
 }
 
+/* ===== Repasar la ruta: el punto recorre el trazado y la cámara lo sigue mirando hacia donde vas =====
+   La ruta entera dura entre 45 s y 2 min y medio según los km (a 1×). Con "reducir movimiento", la cámara no se mueve: solo avanza el punto. */
+const REL_VELS = [1, 2, 4];
+const relDura = t => Math.max(45, Math.min(150, (t.puntos[t.puntos.length - 1][2] || 1) * 1.2));
+/* Posición a una fracción f (0 a 1) de la distancia: entre dos puntos del trazado. */
+function relEn(t, f) {
+  const F = t.frac; let a = 0, b = F.length - 1; while (b - a > 1) { const m = (a + b) >> 1; if (F[m] <= f) a = m; else b = m; }
+  const k = F[b] > F[a] ? Math.max(0, Math.min(1, (f - F[a]) / (F[b] - F[a]))) : 0, p = t.puntos[a], q = t.puntos[b];
+  return { lon: p[0] + (q[0] - p[0]) * k, lat: p[1] + (q[1] - p[1]) * k, i: k < .5 ? a : b };
+}
+const relRumbo = (p, q) => (Math.atan2((q.lon - p.lon) * Math.cos(p.lat * Math.PI / 180), q.lat - p.lat) * 180 / Math.PI + 360) % 360;
+/* Hacia dónde mirar: unos 400 m más adelante, para que una curva cerrada no dé un latigazo. */
+function relMira(t, f) { const kmT = t.puntos[t.puntos.length - 1][2] || 1, g = Math.min(1, f + .4 / kmT); return g > f ? relRumbo(relEn(t, f), relEn(t, g)) : REL.rumbo; }
+function relBotones() {
+  const el = $('#rel-play'); if (!el) return;
+  el.innerHTML = `<button class="btn fill" type="button" data-a="rel-play">${ic(REL.play ? 'pausa' : 'play', 18)} ${REL.play ? 'Pausar' : REL.f > 0 && REL.f < 1 ? 'Seguir' : 'Repasar la ruta'}</button>
+    ${REL.play ? `<button class="rel-vel" type="button" data-a="rel-vel" aria-label="Velocidad del repaso: ${REL.vel}×. Cambiar">${REL.vel}×</button>` : ''}`;
+}
+function relPaso(ts) {
+  const t = REL.t, map = REL.map; if (!REL.play || !t || !map) return;
+  const dt = REL.ts ? Math.min(.1, (ts - REL.ts) / 1000) : 0; REL.ts = ts;
+  REL.f = Math.min(1, REL.f + dt * REL.vel / relDura(t));
+  const pos = relEn(t, REL.f); REL.punto.setLngLat([pos.lon, pos.lat]);
+  if (pos.i !== REL.i) { relIr(pos.i, true); const r = $('#rel-rango'); if (r) r.value = pos.i; }
+  if (!reduced) { REL.rumbo += ((relMira(t, REL.f) - REL.rumbo + 540) % 360 - 180) * Math.min(1, dt * 1.5); map.jumpTo({ center: [pos.lon, pos.lat], bearing: REL.rumbo }); }
+  if (REL.f >= 1) { relPausar(); return; }
+  REL.raf = requestAnimationFrame(relPaso);
+}
+function relReproducir() {
+  const t = REL.t, map = REL.map; if (!t || !map) return;
+  if (REL.f >= 1) REL.f = 0;
+  REL.play = true; REL.ts = 0; relBotones();
+  let ya = false; const arranca = () => { if (ya) return; ya = true; if (REL.play && REL.map === map) { cancelAnimationFrame(REL.raf); REL.raf = requestAnimationFrame(relPaso); } };
+  if (reduced) { arranca(); return; }
+  // Antes de echar a andar, la cámara baja hasta el punto y se pone mirando hacia delante.
+  const pos = relEn(t, REL.f); REL.rumbo = relMira(t, REL.f);
+  map.easeTo({ center: [pos.lon, pos.lat], zoom: Math.max(map.getZoom(), 13), pitch: 62, bearing: REL.rumbo, duration: 900, padding: { top: 140, bottom: 0, left: 0, right: 0 } }); // el punto, algo por debajo del centro: se ve más de lo que viene
+  map.once('moveend', arranca); setTimeout(arranca, 1500); // si el aviso de fin de movimiento no llega, arranca igual
+}
+function relPausar() { REL.play = false; cancelAnimationFrame(REL.raf); relBotones(); }
+
 Object.assign(ACTIONS, {
+  'rel-play': () => { if (REL.play) relPausar(); else relReproducir(); const b = $('#rel-play .btn'); if (b) b.focus(); },
+  'rel-vel': () => { REL.vel = REL_VELS[(REL_VELS.indexOf(REL.vel) + 1) % REL_VELS.length]; relBotones(); const b = $('#rel-play .rel-vel'); if (b) b.focus(); },
   'rel-abrir': el => abrirRelieve(el.dataset.v), 'rel-cerrar': () => cerrarRelieve(),
   'rel-modo': el => { REL.modo = el.dataset.v; relPintar(); const b = $(`#rel-seg [data-v="${REL.modo}"]`); if (b) b.focus(); },
   'rel-zoom': el => { if (REL.map) REL.map.easeTo({ zoom: REL.map.getZoom() + +el.dataset.v, duration: reduced ? 0 : 300 }); },
-  'rel-entero': () => { if (REL.map) REL.map.fitBounds(REL.caja, { padding: 48, pitch: 55, bearing: 0, duration: reduced ? 0 : 600 }); },
+  'rel-entero': () => { if (REL.play) relPausar(); if (REL.map) REL.map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 }); if (REL.map) REL.map.fitBounds(REL.caja, { padding: 48, pitch: 55, bearing: 0, duration: reduced ? 0 : 600 }); },
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('#relieve')) { e.stopPropagation(); cerrarRelieve(); } }, true);
