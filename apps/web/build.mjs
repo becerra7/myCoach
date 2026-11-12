@@ -49,6 +49,8 @@ const page = target === 'web'
     : html;
 mkdirSync(join(here, 'dist'), { recursive: true });
 if (target === 'web') cpSync(join(here, 'public'), join(here, 'dist'), { recursive: true });
+// El motor del mapa en relieve va aparte: solo se descarga al abrir un recorrido (60-relieve.js).
+if (target === 'web') for (const f of ['maplibre-gl.js', 'maplibre-gl.css']) cpSync(join(pkg('maplibre-gl'), 'dist', f), join(here, 'dist', f));
 const out = join(here, 'dist', { web: 'index.html', mcpapp: 'mcp-app.html' }[target] || 'claude.html');
 writeFileSync(out, page);
 if (target === 'mcpapp') writeFileSync(join(here, 'dist', 'mcp-app.js'), js);

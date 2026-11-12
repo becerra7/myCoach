@@ -12,9 +12,12 @@
   },
   "devDependencies": {
     "es-atlas": "^0.6.0",
+    "maplibre-gl": "^5.24.1",
     "topojson-client": "^3.1.0",
     "world-atlas": "^2.0.2",
     "wrangler": "^4.42.0"
   },
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": ">=20"
+  }
 }

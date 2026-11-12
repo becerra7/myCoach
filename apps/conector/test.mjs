@@ -556,7 +556,7 @@ const rpc = async (env, token, message) => {
 	check("un navegador en la raiz sigue viendo la pagina", (await (await get(env, "/")).text()).includes("<h1>"));
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("tools/list devuelve 53 herramientas", list.body.result.tools.length === 53);
+	check("tools/list devuelve 54 herramientas", list.body.result.tools.length === 54);
 	check("app_guardar se anuncia como escritura", anot0(list).app_guardar.readOnlyHint === false);
 	{
 		const call = (name, args) => rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name, arguments: args } });
@@ -1023,6 +1023,26 @@ const rpc = async (env, token, message) => {
 	check("perfil de 60 puntos con km, altitud y pulso", pa.length === 60 && pa.every((x) => x.length === 3) && Math.max(...pa.map((x) => x[1])) > Math.min(...pa.map((x) => x[1])) + 120, `(${pa.length})`);
 	check("por terreno: bajada a 40 km/h, con su pulso", ter.bajada && Math.abs(ter.bajada.vel_media_kmh - 40) < 3 && ter.bajada.fc_media > 0,
 		`(${JSON.stringify(ter.bajada)})`);
+	// El trazado punto a punto (mapa en relieve): 10 km hacia el norte, llano 4 km, subida al 6 % 3 km y bajada 3 km.
+	{
+		const tr = [];
+		for (let x = 0; x <= 2000; x++) {
+			const m = x * 5, alt = m < 4000 ? 200 : m < 7000 ? 200 + (m - 4000) * 0.06 : 380 - (m - 7000) * 0.06;
+			tr.push({ metrics: [m < 4000 ? 130 : 160, alt, m, m / 8, 42 + m / 111320, 1.9, m < 4000 ? 8.33 : m < 7000 ? 4.17 : 11.1] });
+		}
+		const trDetails = { metricDescriptors: [...details.metricDescriptors, { key: "directLatitude", metricsIndex: 4 }, { key: "directLongitude", metricsIndex: 5 }, { key: "directSpeed", metricsIndex: 6 }], activityDetailMetrics: tr };
+		globalThis.fetch = async () => new Response(JSON.stringify(trDetails));
+		const t = await call("garmin_activity_track", { activity_id: "7" });
+		const en = (km) => t.puntos.reduce((m, p) => (Math.abs(p[2] - km) < Math.abs(m[2] - km) ? p : m));
+		check("trazado: como mucho 1.200 puntos, del km 0 al 10", t.puntos.length <= 1201 && t.puntos[0][2] === 0 && t.puntos.at(-1)[2] === 10, `(${t.puntos.length})`);
+		check("trazado: cada punto lleva lon, lat, km, altitud, pendiente, velocidad y pulso", t.columnas.join() === "lon,lat,km,alt,pend,vel,fc" && t.puntos.every((p) => p.length === 7) && t.tiene.vel && t.tiene.fc && t.tiene.alt);
+		check("trazado: pendiente 0 en el llano, +6 % subiendo y −6 % bajando", Math.abs(en(2)[4]) < 0.5 && Math.abs(en(5.5)[4] - 6) < 0.5 && Math.abs(en(8.5)[4] + 6) < 0.5, `(${en(2)[4]}, ${en(5.5)[4]}, ${en(8.5)[4]})`);
+		check("trazado: velocidad en km/h y pulso de cada tramo", Math.abs(en(2)[5] - 30) < 0.5 && Math.abs(en(5.5)[5] - 15) < 0.5 && en(5.5)[6] === 160 && en(2)[6] === 130, `(${en(2)[5]}, ${en(5.5)[5]})`);
+		check("trazado: la posición avanza hacia el norte", t.puntos.at(-1)[1] > t.puntos[0][1] + 0.08 && t.puntos[0][0] === 1.9);
+		globalThis.fetch = async () => new Response(JSON.stringify({ geoPolylineDTO: { polyline: [{ lat: 42, lon: 1.9, altitude: 1000, speed: 5 }, { lat: 42.01, lon: 1.9, altitude: 1100, speed: 5 }] } }));
+		const sinSeries = await call("garmin_activity_track", { activity_id: "8" });
+		check("trazado: sin posición en las series usa la línea del mapa, sin pulso", sinSeries.puntos.length === 2 && Math.abs(sinSeries.puntos[1][2] - 1.11) < 0.02 && !sinSeries.tiene.fc && sinSeries.tiene.vel);
+	}
 	// El desacople solo tiene sentido en llano: dos horas a 30 km/h con el
 	// pulso subiendo de 130 a 143 en la segunda hora dan 1 - 130/143 ≈ 9 %.
 	const llanas = [];
@@ -1375,7 +1395,7 @@ const rpc = async (env, token, message) => {
 	check("el token de acceso vale sin leer del KV", init.body.result?.serverInfo?.name === "garmin");
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("las herramientas se listan igualmente", list.body.result.tools.length === 53);
+	check("las herramientas se listan igualmente", list.body.result.tools.length === 54);
 
 	// Y el dato que si vive en KV avisa en vez de mentir
 	const call = await rpc(env, tokens.access_token, {
@@ -2211,7 +2231,7 @@ const rpc = async (env, token, message) => {
 	check("convención: todas con título, descripción y esquema de objeto", tools.every((t) => t.title && t.description?.length > 40 && t.inputSchema?.type === "object"));
 	check("convención: descripciones de menos de 1500 caracteres", tools.every((t) => t.description.length < 1500), tools.filter((t) => t.description.length >= 1500).map((t) => t.name).join());
 	const soloApp = tools.filter((t) => t._meta?.ui?.visibility?.join() === "app").map((t) => t.name).sort();
-	check("las de la app no se le enseñan al modelo (visibility app)", soloApp.join() === "agenda_calendario,app_guardar,avisos,avisos_guardar,fuerza_dia,intervals_conectar,intervals_desconectar", soloApp.join());
+	check("las de la app no se le enseñan al modelo (visibility app)", soloApp.join() === "agenda_calendario,app_guardar,avisos,avisos_guardar,fuerza_dia,garmin_activity_track,intervals_conectar,intervals_desconectar", soloApp.join());
 	check("la app sigue pudiendo llamarlas", !(await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 31, method: "tools/call", params: { name: "app_guardar", arguments: { doc: "notas", datos: [] } } })).body.result.isError);
 	const viejas = ["garmin_sleep", "garmin_hrv", "garmin_daily_summary", "garmin_body_battery", "garmin_training_readiness", "garmin_course_detail", "fuerza_entrenos", "cardio_entrenos", "fuerza_enviar_garmin", "cardio_enviar_garmin"];
 	check("las herramientas juntadas ya no existen", !tools.some((t) => viejas.includes(t.name)));

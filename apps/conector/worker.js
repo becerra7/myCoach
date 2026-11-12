@@ -1713,6 +1713,75 @@ async function detalleCourse(env, userId, { course_id, puntos }) {
 }
 
 /** Polilínea codificada de Google (precisión 1e-5) a partir de puntos {lat, lon}. */
+/**
+ * El recorrido punto a punto para el mapa en relieve: posición, km, altitud, pendiente, velocidad y pulso.
+ * La altitud va suavizada (150 m) y la pendiente se mide en los 200 m de alrededor, igual que en el
+ * análisis por terreno: punto a punto, el ruido del barómetro inventaría rampas. Como mucho `max` puntos.
+ * Si las series no traen posición (aparatos antiguos), se usa la línea del mapa, sin pulso.
+ */
+function trazadoDeActividad(details, max = 1200) {
+	const desc = details?.metricDescriptors || [];
+	const indice = (...claves) => { for (const c of claves) { const d = desc.find((x) => x.key === c); if (d) return d.metricsIndex; } return -1; };
+	const iLat = indice("directLatitude"), iLon = indice("directLongitude"), iDist = indice("sumDistance");
+	const iAlt = indice("directElevation", "directCorrectedElevation"), iVel = indice("directSpeed"), iFc = indice("directHeartRate");
+	const num = (f, i) => (i >= 0 && typeof f[i] === "number" ? f[i] : null);
+	let pts = [];
+	if (iLat >= 0 && iLon >= 0 && iDist >= 0) {
+		for (const m of details?.activityDetailMetrics || []) {
+			const f = m.metrics || [];
+			const lat = num(f, iLat), lon = num(f, iLon), d = num(f, iDist);
+			if (lat == null || lon == null || d == null || (!lat && !lon)) continue;
+			const fc = num(f, iFc);
+			pts.push({ lat, lon, d, e: num(f, iAlt), v: num(f, iVel), fc: fc > 30 ? fc : null });
+		}
+		pts.sort((a, b) => a.d - b.d);
+	}
+	if (pts.length < 2) {
+		pts = [];
+		let d = 0, prev = null;
+		for (const p of details?.geoPolylineDTO?.polyline || []) {
+			if (typeof p?.lat !== "number" || typeof p?.lon !== "number") continue;
+			if (prev) d += metresBetween([prev.lon, prev.lat], [p.lon, p.lat]);
+			prev = p;
+			pts.push({ lat: p.lat, lon: p.lon, d, e: typeof p.altitude === "number" ? p.altitude : null, v: typeof p.speed === "number" ? p.speed : null, fc: null });
+		}
+	}
+	if (pts.length < 2) return null;
+	const alt = suavizarAltitud(pts);
+	// Pendiente en los 200 m de alrededor (100 antes y 100 después).
+	const pend = new Array(pts.length).fill(null);
+	let a = 0, b = 0;
+	for (let i = 0; i < pts.length; i++) {
+		while (pts[i].d - pts[a].d > 100) a++;
+		while (b < pts.length - 1 && pts[b].d - pts[i].d < 100) b++;
+		const dd = pts[b].d - pts[a].d;
+		if (alt[a] != null && alt[b] != null && dd >= 50) pend[i] = Math.max(-30, Math.min(30, ((alt[b] - alt[a]) / dd) * 100));
+	}
+	// Velocidad: media de unos 60 m alrededor, para que un pico del GPS no pinte un tramo entero.
+	const vel = new Array(pts.length).fill(null);
+	let c = 0, e = 0, suma = 0, n = 0;
+	for (let i = 0; i < pts.length; i++) {
+		while (e < pts.length && pts[e].d - pts[i].d <= 30) { if (pts[e].v != null) { suma += pts[e].v; n++; } e++; }
+		while (pts[i].d - pts[c].d > 30) { if (pts[c].v != null) { suma -= pts[c].v; n--; } c++; }
+		vel[i] = n ? (suma / n) * 3.6 : null;
+	}
+	const paso = Math.max(1, Math.ceil(pts.length / max));
+	const puntos = [];
+	for (let i = 0; i < pts.length; i += paso) puntos.push(i);
+	if (puntos.at(-1) !== pts.length - 1) puntos.push(pts.length - 1);
+	const hay = (arr) => arr.some((x) => x != null);
+	return {
+		// [lon, lat, km, altitud m, pendiente %, velocidad km/h, pulso ppm]; null donde no hay dato.
+		columnas: ["lon", "lat", "km", "alt", "pend", "vel", "fc"],
+		puntos: puntos.map((i) => [
+			round(pts[i].lon, 5), round(pts[i].lat, 5), round(pts[i].d / 1000, 3),
+			alt[i] != null ? round(alt[i], 1) : null, pend[i] != null ? round(pend[i], 1) : null,
+			vel[i] != null ? round(vel[i], 1) : null, pts[i].fc != null ? Math.round(pts[i].fc) : null,
+		]),
+		tiene: { alt: hay(alt), vel: hay(vel), fc: pts.some((p) => p.fc != null) },
+	};
+}
+
 function codificarPolilinea(puntos) {
 	let out = "";
 	let plat = 0;
@@ -2023,6 +2092,24 @@ const TOOLS = {
 				desnivel_m: round(data?.summaryDTO?.elevationGain, 0),
 				nota: "Puntos del recorrido real. Paselos a garmin_plan_route para repetirlo, o quite y anada alguno para variarlo.",
 			};
+		},
+	},
+
+	garmin_activity_track: {
+		// Solo la app: el mapa en relieve de una actividad. Son cientos de puntos; a Claude no le sirven.
+		soloApp: true,
+		title: "Trazado de una actividad punto a punto",
+		description: "El recorrido de una actividad con sus datos en cada punto, para el mapa en relieve de la app.",
+		schema: {
+			type: "object",
+			properties: { activity_id: { type: "string", description: "El activity_id devuelto por garmin_activities." } },
+			required: ["activity_id"],
+		},
+		run: async (env, userId, { activity_id }) => {
+			const data = await apiGet(env, userId, `/activity-service/activity/${encodeURIComponent(activity_id)}/details`, { maxChartSize: "2000", maxPolylineSize: "2000" });
+			const t = trazadoDeActividad(data);
+			if (!t) throw new HttpError(404, "Esa actividad no tiene trazado guardado.");
+			return { activity_id, ...t };
 		},
 	},
 
@@ -5655,7 +5742,11 @@ const RECURSOS_UI = [{
 	_meta: {
 		ui: {
 			prefersBorder: true,
-			csp: { resourceDomains: ["https://fonts.googleapis.com", "https://fonts.gstatic.com"] },
+			// Los dos servidores de mapas son para el recorrido en relieve: Mapterhorn (altitud) y OpenFreeMap (mapa base).
+			csp: {
+				resourceDomains: ["https://fonts.googleapis.com", "https://fonts.gstatic.com", "https://tiles.mapterhorn.com", "https://tiles.openfreemap.org"],
+				connectDomains: ["https://tiles.mapterhorn.com", "https://tiles.openfreemap.org"],
+			},
 			// El codigo de la app se carga de la web (ver metaApp).
 		},
 	},

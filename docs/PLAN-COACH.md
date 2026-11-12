@@ -295,6 +295,13 @@ Objetivo: que funcione sin ti delante y aprender qué enamora.
     - Se puede poner a mano (`coach_perfil_guardar` con `ftp_rodillo`; cuenta como un test de hoy).
     - Cada cambio se **copia a Intervals.icu como FTP de interior** (`indoor_ftp`, sin recalcular zonas de pulso), para que los entrenos lleguen a Zwift o MyWhoosh con los mismos vatios. El FTP de Garmin no se toca (el Edge tiene su propia detección).
     - Se calcula al analizar cada sesión (`garmin_activity_detail`); la web avisa al sincronizar ("Tu FTP de rodillo: 206 → 212 W") y lo enseña en Insights → Rodillo, que lo usa para las zonas de potencia.
+31. **Recorrido en relieve (prototipo de la fase 1), 12 de noviembre.** A petición del usuario, que quería ver sus rutas como en Strava de pago. **Cambia una cosa de cómo estaba hecha la app:** hasta ahora no cargaba nada de terceros salvo las fuentes; el mapa en relieve usa una librería de mapas y dos servidores de teselas.
+    - **Qué hace:** en la pantalla de actividad, el trazado plano es ahora un botón, "Ver en relieve". Abre el mapa 3D a pantalla completa con el recorrido pintado por **pendiente, velocidad (ritmo al correr) o pulso** (solo las que tenga la actividad), el perfil de altitud con el mismo color y un cursor que mueve el punto en el mapa y enseña las cifras de ese punto. Con teclado: flechas sobre el perfil, Esc cierra.
+    - **Piezas:** MapLibre GL JS 5 (libre; 277 kB comprimido, servido desde la propia web y descargado solo al abrir un mapa), relieve de **Mapterhorn** y mapa base de **OpenFreeMap** (datos de OpenStreetMap), los dos gratis y sin clave. Ninguno recibe el recorrido: solo ven la zona que se mira. Mapterhorn no publica condiciones de uso; si cambian, la alternativa es MapTiler (plan gratuito limitado).
+    - **Quién calcula qué:** el conector da el trazado punto a punto (`garmin_activity_track`, solo para la app: Claude no la ve ni gasta tokens): posición, km, altitud suavizada, pendiente en 200 m, velocidad y pulso, como mucho 1.200 puntos. La web solo dibuja. No se guarda en el navegador; se pide al abrir.
+    - **En el ejemplo (demo):** no hay datos punto a punto; la altitud se lee del propio relieve y solo se pinta la pendiente, marcado como "Ejemplo".
+    - **Sin comprobar:** que funcione dentro de Claude (el marco tiene que permitir WebGL, el worker del mapa y los dos servidores, ya añadidos a su lista). Si no puede dibujar el relieve, lo dice y enseña el trazado plano.
+    - **Fuera de este prototipo:** repasar la ruta con la cámara siguiendo el punto (fase 2) y la foto de satélite (fase 3).
 
 ## 10. Próximos pasos concretos (2 semanas)
 1. Sacar `packages/domain` con carga TRIMP, semáforo y tests.

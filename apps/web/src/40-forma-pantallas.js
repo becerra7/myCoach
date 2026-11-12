@@ -77,7 +77,7 @@ function scrActividad(scr) {
     ${pidiendo ? '<p class="small muted" role="status">Leyendo el detalle de Garmin (zonas, llano, subidas y mapa)…</p>' : ''}
     ${semana}${fuerza}${cardio ? actEntrenador(a) + actPerfil(a) + actTerreno(a) + actEsfuerzos(a) : ''}
     ${mejor ? `<section class="card" aria-labelledby="act-mejor"><h2 class="card-t" id="act-mejor" style="margin:0">Lo mejor de la salida</h2><ul class="act-mejor">${mejor}</ul></section>` : ''}
-    ${(DSET.rutas || {})[a.id] ? `<div class="trackmap">${trackSvg(a.id)}</div>` : ''}
+    ${(DSET.rutas || {})[a.id] ? `<button type="button" class="trackmap mapprev" data-a="rel-abrir" data-v="${a.id}" aria-label="Abrir el recorrido en relieve">${trackSvg(a.id)}<span class="mp-cta">${ic('pueblos', 18)} Ver en relieve</span></button>` : ''}
     ${a.nuevos.length ? `<section class="card" aria-labelledby="act-pue"><h2 class="card-t" id="act-pue" style="margin:0">${a.nuevos.length} pueblo${a.nuevos.length === 1 ? '' : 's'} nuevo${a.nuevos.length === 1 ? '' : 's'}</h2><div class="towns">${a.nuevos.map(n => `<span class="town new">${esc(n)}</span>`).join('')}</div></section>` : ''}</div>` };
 }
 /* ===== Actividad: lo que dijo tu entrenador, cómo fue por terreno y los esfuerzos =====

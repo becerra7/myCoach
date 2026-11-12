@@ -82,6 +82,7 @@ El inventario salió de leer el código con un agente; los puntos marcados ✔ l
 | Feature | Cómo funciona hoy | Datos | Estado | Decisión |
 |---|---|---|---|---|
 | Mapa de pueblos | Municipios cruzados por comunidad, España o Mundo, por deporte; lista por kilómetros con buscador | Garmin (`garmin_activity_route`) + IGN | ✅ (Mundo solo países) | Quedarse |
+| Recorrido en relieve | En cada actividad con GPS: mapa 3D con el trazado pintado por pendiente, velocidad o pulso, y el perfil con cursor | Garmin (`garmin_activity_track`) + Mapterhorn + OpenFreeMap | 🟡 prototipo | Probar dentro de Claude; después, repasar la ruta y satélite |
 | Mapa a pantalla completa | Zoom, ficha del pueblo con km por deporte y primera vez. "Núcleos: pendiente de OpenStreetMap" | Garmin | 🟡 | Mejorar: quitar el texto pendiente |
 | Banner "+3 pueblos" | Aviso de actividad nueva | Demo | 🧪 | Mejorar: hacerlo real tras sincronizar |
 | **Planificar una ruta de bici** | No existe en la app. Claude puede hacerlo con `garmin_plan_route` | Coach | ❌ | Añadir: ver y revisar rutas en la app |

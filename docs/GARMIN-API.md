@@ -57,6 +57,7 @@ Leyenda: ✅ herramienta propia · 🟡 a medias · 🔎 solo con `garmin_api`.
 | Resumen, series, zonas de pulso | `activity-service/activity/{id}[/details|/hrTimeInZones]` | ✅ `garmin_activity_detail` |
 | Series de fuerza | `.../exerciseSets` | ✅ `fuerza_desde_garmin` |
 | Recorrido | `.../details` (polilínea) | ✅ `garmin_activity_route` |
+| Recorrido punto a punto (posición, altitud, pendiente, velocidad, pulso) | `.../details` (series) | ✅ `garmin_activity_track` (solo la app: mapa en relieve) |
 | Vueltas, tramos por tipo, resumen de tramos | `.../splits`, `/typedsplits`, `/split_summaries` | 🔎 |
 | Zonas de potencia | `.../powerTimeInZones` | 🔎 |
 | Tiempo que hacía | `.../weather` | 🔎 (Intervals.icu lo da) |
@@ -155,7 +156,7 @@ De 47 herramientas a **40, de las que Claude ve 36**. No se pierde nada, porque 
 | `garmin_courses` + `garmin_course_detail` | **`garmin_courses`** (con `course_id`, el detalle). |
 | `fuerza_entrenos` + `cardio_entrenos` | **`entrenos`** (con `tipo`). |
 | `fuerza_enviar_garmin` + `cardio_enviar_garmin` | **`entreno_enviar_garmin`** (con `tipo`). |
-| `app_guardar`, `intervals_conectar`, `intervals_desconectar`, `fuerza_dia` | Siguen, pero **solo para la app** (`_meta.ui.visibility: ["app"]`): Claude no las ve. |
+| `app_guardar`, `intervals_conectar`, `intervals_desconectar`, `fuerza_dia`, `garmin_activity_track` | Siguen, pero **solo para la app** (`_meta.ui.visibility: ["app"]`): Claude no las ve. |
 
 Las convenciones para seguir creciendo sin romper están en el README del
 conector ("Convenciones de las herramientas"), y las comprueba un test.
