@@ -404,9 +404,10 @@ body.framed .toasts{top:50px}
 .rel-estado .trackmap{width:100%;max-width:420px;margin-top:12px}
 .rel-titulo{flex:1;min-width:0;margin:0;font-size:17px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rel-titulo[hidden],.relieve .seg[hidden]{display:none}
-.rel-salida,.rel-punto{border-radius:50%;border:2px solid var(--card);box-shadow:0 1px 4px rgba(0,0,0,.35)}
+.rel-salida,.rel-punto{border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35)}
 .rel-salida{width:12px;height:12px;background:var(--good)}
-.rel-punto{width:18px;height:18px;background:var(--label);border-width:3px}
+/* Sobre el mapa, que siempre es claro: el punto no sigue al tema */
+.rel-punto{width:18px;height:18px;background:#15191E;border-width:3px}
 .rel-panel{background:var(--card);padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:8px}
 .rel-cifras{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:8px}
 .rel-cifras .v{font-size:22px;font-variant-numeric:tabular-nums;white-space:nowrap}

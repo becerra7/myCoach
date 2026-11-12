@@ -7,7 +7,8 @@ const ORIGEN_WEB = (() => { try { const s = document.currentScript; return s && 
 const REL = { a: null, t: null, modo: 'pend', map: null, punto: null, i: 0, foco: null };
 const REL_TRAZAS = new Map(); // en memoria: no se guarda en el navegador (son cientos de puntos por salida)
 const REL_DEM = 'https://tiles.mapterhorn.com/tilejson.json', REL_EXAG = 1.4;
-const relEstilo = oscuro => `https://tiles.openfreemap.org/styles/${oscuro ? 'dark' : 'positron'}`;
+// Mapa en color (bosque, agua, carreteras) también con la app en oscuro: en gris o en negro no se lee el terreno.
+const relEstilo = () => 'https://tiles.openfreemap.org/styles/liberty';
 // Columnas de cada punto, como las manda el conector.
 const RC = { lon: 0, lat: 1, km: 2, alt: 3, pend: 4, vel: 5, fc: 6 };
 
@@ -26,7 +27,6 @@ function relRgb(token) {
   const cv = document.createElement('canvas').getContext('2d'); cv.fillStyle = getComputedStyle(el).color; cv.fillRect(0, 0, 1, 1); el.remove();
   return [...cv.getImageData(0, 0, 1, 1).data.slice(0, 3)];
 }
-const relOscuro = () => { const [r, g, b] = relRgb('--bg'); return r * .299 + g * .587 + b * .114 < 128; };
 
 /* Las tres maneras de pintar el trazado. Cada una: de qué valor a qué valor y con qué colores (tokens). */
 function relEscala(modo, t) {
@@ -112,7 +112,7 @@ function relMontar(t) {
   try {
     const xs = t.puntos.map(p => p[0]), ys = t.puntos.map(p => p[1]);
     REL.caja = [[Math.min(...xs), Math.min(...ys)], [Math.max(...xs), Math.max(...ys)]];
-    map = REL.map = new maplibregl.Map({ container: 'rel-map', style: relEstilo(relOscuro()), bounds: REL.caja, fitBoundsOptions: { padding: 48 }, pitch: 55, maxPitch: 75, attributionControl: { compact: true } });
+    map = REL.map = new maplibregl.Map({ container: 'rel-map', style: relEstilo(), bounds: REL.caja, fitBoundsOptions: { padding: 48 }, pitch: 55, maxPitch: 75, attributionControl: { compact: true } });
   } catch (e) {
     // Sin WebGL (navegador viejo o un marco que no lo deja): se dice y se deja el trazado plano.
     const est = $('#rel-estado'); est.classList.add('fallo'); est.innerHTML = `<b>Este navegador no puede dibujar el relieve</b><span>Aquí tienes el recorrido en plano. Para verlo en 3D, abre myCoach en el navegador del móvil o del ordenador.</span><div class="trackmap">${trackSvg(REL.a.id)}</div>`;
@@ -123,10 +123,10 @@ function relMontar(t) {
     const rotulos = (map.getStyle().layers.find(l => l.type === 'symbol') || {}).id;
     map.addSource('relieve', { type: 'raster-dem', url: REL_DEM });
     map.addSource('sombras', { type: 'raster-dem', url: REL_DEM });
-    map.addLayer({ id: 'sombras', type: 'hillshade', source: 'sombras', paint: { 'hillshade-exaggeration': .45, 'hillshade-shadow-color': relOscuro() ? '#000000' : '#5b6470', 'hillshade-highlight-color': relOscuro() ? '#6b7480' : '#ffffff' } }, rotulos);
+    map.addLayer({ id: 'sombras', type: 'hillshade', source: 'sombras', paint: { 'hillshade-exaggeration': .35, 'hillshade-shadow-color': '#4a5560', 'hillshade-highlight-color': '#ffffff' } }, rotulos);
     map.setTerrain({ source: 'relieve', exaggeration: REL_EXAG });
     map.addSource('ruta', { type: 'geojson', lineMetrics: true, data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: t.puntos.map(p => [p[0], p[1]]) } } });
-    const borde = `rgb(${relRgb('--card').join(',')})`;
+    const borde = '#ffffff'; // el mapa es claro con la app en claro o en oscuro: el borde de la línea no sigue al tema
     map.addLayer({ id: 'ruta-borde', type: 'line', source: 'ruta', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': borde, 'line-width': 8 } });
     map.addLayer({ id: 'ruta', type: 'line', source: 'ruta', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-width': 4.5 } });
     const marca = (cls, p, txt) => { const d = document.createElement('div'); d.className = cls; d.setAttribute('role', 'img'); d.setAttribute('aria-label', txt); return new maplibregl.Marker({ element: d }).setLngLat([p[0], p[1]]).addTo(map); };
