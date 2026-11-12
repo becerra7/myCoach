@@ -7405,7 +7405,8 @@ const testFtp = (nombre) => {
 /** Mira una sesión de rodillo con potencia y, si toca, cambia el FTP. Devuelve el FTP nuevo o null. */
 async function actualizarFtpRodillo(env, userId, { id, fecha, nombre, potencia }) {
 	const test = testFtp(nombre), m = potencia?.mejor_w || {};
-	const valor = test === "rampa" ? (m.min1 ? Math.round(m.min1 * 0.75) : null) : m.min20 ? Math.round(m.min20 * 0.95) : null;
+	// En el de 20 min, el FTP estimado del análisis (sale de los 20 min de Garmin sin redondear, como el de Zwift).
+	const valor = test === "rampa" ? (m.min1 ? Math.round(m.min1 * 0.75) : null) : potencia?.ftp_estimado_w || (m.min20 ? Math.round(m.min20 * 0.95) : null);
 	if (!valor || valor < 50 || valor > 600 || !/^\d{4}-\d{2}-\d{2}$/.test(fecha || "")) return null;
 	const actual = await leerDoc(env, userId, FTP_DOC);
 	if (actual?.actividad_id === String(id) && actual.vatios === valor) return null;
@@ -7434,7 +7435,7 @@ function resumenFtp(f, hoy = fechaLocal()) {
 	if (!f?.vatios) return null;
 	const semanas = f.fecha_test ? Math.floor((Date.parse(hoy) - Date.parse(f.fecha_test)) / (7 * 864e5)) : null;
 	return { vatios: f.vatios, fecha: f.fecha, fuente: f.fuente, actividad: f.actividad || null, anterior: f.anterior?.vatios ?? null,
-		semanas_desde_test: semanas, repetir_test: semanas != null && semanas >= SEMANAS_REPETIR_TEST };
+		semanas_desde_test: semanas, repetir_test: semanas != null && semanas >= SEMANAS_REPETIR_TEST, copiado_a_intervals: f.intervals ?? null };
 }
 
 // ──────────── El mismo entreno, a Intervals.icu (y de ahí a Zwift o MyWhoosh) ────────────
