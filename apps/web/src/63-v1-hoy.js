@@ -115,7 +115,7 @@ function bloqueDia(enHoy) {
   const clave = it => it.k === 'sesion' ? '10:30' : (it.m?.h || it.h);
   // Si la sesión de hoy no cabe en tu agenda, lo dice el motor (coach_hoy) y aquí se cuenta debajo.
   const ag = COACH && COACH.fecha === HOY && COACH.agenda, noCabe = ag && ag.cabe === false && s && !s.a
-    ? (ag.libre_min >= 30 ? `Hoy solo tienes ${dur(ag.libre_min)} libres: tu entrenador te propone qué hacer en Plan.` : 'Hoy no tienes hueco: tu entrenador te propone moverla en Plan.') : '';
+    ? (ag.libre_min >= 30 ? `Hoy solo tienes ${dur(ag.libre_min)} libres: tu entrenador te propone qué hacer en Calendario.` : 'Hoy no tienes hueco: tu entrenador te propone moverla en Calendario.') : '';
   items.sort((x, y) => clave(x).localeCompare(clave(y)));
   const durante = s && SPORTS[s.dep]?.cardio && s.t !== 'descanso' ? (s.min >= 90 ? 'Lleva hidrato: 60-90 g por hora desde la segunda hora.' : 'Menos de 90 min: con agua basta.') : '';
   const li = items.map(it => {

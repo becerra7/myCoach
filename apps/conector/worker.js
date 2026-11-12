@@ -5811,7 +5811,7 @@ Object.assign(TOOLS, {
 		ui: APP_UI,
 		description:
 			"Abre la app myCoach dentro de la conversacion, en la pantalla indicada: hoy (que toca, sus datos, su dia y la semana), " +
-			"plan, comer (comida del dia, historico y peso), progreso (forma e indicadores por deporte), pueblos (resumen de lo hecho y mapa) o ajustes. " +
+			"plan (el calendario: la semana y, por meses, que hizo cada dia), comer (comida del dia, historico y peso), progreso (forma e indicadores por deporte), pueblos (resumen de lo hecho y mapa) o ajustes. " +
 			"Uselo cuando el usuario quiera ver su app, su plan, su comida, su progreso o sus pueblos, " +
 			"y despues de guardar un cambio de plan, para que lo vea. La app lee y guarda lo mismo que estas herramientas: no dibuje una tarjeta, un grafico ni un artefacto imitandola.",
 		schema: {

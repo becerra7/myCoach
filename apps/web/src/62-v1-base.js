@@ -1,7 +1,7 @@
 /* ===== v1 · Piezas comunes del rediseño (docs/PLAN-V1.md) =====
    Icono de información, etiquetas de estado, gráficas SVG de una sola escala con tooltip,
    y la hoja de Claude. Las pantallas están en 63-67. */
-const V = { carga: null, prog: null, pueb: 'año', semOff: 0 };
+const V = { carga: null, prog: null, pueb: 'año', semOff: 0, calVista: 'sem', calMes: 0, calDia: null };
 
 /* Texto explicativo detrás de un icono ⓘ: se registra al pintar y se abre en una hoja */
 const INFOS = {};

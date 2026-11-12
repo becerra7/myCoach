@@ -302,6 +302,14 @@ Objetivo: que funcione sin ti delante y aprender qué enamora.
     - **En el ejemplo (demo):** no hay datos punto a punto; la altitud se lee del propio relieve y solo se pinta la pendiente, marcado como "Ejemplo".
     - **Sin comprobar:** que funcione dentro de Claude (el marco tiene que permitir WebGL, el worker del mapa y los dos servidores, ya añadidos a su lista). Si no puede dibujar el relieve, lo dice y enseña el trazado plano.
     - **Fuera de este prototipo:** repasar la ruta con la cámara siguiendo el punto (fase 2) y la foto de satélite (fase 3).
+    - **13 de noviembre: mapa base en color.** El gris (app en claro) y el negro (app en oscuro) no dejaban leer el terreno. Ahora es el mismo mapa en color en los dos temas (estilo "liberty" de OpenFreeMap), con sombras más suaves.
+32. **Calendario y Más: cuatro pestañas fijas, 13 de noviembre.** A petición del usuario, que echaba en falta mirar hacia atrás ("qué días hice qué") y no quiere que la barra siga engordando. **Cambia lo acordado en `PLAN-V1.md`**: allí Pueblos era "el sitio del histórico" con su lista de actividades, y había cinco pestañas.
+    - **La barra:** Hoy, **Calendario** (antes Plan), Comer, Insights y **Más**. Lo que se añada a partir de ahora va a Más, no a la barra.
+    - **Calendario:** abre en **Semana**, igual que Plan (lo hecho frente a lo previsto, preparar y cambiar la semana). Gana **Mes**: una rejilla con cada día y el icono del deporte hecho (o un cuadro hueco si está previsto), con flechas hasta tu primera actividad guardada. Tocar un día enseña sus actividades; sin día elegido, la lista del mes. Cada actividad lleva a su pantalla. En móvil se elige Semana o Mes; en escritorio se ven las dos.
+    - **Más:** Entrenos, Rutas (pantalla nueva con las guardadas en Garmin y "Trazar una con Claude") y Pueblos, que queda como estaba, con sus totales, el año día a día y el mapa. Salen de Calendario los bloques "Tus rutas" y "Tus entrenos".
+    - **Lo que no cambia por dentro:** las pantallas se siguen llamando `plan` y `pueblos` para los avisos y para `mycoach_abrir`; "pueblos" abre Más → Pueblos.
+    - **Límite:** la app guarda las últimas 300 actividades; al llegar al mes más antiguo lo dice. Para ir más atrás habría que ampliarlo en el conector.
+    - **Coste:** solo la web; ni conector nuevo ni tokens. Cambian dos textos: la descripción de `mycoach_abrir` y la skill `primeros-pasos` (hay que volver a subirla con `npm run skills`).
 
 ## 10. Próximos pasos concretos (2 semanas)
 1. Sacar `packages/domain` con carga TRIMP, semáforo y tests.

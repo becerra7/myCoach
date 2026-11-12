@@ -55,10 +55,12 @@ function enClaude(prompt) {
 function showPrompt(p) { openSheet({ title: 'Encargo para Claude', size: 'auto', body: () => `<p class="small muted">Cópialo y pégalo en Claude con tu conector de Garmin activo.</p><label class="vh" for="pr-t">Encargo</label><textarea id="pr-t" class="card" style="min-height:140px;font:14px/1.4 var(--font-ui);color:var(--label);border:0" readonly>${esc(p)}</textarea><a class="btn fill" href="https://claude.ai/new" target="_blank" rel="noopener">Abrir Claude</a>` }); }
 
 /* ===== Navegación ===== */
-function go(tab) { vt(() => { S.tab = tab === 'forma' ? 'progreso' : tab; S.stack = []; save(); render(true); }); }
+// Pueblos ya no es pestaña: vive dentro de Más (los avisos y tu Claude siguen pudiendo abrirlo por su nombre).
+function go(tab) { vt(() => { const t = tab === 'forma' ? 'progreso' : tab; if (t === 'pueblos') { S.tab = 'mas'; S.stack = [{ s: 'pueblos' }]; } else { S.tab = t; S.stack = []; } save(); render(true); }); }
 function push(screen) { vt(() => { S.stack.push(screen); save(); render(true); }); }
 function pop() { vt(() => { S.stack.pop(); save(); render(true); }); }
-const TABS = [['hoy', 'Hoy'], ['plan', 'Plan'], ['comer', 'Comer'], ['progreso', 'Insights'], ['pueblos', 'Pueblos']];
+// Cuatro pestañas fijas y Más (entrenos, rutas y pueblos): lo que se añada después va a Más, no a la barra.
+const TABS = [['hoy', 'Hoy'], ['plan', 'Calendario'], ['comer', 'Comer'], ['progreso', 'Insights'], ['mas', 'Más']];
 // El botón de Ajustes lleva tus iniciales (Ajustes → Tu nombre); sin nombre, un icono de persona.
 function pintarAvatar() {
   const el = $('#avatar .avatar'); if (!el) return;

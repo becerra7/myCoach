@@ -39,7 +39,7 @@ function scrEntrenos() {
   } else cardio = '';
   return { title: 'Tus entrenos', html: head('Tus entrenos', 'Para repetirlos, ajustarlos y mandarlos al reloj') + `<div class="content stack" style="max-width:640px;gap:8px">
     <h2 class="aj-h">${ic('dumbbell', 18)} Fuerza</h2>${fuerza}
-    <p class="small muted aj-nota">Para ponerlos en tu semana, toca un día en Plan y elige "Poner un entreno de fuerza".</p>
+    <p class="small muted aj-nota">Para ponerlos en tu semana, toca un día en Calendario y elige "Poner un entreno de fuerza".</p>
     ${cardio ? `<h2 class="aj-h" style="margin-top:16px">${ic('bike', 18)} Bici y correr</h2>${cardio}` : ''}</div>` };
 }
 

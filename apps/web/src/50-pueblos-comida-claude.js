@@ -415,11 +415,12 @@ function renderOnboarding() {
   if (st !== 5) delete ob.dataset.anim;
 }
 // Pantallas del rediseño v1 (63-67). Las de la versión anterior que sigan haciendo falta se usan desde ellas.
-const TABSCR = { hoy: () => tabHoyV1(), plan: () => tabPlanV1(), comer: () => tabComerV1(), progreso: () => tabProgresoV1(), pueblos: () => tabPueblosV1() };
+const TABSCR = { hoy: () => tabHoyV1(), plan: () => tabPlanV1(), comer: () => tabComerV1(), progreso: () => tabProgresoV1(), mas: () => tabMasV1() };
 { const ir = new URLSearchParams(location.search).get('ir'); // los avisos abren su pestaña: /?ir=plan
-  if (['hoy', 'plan', 'comer', 'progreso', 'pueblos'].includes(ir)) { S.tab = ir; S.stack = []; history.replaceState(null, '', location.pathname); } }
-if (!['hoy', 'plan', 'comer', 'progreso', 'pueblos'].includes(S.tab)) S.tab = S.tab === 'forma' ? 'progreso' : 'hoy';
-const SCREENS = { entrenos: scrEntrenos, entreno: scrEntreno, actividad: scrActividad, objetivo: scrObjetivo, ajustes: scrAjustes, evo: scrEvo, numeros: scrNumeros, records: scrRecords };
+  if (['hoy', 'plan', 'comer', 'progreso', 'mas', 'pueblos'].includes(ir)) { S.tab = ir; S.stack = []; history.replaceState(null, '', location.pathname); } }
+if (S.tab === 'pueblos') { S.tab = 'mas'; S.stack = [{ s: 'pueblos' }]; } // quien la tenía abierta como pestaña la encuentra dentro de Más
+if (!['hoy', 'plan', 'comer', 'progreso', 'mas'].includes(S.tab)) S.tab = S.tab === 'forma' ? 'progreso' : 'hoy';
+const SCREENS = { pueblos: () => tabPueblosV1(), rutas: scrRutas, entrenos: scrEntrenos, entreno: scrEntreno, actividad: scrActividad, objetivo: scrObjetivo, ajustes: scrAjustes, evo: scrEvo, numeros: scrNumeros, records: scrRecords };
 S.stack = (S.stack || []).filter(x => SCREENS[x.s]);
 
 /* ===== Panel de prototipo ===== */
@@ -434,7 +435,7 @@ const FLOWS = [
   { id: 'forma', t: 'Ver tu evolución', task: 'Averigua cuándo estuviste más en forma este año.', setup() { S.tab = 'forma'; } },
   { id: 'objetivo', t: 'Objetivo moldeable', task: 'Pon un objetivo de reto para primavera y ajusta a mano las horas.', setup() { S.goal = { modo: 'forma' }; S.tab = 'hoy'; } },
   { id: 'comida', t: 'Registrar una comida', task: 'Registra lo que has comido (con foto si quieres) y mira si cuadra con tu entreno.', setup() { S.tab = 'hoy'; } },
-  { id: 'pueblos', t: 'Pueblos por deporte y nivel', task: 'Mira tus pueblos solo de skimo y luego a nivel España.', setup() { S.tab = 'pueblos'; S.pSport = []; S.pLevel = 'ccaa'; } },
+  { id: 'pueblos', t: 'Pueblos por deporte y nivel', task: 'Mira tus pueblos solo de skimo y luego a nivel España.', setup() { S.tab = 'mas'; S.stack = [{ s: 'pueblos' }]; S.pSport = []; S.pLevel = 'ccaa'; } },
   { id: 'ia', t: 'IA sin coste: hacerlo en Claude', task: 'Sin Claude en la app, pide la semana a tu Claude de siempre.', setup() { S.ai = 'claude'; CHAT.fallback = true; }, after() { openClaude(); } },
 ];
 function markFlow(id) { if (!S.flows[id]) { S.flows[id] = 'visto'; save(); syncProgress(); } }
