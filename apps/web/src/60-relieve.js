@@ -117,7 +117,7 @@ function relMontar(t) {
   try {
     const xs = t.puntos.map(p => p[0]), ys = t.puntos.map(p => p[1]);
     REL.caja = [[Math.min(...xs), Math.min(...ys)], [Math.max(...xs), Math.max(...ys)]];
-    map = REL.map = new maplibregl.Map({ container: 'rel-map', style: relEstilo(), bounds: REL.caja, fitBoundsOptions: { padding: 48 }, pitch: 55, maxPitch: 75, attributionControl: { compact: true } });
+    map = REL.map = new maplibregl.Map({ container: 'rel-map', style: relEstilo(), bounds: REL.caja, fitBoundsOptions: { padding: 48 }, pitch: 55, maxPitch: 80, attributionControl: { compact: true } });
   } catch (e) {
     // Sin WebGL (navegador viejo o un marco que no lo deja): se dice y se deja el trazado plano.
     const est = $('#rel-estado'); est.classList.add('fallo'); est.innerHTML = `<b>Este navegador no puede dibujar el relieve</b><span>Aquí tienes el recorrido en plano. Para verlo en 3D, abre myCoach en el navegador del móvil o del ordenador.</span><div class="trackmap">${trackSvg(REL.a.id)}</div>`;
@@ -133,8 +133,24 @@ function relMontar(t) {
     // Foto aérea (Esri) y topográfico (OpenTopoMap), encima de todo el mapa base y apagados hasta que se eligen; los nombres, por encima.
     map.addSource('sat', { type: 'raster', tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, maxzoom: 19, attribution: 'Imágenes © Esri, Maxar, Earthstar Geographics' });
     map.addSource('topo', { type: 'raster', tiles: ['https://tile.opentopomap.org/{z}/{x}/{y}.png'], tileSize: 256, maxzoom: 17, attribution: '© OpenTopoMap (CC-BY-SA)' });
-    map.addLayer({ id: 'sat', type: 'raster', source: 'sat', layout: { visibility: 'none' } }); map.addLayer({ id: 'topo', type: 'raster', source: 'topo', layout: { visibility: 'none' } });
-    REL.rotulos = map.getStyle().layers.filter(l => l.type === 'symbol').map(l => l.id); REL.rotulos.forEach(id => map.moveLayer(id));
+    map.addLayer({ id: 'sat', type: 'raster', source: 'sat', layout: { visibility: 'none' }, paint: { 'raster-brightness-min': .06, 'raster-saturation': .12, 'raster-contrast': .06 } }); // la foto, un punto más clara y viva: tal cual, el bosque queda casi negro map.addLayer({ id: 'topo', type: 'raster', source: 'topo', layout: { visibility: 'none' } });
+    // Un sombreado suave sobre la foto: sin él, a vista de pájaro la montaña se aplana.
+    map.addLayer({ id: 'sombras-sat', type: 'hillshade', source: 'sombras', layout: { visibility: 'none' }, paint: { 'hillshade-exaggeration': .16, 'hillshade-shadow-color': '#0b1420', 'hillshade-highlight-color': 'rgba(255,255,255,.35)', 'hillshade-accent-color': '#0b1420' } });
+    // Días de esquí y de skimo: las pistas y los remontes (OpenSnowMap), encima de la foto o del mapa.
+    if (['esqui', 'skimo'].includes(REL.a.dep)) {
+      map.addSource('pistas', { type: 'raster', tiles: ['https://tiles.opensnowmap.org/pistes/{z}/{x}/{y}.png'], tileSize: 256, maxzoom: 18, attribution: 'Pistas © OpenSnowMap (CC-BY-SA)' });
+      map.addLayer({ id: 'pistas', type: 'raster', source: 'pistas', paint: { 'raster-opacity': .9 } });
+    }
+    // Las cumbres con su altitud: el mapa base no las pinta.
+    const simbolos = map.getStyle().layers.filter(l => l.type === 'symbol');
+    simbolos.forEach(l => map.moveLayer(l.id));
+    map.addLayer({ id: 'cumbres', type: 'symbol', source: 'openmaptiles', 'source-layer': 'mountain_peak', minzoom: 10,
+      layout: { 'text-field': ['case', ['has', 'ele'], ['concat', ['coalesce', ['get', 'name'], ''], '\n', ['to-string', ['get', 'ele']], ' m'], ['coalesce', ['get', 'name'], '']], 'text-font': ['Noto Sans Italic'], 'text-size': 11, 'symbol-sort-key': ['get', 'rank'], 'text-padding': 6 },
+      paint: { 'text-color': '#3b2f25', 'text-halo-color': 'rgba(255,255,255,.85)', 'text-halo-width': 1.4 } });
+    REL.rotulos = [...simbolos, { id: 'cumbres', 'source-layer': 'mountain_peak' }].map(l => { const lugar = ['place', 'water_name', 'mountain_peak'].includes(l['source-layer']);
+      return { id: l.id, lugar, color: lugar ? map.getPaintProperty(l.id, 'text-color') || '#333333' : null, halo: lugar ? map.getPaintProperty(l.id, 'text-halo-color') || '#ffffff' : null }; });
+    // Cielo y calima en el horizonte: al inclinar la vista, lo lejano se difumina en vez de cortarse.
+    try { map.setSky({ 'sky-color': '#7fb0dc', 'horizon-color': '#e4edf5', 'fog-color': '#e4edf5', 'sky-horizon-blend': .6, 'horizon-fog-blend': .6, 'fog-ground-blend': .75 }); } catch (e) { }
     map.setTerrain({ source: 'relieve', exaggeration: REL_EXAG });
     map.addSource('ruta', { type: 'geojson', lineMetrics: true, data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: t.puntos.map(p => [p[0], p[1]]) } } });
     map.addSource('tramo', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
@@ -244,9 +260,15 @@ function relPausar() { REL.play = false; cancelAnimationFrame(REL.raf); relBoton
    La foto y el topográfico solo se piden cuando se eligen. Con el topográfico se quitan los nombres del mapa base: ya trae los suyos. */
 const REL_MAPAS = [['mapa', 'Mapa'], ['sat', 'Satélite'], ['topo', 'Topo']];
 function relMapa() {
-  const map = REL.map, k = REL_MAPAS.some(m => m[0] === S.relMapa) ? S.relMapa : 'mapa'; if (!map || !map.getLayer('sat')) return;
+  // Sin haber elegido nunca, la foto aérea: es la que deja leer la montaña.
+  const map = REL.map, k = REL_MAPAS.some(m => m[0] === S.relMapa) ? S.relMapa : 'sat'; if (!map || !map.getLayer('sat')) return;
   map.setLayoutProperty('sat', 'visibility', k === 'sat' ? 'visible' : 'none'); map.setLayoutProperty('topo', 'visibility', k === 'topo' ? 'visible' : 'none');
-  (REL.rotulos || []).forEach(id => map.setLayoutProperty(id, 'visibility', k === 'topo' ? 'none' : 'visible'));
+  map.setLayoutProperty('sombras-sat', 'visibility', k === 'sat' ? 'visible' : 'none');
+  // Sobre la foto, solo los nombres de pueblos, agua y cumbres, en blanco: carreteras, escudos y comercios la tapan. El topográfico trae los suyos.
+  (REL.rotulos || []).forEach(({ id, lugar, color, halo }) => {
+    map.setLayoutProperty(id, 'visibility', k === 'topo' || (k === 'sat' && !lugar) ? 'none' : 'visible');
+    if (lugar) { map.setPaintProperty(id, 'text-color', k === 'sat' ? '#ffffff' : color); map.setPaintProperty(id, 'text-halo-color', k === 'sat' ? 'rgba(0,0,0,.7)' : halo); }
+  });
   const el = $('#rel-tipo'); el.hidden = false;
   el.innerHTML = REL_MAPAS.map(([v, l]) => `<button type="button" data-a="rel-mapa" data-v="${v}" aria-pressed="${k === v}">${l}</button>`).join('');
 }

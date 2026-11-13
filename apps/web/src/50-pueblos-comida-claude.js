@@ -277,7 +277,7 @@ const DET_PIDIENDO = new Set(), DET_PEDIDO = new Set(); // pidiendo ahora · ya 
 async function detalleAlAbrir(a) {
   if (!LIVE || S.modo !== 'vivo' || !DSET || DSET.fuente !== 'vivo' || DET_PEDIDO.has(a.id)) return;
   const det = DSET.det || (DSET.det = {}); const rutas = DSET.rutas || (DSET.rutas = {});
-  const falta = !det[a.id] || det[a.id].err || (det[a.id].v !== DET_V && SPORTS[a.dep].cardio); const faltaRuta = !(a.id in rutas) && a.km > 0.5 && SPORTS[a.dep].cardio;
+  const falta = !det[a.id] || det[a.id].err || (det[a.id].v !== DET_V && SPORTS[a.dep].cardio); const faltaRuta = !(a.id in rutas) && a.km > 0.5 && (SPORTS[a.dep].cardio || ['esqui', 'caminar'].includes(a.dep)); // también los días de esquí y las caminatas: tienen recorrido que ver en relieve
   if (!falta && !faltaRuta) return;
   DET_PEDIDO.add(a.id); DET_PIDIENDO.add(a.id); setTimeout(render);
   await Promise.all([

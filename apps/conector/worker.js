@@ -1716,10 +1716,11 @@ async function detalleCourse(env, userId, { course_id, puntos }) {
 /**
  * El recorrido punto a punto para el mapa en relieve: posición, km, altitud, pendiente, velocidad y pulso.
  * La altitud va suavizada (150 m) y la pendiente se mide en los 200 m de alrededor, igual que en el
- * análisis por terreno: punto a punto, el ruido del barómetro inventaría rampas. Como mucho `max` puntos.
+ * análisis por terreno: punto a punto, el ruido del barómetro inventaría rampas. Como mucho `max` puntos
+ * (todos los que da Garmin: en un día de esquí, cada giro cuenta).
  * Si las series no traen posición (aparatos antiguos), se usa la línea del mapa, sin pulso.
  */
-function trazadoDeActividad(details, max = 1200) {
+function trazadoDeActividad(details, max = 2000) {
 	const desc = details?.metricDescriptors || [];
 	const indice = (...claves) => { for (const c of claves) { const d = desc.find((x) => x.key === c); if (d) return d.metricsIndex; } return -1; };
 	const iLat = indice("directLatitude"), iLon = indice("directLongitude"), iDist = indice("sumDistance");
@@ -5760,10 +5761,10 @@ const RECURSOS_UI = [{
 		ui: {
 			prefersBorder: true,
 			// Los servidores de mapas son para el recorrido en relieve: Mapterhorn (altitud), OpenFreeMap (mapa base),
-			// Esri (foto aérea) y OpenTopoMap (topográfico).
+			// Esri (foto aérea), OpenTopoMap (topográfico) y OpenSnowMap (pistas de esquí).
 			csp: {
-				resourceDomains: ["https://fonts.googleapis.com", "https://fonts.gstatic.com", "https://tiles.mapterhorn.com", "https://tiles.openfreemap.org", "https://server.arcgisonline.com", "https://tile.opentopomap.org"],
-				connectDomains: ["https://tiles.mapterhorn.com", "https://tiles.openfreemap.org", "https://server.arcgisonline.com", "https://tile.opentopomap.org"],
+				resourceDomains: ["https://fonts.googleapis.com", "https://fonts.gstatic.com", "https://tiles.mapterhorn.com", "https://tiles.openfreemap.org", "https://server.arcgisonline.com", "https://tile.opentopomap.org", "https://tiles.opensnowmap.org"],
+				connectDomains: ["https://tiles.mapterhorn.com", "https://tiles.openfreemap.org", "https://server.arcgisonline.com", "https://tile.opentopomap.org", "https://tiles.opensnowmap.org"],
 			},
 			// El codigo de la app se carga de la web (ver metaApp).
 		},
