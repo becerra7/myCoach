@@ -93,6 +93,7 @@ function abrirRelieve(id) {
       <p class="rel-estado" id="rel-estado" role="status">Cargando el relieve…</p>
       <div class="mf-zoom rel-zoom" hidden><button type="button" aria-label="Acercar" data-a="rel-zoom" data-v="1">${ic('plus', 22)}</button><button type="button" aria-label="Alejar" data-a="rel-zoom" data-v="-1">${ic('minus', 22)}</button><button type="button" aria-label="Ver el recorrido entero" data-a="rel-entero">${ic('sync', 20)}</button></div>
       <div class="seg rel-tipo" id="rel-tipo" role="group" aria-label="Tipo de mapa" hidden></div>
+      <button type="button" class="rel-detalle" id="rel-detalle" data-a="rel-detalle" aria-pressed="false" hidden>Calles y sitios</button>
       <div class="rel-play" id="rel-play" hidden></div></div>
     <div class="rel-panel" id="rel-panel" hidden></div>`;
   app.append(el); requestAnimationFrame(() => el.classList.add('in')); el.querySelector('.close').focus();
@@ -148,7 +149,7 @@ function relMontar(t) {
       layout: { 'text-field': ['case', ['has', 'ele'], ['concat', ['coalesce', ['get', 'name'], ''], '\n', ['to-string', ['get', 'ele']], ' m'], ['coalesce', ['get', 'name'], '']], 'text-font': ['Noto Sans Italic'], 'text-size': 11, 'symbol-sort-key': ['get', 'rank'], 'text-padding': 6 },
       paint: { 'text-color': '#3b2f25', 'text-halo-color': 'rgba(255,255,255,.85)', 'text-halo-width': 1.4 } });
     REL.rotulos = [...simbolos, { id: 'cumbres', 'source-layer': 'mountain_peak' }].map(l => { const lugar = ['place', 'water_name', 'mountain_peak'].includes(l['source-layer']);
-      return { id: l.id, lugar, color: lugar ? map.getPaintProperty(l.id, 'text-color') || '#333333' : null, halo: lugar ? map.getPaintProperty(l.id, 'text-halo-color') || '#ffffff' : null }; });
+      return { id: l.id, lugar, color: map.getPaintProperty(l.id, 'text-color'), halo: map.getPaintProperty(l.id, 'text-halo-color') }; });
     // Cielo y calima en el horizonte: al inclinar la vista, lo lejano se difumina en vez de cortarse.
     try { map.setSky({ 'sky-color': '#7fb0dc', 'horizon-color': '#e4edf5', 'fog-color': '#e4edf5', 'sky-horizon-blend': .6, 'horizon-fog-blend': .6, 'fog-ground-blend': .75 }); } catch (e) { }
     map.setTerrain({ source: 'relieve', exaggeration: REL_EXAG });
@@ -264,13 +265,17 @@ function relMapa() {
   const map = REL.map, k = REL_MAPAS.some(m => m[0] === S.relMapa) ? S.relMapa : 'sat'; if (!map || !map.getLayer('sat')) return;
   map.setLayoutProperty('sat', 'visibility', k === 'sat' ? 'visible' : 'none'); map.setLayoutProperty('topo', 'visibility', k === 'topo' ? 'visible' : 'none');
   map.setLayoutProperty('sombras-sat', 'visibility', k === 'sat' ? 'visible' : 'none');
-  // Sobre la foto, solo los nombres de pueblos, agua y cumbres, en blanco: carreteras, escudos y comercios la tapan. El topográfico trae los suyos.
+  // Los edificios en 3D del mapa base son bloques blancos: sobre la foto o el topográfico estorban.
+  map.getStyle().layers.filter(l => l.type === 'fill-extrusion').forEach(l => map.setLayoutProperty(l.id, 'visibility', k === 'mapa' ? 'visible' : 'none'));
+  // Sobre la foto, por defecto solo los nombres de pueblos, agua y cumbres: limpia para la montaña. Con "Calles y sitios" (S.relDetalle)
+  // salen también calles, carreteras y lugares, para ver por dónde pasaste en un pueblo. Todo en blanco. El topográfico trae sus nombres.
   (REL.rotulos || []).forEach(({ id, lugar, color, halo }) => {
-    map.setLayoutProperty(id, 'visibility', k === 'topo' || (k === 'sat' && !lugar) ? 'none' : 'visible');
-    if (lugar) { map.setPaintProperty(id, 'text-color', k === 'sat' ? '#ffffff' : color); map.setPaintProperty(id, 'text-halo-color', k === 'sat' ? 'rgba(0,0,0,.7)' : halo); }
+    map.setLayoutProperty(id, 'visibility', k === 'topo' || (k === 'sat' && !lugar && !S.relDetalle) ? 'none' : 'visible');
+    map.setPaintProperty(id, 'text-color', k === 'sat' ? '#ffffff' : color); map.setPaintProperty(id, 'text-halo-color', k === 'sat' ? 'rgba(0,0,0,.75)' : halo);
   });
   const el = $('#rel-tipo'); el.hidden = false;
   el.innerHTML = REL_MAPAS.map(([v, l]) => `<button type="button" data-a="rel-mapa" data-v="${v}" aria-pressed="${k === v}">${l}</button>`).join('');
+  const det = $('#rel-detalle'); det.hidden = k !== 'sat'; det.setAttribute('aria-pressed', !!S.relDetalle);
 }
 
 /* ===== Medir un tramo: dos asas sobre el perfil y las medias de lo que queda entre ellas =====
@@ -337,6 +342,7 @@ function relTramoDedo(perfil) {
 }
 
 Object.assign(ACTIONS, {
+  'rel-detalle': () => { S.relDetalle = !S.relDetalle; save(); relMapa(); },
   'rel-mapa': el => { S.relMapa = el.dataset.v; save(); relMapa(); const b = $(`#rel-tipo [data-v="${S.relMapa}"]`); if (b) b.focus(); },
   'rel-tramo': () => { const t = REL.t; if (!t) return; if (REL.play) relPausar(); const n = t.puntos.length - 1, i0 = REL.i < n - 1 ? REL.i : 0;
     REL.tramo = [i0, Math.min(n, i0 + Math.max(2, Math.round(n / 5)))]; relPintar(); relBotones(); relTramoEncuadrar(); const r = $('#rel-t0'); if (r) r.focus({ preventScroll: true }); },

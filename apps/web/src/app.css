@@ -394,6 +394,7 @@ body.framed .toasts{top:50px}
 .trackmap{background:var(--card-2);border-radius:18px;overflow:hidden}
 .trackmap>svg{display:block;width:100%;height:auto}
 .trackmap .mp-cta{white-space:nowrap}
+.trackmap .mp-atr{position:absolute;left:8px;bottom:6px;font-size:11px;color:#fff;text-shadow:0 0 3px rgba(0,0,0,.9)}
 /* Recorrido en relieve (60-relieve.js): mapa 3D arriba, y abajo las cifras del punto, el perfil y la leyenda */
 .rel-view{flex:1;min-height:0;position:relative;background:var(--bg)}
 /* MapLibre pone position:relative en su contenedor; aquí manda el nuestro */
@@ -433,6 +434,11 @@ body.framed .toasts{top:50px}
 @container app (min-width:840px){.rel-tramo .fields{grid-template-columns:repeat(auto-fill,minmax(130px,1fr))}}
 .rel-tramo .field .v{font-size:22px;font-variant-numeric:tabular-nums;white-space:nowrap}
 .rel-tramo .field .v small{font-size:11px}
+.rel-detalle{position:absolute;left:12px;top:64px;z-index:2;display:inline-flex;align-items:center;gap:8px;min-height:var(--tap);padding:0 14px;border:0;border-radius:var(--r-ctl);background:var(--card);color:var(--label);font:inherit;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.2)}
+.rel-detalle[hidden]{display:none}
+/* El estado va con marca, no solo con color: casilla vacía o con ✓ */
+.rel-detalle::before{content:"";width:16px;height:16px;border:2px solid currentColor;border-radius:4px;box-sizing:border-box}
+.rel-detalle[aria-pressed="true"]::before{content:"✓";display:grid;place-items:center;font-size:12px;line-height:1;background:var(--label);color:var(--card);border-color:var(--label)}
 .rel-ext{width:12px;height:12px;background:#fff;border:3px solid #15191E;border-radius:2px}
 .relieve .rel-tipo{position:absolute;left:12px;top:12px;z-index:2;background:var(--card);box-shadow:0 4px 14px rgba(0,0,0,.2)}
 .relieve .rel-tipo button{min-height:40px;font-size:13px;padding:0 12px}

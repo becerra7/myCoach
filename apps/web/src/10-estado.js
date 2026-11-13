@@ -242,13 +242,19 @@ const sportDot = k => `<i style="background:${scol(k)}"></i>`;
 function distBar(z) { const t = z[0] + z[1] + z[2] || 1; return `<div class="dist" role="img" aria-label="${Math.round(z[0] / t * 100)} % suave, ${Math.round(z[1] / t * 100)} % medio, ${Math.round(z[2] / t * 100)} % duro"><i style="width:${z[0] / t * 100}%;background:var(--fondo)"></i><i style="width:${z[1] / t * 100}%;background:var(--tempo)"></i><i style="width:${z[2] / t * 100}%;background:var(--int)"></i></div>`; }
 function sportBar(dep) { const tot = Object.values(dep).reduce((a, b) => a + b, 0) || 1; return `<div class="sportbar" role="img" aria-label="${Object.entries(dep).map(([k, v]) => `${SPORTS[k].n} ${Math.round(v / tot * 100)} %`).join(', ')}">${SPORT_ORDER.filter(k => dep[k]).map(k => `<i style="width:${dep[k] / tot * 100}%;background:${scol(k)}" title="${SPORTS[k].n}: ${dur(dep[k])}"></i>`).join('')}</div><div class="legend2">${SPORT_ORDER.filter(k => dep[k]).map(k => `<span>${sportDot(k)}${SPORTS[k].n} ${dur(dep[k])}</span>`).join('')}</div>`; }
 function decodePoly(s) { let i = 0, lat = 0, lon = 0; const o = []; while (i < s.length) { for (const k of [0, 1]) { let r = 0, sh = 0, b; do { b = s.charCodeAt(i++) - 63; r |= (b & 31) << sh; sh += 5; } while (b >= 32); const d = r & 1 ? ~(r >> 1) : r >> 1; if (k) lon += d; else lat += d; } o.push([lon / 1e5, lat / 1e5]); } return o; }
+/* El recorrido de una actividad sobre la foto aérea (teselas de Esri como imágenes; sin motor de mapas, así no pesa).
+   El zoom es el mayor en el que cabe entero. Sin red, queda la línea sobre el fondo de la tarjeta. */
 function trackSvg(id) {
   const p = (DSET.rutas || {})[id]; if (!p) return '';
-  const pts = decodePoly(p); const xs = pts.map(q => q[0]), ys = pts.map(q => q[1]);
-  const k = Math.cos(ys[0] * Math.PI / 180); const minx = Math.min(...xs), maxx = Math.max(...xs), miny = Math.min(...ys), maxy = Math.max(...ys);
-  const W = 400, H = 220, pad = 16; const s = Math.min((W - 2 * pad) / ((maxx - minx) * k || 1), (H - 2 * pad) / ((maxy - miny) || 1));
-  const ox = (W - (maxx - minx) * k * s) / 2, oy = (H - (maxy - miny) * s) / 2;
-  const P = pts.map(([x, y]) => `${(ox + (x - minx) * k * s).toFixed(1)},${(oy + (maxy - y) * s).toFixed(1)}`);
-  const [sx0, sy0] = P[0].split(',');
-  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Recorrido"><polyline points="${P.join(' ')}" fill="none" stroke="var(--card)" stroke-width="7" stroke-linejoin="round" stroke-linecap="round"/><polyline points="${P.join(' ')}" fill="none" stroke="var(--tint)" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round"/><circle cx="${sx0}" cy="${sy0}" r="6" fill="var(--good)" stroke="var(--card)" stroke-width="2"/></svg>`;
+  const pts = decodePoly(p), W = 640, H = 352, pad = 40, R = Math.PI / 180;
+  const mx = lon => (lon + 180) / 360, my = lat => (1 - Math.log(Math.tan(lat * R) + 1 / Math.cos(lat * R)) / Math.PI) / 2;
+  const xs = pts.map(q => mx(q[0])), ys = pts.map(q => my(q[1])), x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  let z = 16; while (z > 3 && ((x1 - x0) * 256 * 2 ** z > W - 2 * pad || (y1 - y0) * 256 * 2 ** z > H - 2 * pad)) z--;
+  const k = 256 * 2 ** z, ox = (x0 + x1) / 2 * k - W / 2, oy = (y0 + y1) / 2 * k - H / 2;
+  let fotos = '';
+  for (let tx = Math.floor(ox / 256); tx * 256 < ox + W; tx++) for (let ty = Math.floor(oy / 256); ty * 256 < oy + H; ty++)
+    if (ty >= 0 && ty < 2 ** z) fotos += `<image href="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${ty}/${((tx % 2 ** z) + 2 ** z) % 2 ** z}" x="${(tx * 256 - ox).toFixed(1)}" y="${(ty * 256 - oy).toFixed(1)}" width="256.6" height="256.6"/>`;
+  const P = pts.map((q, i) => `${(xs[i] * k - ox).toFixed(1)},${(ys[i] * k - oy).toFixed(1)}`), [sx0, sy0] = P[0].split(',');
+  // Sobre la foto, el borde de la línea es blanco fijo: la foto no cambia con el tema.
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Recorrido sobre la foto aérea">${fotos}<polyline points="${P.join(' ')}" fill="none" stroke="#fff" stroke-width="10" stroke-linejoin="round" stroke-linecap="round"/><polyline points="${P.join(' ')}" fill="none" stroke="var(--brand)" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"/><circle cx="${sx0}" cy="${sy0}" r="9" fill="var(--good)" stroke="#fff" stroke-width="3"/></svg>`;
 }
