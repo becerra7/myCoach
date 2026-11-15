@@ -19,6 +19,8 @@ description: Cómo y cuándo usar las herramientas de myCoach/Garmin (coach_*, a
 | Tengo una cena, un viaje, una reunión… | `agenda_anotar` sin guardar → con su sí, `guardar=true` y, si choca, `coach_proponer` con `propuesta_plan` (2-3) |
 | ¿Cuándo puedo entrenar? | `agenda` (1); si ya llamaste a `coach_semana`, su agenda viene en cada día |
 | Revisar o cambiar la semana | `coach_semana` → `coach_proponer` (validar) → con su sí, `guardar=true` → `coach_semana` para verificar (4) |
+| ¿Cómo va mi plan? / ¿llego al reto? | `coach_temporada` (1): dónde está frente a lo esperado y qué conviene |
+| Montar o reajustar el plan de varias semanas, o dejar una sesión puesta a futuro | `coach_temporada` → `coach_temporada_guardar` (ver) → con su sí, `guardar=true` (3). Lo de esta semana y la siguiente sigue yendo por `coach_proponer` |
 | Primer mensaje de entreno de la conversación | `coach_perfil` (1, solo si no está en contexto). Si trae `por_conocer`, sigue `primeros-pasos` |
 | Analizar una actividad | `garmin_activities limit=3` → `garmin_activity_detail` (2); `intervals_actividad` solo si hace falta desacople o zonas; al acabar, `salida_guardar` (+1) |
 | Sueño, VFC, readiness, estrés de un día | `garmin_dia` (1; con `partes` si solo hace falta una cosa) |
@@ -47,7 +49,8 @@ Si `coach_hoy` trae `fuentes.sin_descanso: true`, su dispositivo no mide sueño 
 
 ## Escritura
 - Toda escritura (plan, Garmin, perfil) se valida y se confirma con el usuario antes; tras escribir, se relee una vez para verificar.
-- `coach_proponer` y `comida_proponer` siempre con `porque` en una frase: es el registro de decisiones.
+- `coach_proponer`, `coach_temporada_guardar` y `comida_proponer` siempre con `porque` en una frase: es el registro de decisiones.
+- Una sesión pre-programada (`coach_temporada_guardar`, `sesiones`) no está confirmada ni validada: nunca la presentes como plan cerrado.
 
 ## Presupuesto
 - Respuesta simple: ≤2 llamadas. Análisis: ≤5. Planificación semanal: ≤8.

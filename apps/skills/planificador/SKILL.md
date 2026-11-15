@@ -25,6 +25,15 @@ Antes de llamar herramientas, sigue la skill `mycoach-uso`.
 6. Propón con `coach_proponer` (validar), enseña, guarda con su sí y verifica con `coach_semana`.
 7. Si quiere también los menús: después de guardar los entrenos (la carga de cada comida sale de ellos), el nutricionista los propone con `comida_plan` → `comida_proponer`. Si cambias un entreno con menús ya puestos, mira en `comida_plan` si algún hidrato ha quedado fuera de su código.
 
+## Plan a futuro (temporada)
+El plan de varias semanas lo montas y lo reajustas tú; el motor solo lo guarda y dice dónde está frente a lo esperado.
+1. Antes de montarlo: su objetivo y su fecha, las horas que tiene de verdad y lo que viene haciendo (`coach_perfil`, `coach_semana anterior`, `coach_progreso`). Pregunta lo que falte.
+2. Semanas con `coach_temporada_guardar`: cada lunes con horas, días intensos, sesión larga, fuerza y fase. Sube poco a poco desde lo que hace hoy, una semana de descarga cada 3 o 4 y bajada antes del reto. Enséñalo (antes → después) y guarda solo con su sí.
+3. Sesiones concretas en días lejanos (una marcha, una salida ya quedada): van en `sesiones`. Quedan **pre-programadas, sin confirmar**: díselo así. No se validan hasta que su semana es esta o la siguiente.
+4. Al planificar una semana: `coach_semana` trae `objetivo_temporada` (lo que pide el plan esa semana) y `preprogramadas_sin_confirmar`. Úsalos como punto de partida y confírmalas con `coach_proponer` (ahí sí pasan las reglas) o descártalas preguntando.
+5. "¿Cómo voy?" → `coach_temporada`: di `donde_estas` en una frase y sigue `que_hacer`. Por detrás: no se recupera lo perdido; se reajusta lo que queda desde lo que hace de verdad, sin culpa. Por delante: mira cómo llega antes de subir.
+6. Reajustar es volver a llamar a `coach_temporada_guardar` solo con las semanas que cambian. Lo esperado de una semana pasada no se toca.
+
 ## Compromisos (cena, viaje, reunión, turno…)
 - "El martes tengo cena de 20 a 23" → `agenda_anotar` con `de`/`a` (sin guardar). Sin hora, es todo el día; una franja deja libre el resto.
 - Si choca, el motor ya trae `propuesta_plan`: enséñala como "He movido X al jueves porque tienes Y" (antes → después). Con su sí: `agenda_anotar guardar=true` y `coach_proponer` con esa propuesta y `guardar=true`.

@@ -270,3 +270,8 @@
   .v2 .v2-cols{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:12px 32px;align-items:start}
   .app[data-os][data-d2] #claude-top{display:inline-flex;border:0;background:var(--ink);color:var(--paper);border-radius:999px}
 }
+
+/* Tu plan a futuro: la semana en curso, marcada */
+.app[data-os][data-d2] .li.ahora{background:var(--fill)}
+.app[data-os][data-d2] .li .day small{text-transform:none;letter-spacing:0}
+.app[data-os][data-d2] .card>.tag{align-self:flex-start}

@@ -25,7 +25,7 @@ export const TOOLS = new Set([
   'app_leer', 'app_guardar',
   // El entrenador: el semáforo y las reglas del plan viven en el conector,
   // así la web y tu Claude deciden con el mismo método.
-  'coach_hoy', 'coach_semana', 'coach_perfil', 'coach_perfil_guardar', 'coach_proponer', 'coach_anotar', 'coach_progreso',
+  'coach_hoy', 'coach_semana', 'coach_temporada', 'coach_perfil', 'coach_perfil_guardar', 'coach_proponer', 'coach_anotar', 'coach_progreso',
   // Intervals.icu: la clave se manda una vez al conector, que la guarda cifrada.
   'intervals_estado', 'intervals_conectar', 'intervals_desconectar',
   'intervals_actividades', 'intervals_actividad', 'intervals_bienestar', 'intervals_curvas',

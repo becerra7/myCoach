@@ -22,7 +22,7 @@ function tabPlanV2() {
   else semana = `${nav}<div style="margin-bottom:12px">${avance}</div>${avisoChoques(w)}<ul class="dias">${days7(w).map(filaDia).join('')}</ul>`;
   const acciones = w >= SEM && !(w === PROX && !pl) ? `<div class="btns" style="padding:0 4px"><button class="btn tonal" type="button" data-a="v-encargo" data-v="0">Cambiarla con Claude</button>${w === PROX ? '<button class="link" type="button" data-a="replan">Rehacerla</button>' : ''}</div>` : '';
   const falta = cuentaAtras();
-  const pie = grupo2(fila2('Tu objetivo', esc(`${g.titulo || m.n}${g.fecha ? `, ${fDia(g.fecha)}` : ''}`), 'data-a="push" data-v="objetivo"', { valor: falta })
+  const pie = grupo2((typeof filaTemporada === 'function' ? filaTemporada() : '') + fila2('Tu objetivo', esc(`${g.titulo || m.n}${g.fecha ? `, ${fDia(g.fecha)}` : ''}`), 'data-a="push" data-v="objetivo"', { valor: falta })
     + fila2('Lo que ha cambiado tu entrenador', 'Los cambios del plan y su porqué', 'data-a="push" data-v="cambios"'));
   return { title: 'Calendario', html: `<div class="v2">${cab2('Calendario')}
     <div class="seg-row cal-sel" style="padding:0"><div class="seg2" role="group" aria-label="Ver">${[['sem', 'Semana'], ['mes', 'Mes']].map(([k, l]) => `<button type="button" data-a="cal-vista" data-v="${k}" aria-pressed="${V.calVista === k}">${l}</button>`).join('')}</div></div>

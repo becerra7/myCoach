@@ -556,7 +556,7 @@ const rpc = async (env, token, message) => {
 	check("un navegador en la raiz sigue viendo la pagina", (await (await get(env, "/")).text()).includes("<h1>"));
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("tools/list devuelve 54 herramientas", list.body.result.tools.length === 54);
+	check("tools/list devuelve 56 herramientas", list.body.result.tools.length === 56);
 	check("app_guardar se anuncia como escritura", anot0(list).app_guardar.readOnlyHint === false);
 	{
 		const call = (name, args) => rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name, arguments: args } });
@@ -1404,7 +1404,7 @@ const rpc = async (env, token, message) => {
 	check("el token de acceso vale sin leer del KV", init.body.result?.serverInfo?.name === "garmin");
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("las herramientas se listan igualmente", list.body.result.tools.length === 54);
+	check("las herramientas se listan igualmente", list.body.result.tools.length === 56);
 
 	// Y el dato que si vive en KV avisa en vez de mentir
 	const call = await rpc(env, tokens.access_token, {
@@ -1927,6 +1927,50 @@ const rpc = async (env, token, message) => {
 	const hecha = semPasada.dias.flatMap((d) => d.hecho)[0];
 	check("lo hecho en la semana trae velocidad, pulso y eficiencia", hecha && hecha.velocidad_kmh > 0 && hecha.fc_media === 135 && hecha.metros_por_latido > 0, JSON.stringify(hecha));
 
+	// Temporada: el plan a futuro lo monta Claude; el motor lo guarda y dice donde estas frente a lo esperado
+	{
+		const lunesT = mas(proxLunes, -7);
+		const sinT = await llamar(ana, "coach_temporada");
+		check("temporada: sin plan dice como montarlo", sinT.hay_plan === false && /coach_temporada_guardar/.test(sinT.como), JSON.stringify(sinT).slice(0, 200));
+		check("temporada: lo esperado de una semana pasada no se cambia",
+			Boolean((await llamar(ana, "coach_temporada_guardar", { semanas: { [mas(lunesT, -7)]: { horas: 6 } }, porque: "x" })).error));
+		check("temporada: una semana necesita sus horas",
+			Boolean((await llamar(ana, "coach_temporada_guardar", { semanas: { [lunesT]: { intensos: 2 } }, porque: "x" })).error));
+		const cerca = await llamar(ana, "coach_temporada_guardar", { sesiones: { [proxLunes]: { dep: "bici", t: "int", d: "Series", min: 60 } }, porque: "x" });
+		check("temporada: lo de esta semana y la siguiente va por coach_proponer", /coach_proponer/.test(cerca.error || ""), JSON.stringify(cerca).slice(0, 200));
+		const planT = { nombre: "Reto de prueba", semanas: { [lunesT]: { horas: 8, intensos: 2, larga_min: 180, fuerza: 1, fase: "base" }, [mas(proxLunes, 2)]: { horas: 9 }, [mas(proxLunes, 7)]: { horas: 5, fase: "descarga" } },
+			sesiones: { [mas(proxLunes, 9)]: { dep: "bici", t: "int", d: "Marcha", min: 300 }, [mas(proxLunes, 10)]: { dep: "bici", t: "int", d: "Otra seguida", min: 200 } }, porque: "Plan del reto" };
+		const prevT = await llamar(ana, "coach_temporada_guardar", planT);
+		check("temporada: sin guardar=true solo enseña el antes y el despues", prevT.guardado === false && prevT.cambios.length === 5 && prevT.resumen.semanas === 3 && prevT.resumen.horas_totales === 22, JSON.stringify(prevT).slice(0, 300));
+		check("temporada: la vista previa no guarda nada", (await llamar(ana, "coach_temporada")).hay_plan === false);
+		const okT = await llamar(ana, "coach_temporada_guardar", { ...planT, guardar: true });
+		check("temporada: con el si, se guarda", okT.guardado === true && okT.resumen.preprogramadas === 2);
+		const t = await llamar(ana, "coach_temporada");
+		check("temporada: las semanas, con la fecha llevada a su lunes", t.hay_plan && t.semanas_totales === 3 && t.semana_actual === 1 && t.semanas[1].lunes === proxLunes && t.nombre === "Reto de prueba", JSON.stringify(t).slice(0, 300));
+		check("temporada: la semana en curso trae lo hecho frente a lo esperado", typeof t.semanas[0].real.horas === "number" && t.semanas[0].esperado.larga_min === 180 && !t.semanas[1].real);
+		check("temporada: con menos de dos semanas cerradas no se juzga", t.donde_estas.estado === "empezando");
+		check("temporada: las sesiones futuras quedan pre-programadas, sin confirmar y sin validar (dos intensas seguidas se aceptan)",
+			t.preprogramadas.length === 2 && t.preprogramadas.every((x) => x.confirmada === false && x.toca_confirmar === false) && t.preprogramadas[0].sesion.d === "Marcha");
+		check("temporada: el cambio queda en el historial", (await llamar(ana, "app_leer", { doc: "coach/decisiones" })).at(-1).tipo === "temporada");
+		check("temporada: coach_semana trae el objetivo de esa semana", (await llamar(ana, "coach_semana", { semana: "siguiente" })).objetivo_temporada?.horas === 9);
+		check("temporada: repetir lo mismo no cambia nada", (await llamar(ana, "coach_temporada_guardar", { semanas: { [proxLunes]: { horas: 9 } }, porque: "x", guardar: true })).sin_cambios === true);
+		// Donde estas: tres semanas cerradas con mucho mas (o mucho menos) de lo esperado
+		const docT = await llamar(ana, "app_leer", { doc: "coach/temporada" });
+		const pasadas = (h) => ({ ...docT, semanas: { [mas(lunesT, -21)]: { horas: h }, [mas(lunesT, -14)]: { horas: h }, [mas(lunesT, -7)]: { horas: h }, ...docT.semanas } });
+		await llamar(ana, "app_guardar", { doc: "coach/temporada", datos: pasadas(60) });
+		const atras = await llamar(ana, "coach_temporada");
+		check("temporada: por detras de lo esperado, sin pedir recuperar lo perdido",
+			atras.donde_estas.estado === "por_detras" && atras.hasta_hoy.semanas_cerradas === 3 && atras.hasta_hoy.horas_esperadas === 180 && /No intentes recuperar/.test(atras.que_hacer) && atras.semana_actual === 4, JSON.stringify(atras.donde_estas));
+		await llamar(ana, "app_guardar", { doc: "coach/temporada", datos: pasadas(0.1) });
+		const delante = await llamar(ana, "coach_temporada");
+		check("temporada: por delante si se ha hecho mucho mas", delante.hasta_hoy.horas_hechas > 0.4 ? delante.donde_estas.estado === "por_delante" : true, JSON.stringify(delante.hasta_hoy));
+		// Reajustar: quitar una semana y una sesion; y borrar el plan
+		const reaj = await llamar(ana, "coach_temporada_guardar", { semanas: { [mas(proxLunes, 7)]: null }, sesiones: { [mas(proxLunes, 10)]: null }, porque: "Reajuste", guardar: true });
+		check("temporada: reajustar quita o cambia solo lo que se pasa", reaj.guardado && reaj.cambios.length === 2 && reaj.resumen.preprogramadas === 1);
+		const fin = await llamar(ana, "coach_temporada_guardar", { borrar_todo: true, porque: "Fuera", guardar: true });
+		check("temporada: se puede quitar entera", fin.guardado && (await llamar(ana, "coach_temporada")).hay_plan === false);
+	}
+
 	// Perfil
 	check("el perfil empieza vacio", (await llamar(ana, "coach_perfil")).vacio === true);
 	await llamar(ana, "coach_perfil_guardar", { cambios: { objetivo: { evento: "Quebrantahuesos", fecha: "2027-06-19" }, lesiones: [{ zona: "rodilla", estado: "activa" }], hackeo: 1 } });
@@ -2245,7 +2289,7 @@ const rpc = async (env, token, message) => {
 	const viejas = ["garmin_sleep", "garmin_hrv", "garmin_daily_summary", "garmin_body_battery", "garmin_training_readiness", "garmin_course_detail", "fuerza_entrenos", "cardio_entrenos", "fuerza_enviar_garmin", "cardio_enviar_garmin"];
 	check("las herramientas juntadas ya no existen", !tools.some((t) => viejas.includes(t.name)));
 	const visibles = tools.filter((t) => !t._meta?.ui?.visibility || t._meta.ui.visibility.includes("model"));
-	check("Claude ve 46 herramientas", visibles.length === 46, String(visibles.length));
+	check("Claude ve 48 herramientas", visibles.length === 48, String(visibles.length));
 }
 
 // ── 13. Intervals.icu: clave cifrada, actividades, series, bienestar y curvas ──

@@ -4549,6 +4549,112 @@ function resumenSemana(lunes, plan, actividades, hist, objetivo, hoy) {
 	};
 }
 
+// ──────────────────────────── Temporada: el plan a futuro ────────────────────────────
+// Decisión 34 (docs/PLAN-COACH.md). El plan de varias semanas lo monta y lo reajusta tu Claude; el motor
+// lo guarda, calcula dónde estás frente a lo esperado y lo deja ver en la app. Cada semana lleva su objetivo
+// (horas, días intensos, sesión larga, fuerza). Además se pueden dejar sesiones concretas en días futuros:
+// quedan PRE-PROGRAMADAS, sin confirmar y sin pasar por las reglas, hasta que su semana entra en el plan
+// de verdad (esta semana o la siguiente) con coach_proponer.
+const TEMPORADA_DOC = "coach/temporada";
+const TEMPORADA_MAX_SEMANAS = 60;
+const TEMPORADA_MAX_SESIONES = 120;
+
+function objetivoSemanaLimpio(x) {
+	if (!x || typeof x !== "object" || Array.isArray(x)) throw new HttpError(400, "Cada semana es un objeto { fase, horas, intensos, larga_min, fuerza, nota }.");
+	const num = (v, min, max, nombre) => {
+		if (v == null || v === "") return undefined;
+		const n = Number(v);
+		if (!Number.isFinite(n) || n < min || n > max) throw new HttpError(400, `${nombre}: entre ${min} y ${max}.`);
+		return n;
+	};
+	const limpio = {
+		fase: x.fase == null ? undefined : String(x.fase).trim().slice(0, 24) || undefined,
+		horas: num(x.horas, 0, 40, "horas"),
+		intensos: num(x.intensos, 0, 7, "intensos"),
+		larga_min: num(x.larga_min, 0, 720, "larga_min"),
+		fuerza: num(x.fuerza, 0, 7, "fuerza"),
+		nota: x.nota == null ? undefined : String(x.nota).trim().slice(0, 160) || undefined,
+	};
+	for (const k of Object.keys(limpio)) if (limpio[k] === undefined) delete limpio[k];
+	if (limpio.horas != null) limpio.horas = round(limpio.horas, 1);
+	for (const k of ["intensos", "larga_min", "fuerza"]) if (limpio[k] != null) limpio[k] = Math.round(limpio[k]);
+	if (limpio.horas == null) throw new HttpError(400, "Cada semana necesita al menos sus horas.");
+	return limpio;
+}
+
+/** Lo hecho en una semana, con las mismas medidas que su objetivo. */
+function realDeSemana(lunes, actividades) {
+	const filas = actividades.filter((a) => lunesDe(a.start_date) === lunes).map(metricasFila);
+	const cardio = filas.filter((h) => DEPORTES_ENTRENABLES.has(h.deporte));
+	return {
+		horas: round(filas.reduce((s, h) => s + h.min, 0) / 60, 1),
+		intensos: filas.filter((h) => h.intensidad === "int").length,
+		larga_min: Math.max(0, ...cardio.map((h) => h.min)),
+		fuerza: filas.filter((h) => h.deporte === "fuerza").length,
+		actividades: filas.length,
+	};
+}
+
+const textoObjetivoSemana = (o) => !o ? "sin objetivo" : [`${o.horas} h`, o.intensos != null ? `${o.intensos} intenso${o.intensos === 1 ? "" : "s"}` : "", o.larga_min ? `largo de ${o.larga_min} min` : "", o.fuerza != null ? `${o.fuerza} de fuerza` : "", o.fase || ""].filter(Boolean).join(", ");
+const textoSesion = (s) => !s ? "nada" : s.t === "descanso" ? "descanso" : `${s.d || s.t}${s.min ? ` (${s.min} min)` : ""}`;
+
+/**
+ * La temporada vista desde hoy: cada semana con lo esperado y, si ya ha pasado o está en curso, lo hecho;
+ * el acumulado de las semanas cerradas y dónde estás. No reajusta nada: dice qué conviene y lo propone quien habla.
+ */
+function vistaTemporada(t, actividades, hoy, planCercano = {}) {
+	const lunesHoy = lunesDe(hoy), finCerca = sumaDias(lunesHoy, 13);
+	const lunesOrden = Object.keys(t.semanas || {}).sort();
+	const semanas = lunesOrden.map((l, i) => {
+		const esperado = t.semanas[l], estado = l < lunesHoy ? "hecha" : l === lunesHoy ? "en_curso" : "futura";
+		const fila = { lunes: l, n: i + 1, estado, esperado };
+		if (estado !== "futura") {
+			fila.real = realDeSemana(l, actividades);
+			fila.pct_horas = esperado.horas > 0 ? Math.round((fila.real.horas / esperado.horas) * 100) : null;
+		}
+		return fila;
+	});
+	const cerradas = semanas.filter((s) => s.estado === "hecha");
+	const suma = (lista, f) => round(lista.reduce((a, s) => a + (f(s) || 0), 0), 1);
+	const hEsp = suma(cerradas, (s) => s.esperado.horas), hReal = suma(cerradas, (s) => s.real.horas);
+	const largas = cerradas.filter((s) => s.esperado.larga_min);
+	const hasta_hoy = {
+		semanas_cerradas: cerradas.length,
+		horas_esperadas: hEsp, horas_hechas: hReal, pct_horas: hEsp > 0 ? Math.round((hReal / hEsp) * 100) : null,
+		intensos_esperados: suma(cerradas, (s) => s.esperado.intensos), intensos_hechos: suma(cerradas, (s) => s.real.intensos),
+		fuerza_esperada: suma(cerradas, (s) => s.esperado.fuerza), fuerza_hecha: suma(cerradas, (s) => s.real.fuerza),
+		// Una sesión larga cuenta como hecha si llega al 85 % de lo previsto.
+		largas_previstas: largas.length, largas_hechas: largas.filter((s) => s.real.larga_min >= s.esperado.larga_min * 0.85).length,
+	};
+	// Con menos de dos semanas cerradas no se juzga. El margen es el mismo que usan las reglas de la semana (±15 %).
+	const ult = cerradas.slice(-2), ultEsp = suma(ult, (s) => s.esperado.horas), ultReal = suma(ult, (s) => s.real.horas);
+	let estado = "empezando", texto = "Aún no hay dos semanas cerradas del plan: es pronto para comparar.", que_hacer = "Nada que reajustar todavía.";
+	if (cerradas.length >= 2 && hEsp > 0) {
+		const r = hReal / hEsp, base = `Llevas el ${hasta_hoy.pct_horas} % de las horas previstas en ${cerradas.length} semanas (${hReal} de ${hEsp} h)`;
+		if (r < 0.85) {
+			estado = "por_detras"; texto = `${base}: vas por detrás de lo esperado.`;
+			que_hacer = "No intentes recuperar lo perdido. Propón reajustar las semanas que quedan partiendo de lo que hace de verdad " +
+				`(sus dos últimas semanas: ${ultReal} de ${ultEsp} h) y subiendo poco a poco; pregunta antes qué le ha frenado. Enséñalo con coach_temporada_guardar (guardar=false) y guarda con su sí.`;
+		} else if (r > 1.15) {
+			estado = "por_delante"; texto = `${base}: vas por delante de lo esperado.`;
+			que_hacer = "Comprueba cómo llega (coach_hoy, coach_semana): si está fresco, puedes proponer subir un poco las semanas que quedan; si va cargado, adelanta una semana de descarga. Enséñalo antes de guardar.";
+		} else { estado = "en_linea"; texto = `${base}: vas según lo esperado.`; que_hacer = "No hace falta reajustar. Si quiere, repasa las semanas que vienen."; }
+	}
+	const pre = Object.keys(t.sesiones || {}).filter((f) => f >= hoy).sort().map((f) => ({
+		fecha: f, dia: diaDe(f), sesion: t.sesiones[f], confirmada: false,
+		// Cuando su semana ya es esta o la siguiente, toca confirmarla (o descartarla) con coach_proponer.
+		toca_confirmar: f <= finCerca && !planCercano[f],
+	}));
+	const actual = semanas.find((s) => s.estado === "en_curso") || null;
+	return {
+		hay_plan: true, nombre: t.nombre || null, objetivo: t.objetivo || null,
+		desde: lunesOrden[0] || null, hasta: lunesOrden.length ? sumaDias(lunesOrden.at(-1), 6) : null,
+		semanas_totales: semanas.length, semana_actual: actual ? actual.n : null, semanas_restantes: semanas.filter((s) => s.estado === "futura").length,
+		donde_estas: { estado, texto }, hasta_hoy, que_hacer,
+		semanas, preprogramadas: pre, por_confirmar: pre.filter((p) => p.toca_confirmar).length,
+	};
+}
+
 const esquemaSesion = {
 	type: ["object", "null"],
 	description: "Sesion del dia, o null para dejarlo libre.",
@@ -4617,12 +4723,13 @@ const COACH_TOOLS = {
 			// Lo de Garmin es de hoy: vale para revisar esta semana y para planificar la siguiente.
 			const conGarmin = lunesDe(ref) >= lunesHoy;
 			const lunes = lunesDe(ref);
-			const [estadoApp, perfil, hist, estadoG, agenda] = await Promise.all([
+			const [estadoApp, perfil, hist, estadoG, agenda, temporada] = await Promise.all([
 				leerDoc(env, userId, "estado/app"),
 				leerDoc(env, userId, "atleta/perfil"),
 				historico(env, userId),
 				conGarmin ? apiGet(env, userId, `/metrics-service/metrics/trainingstatus/aggregated/${hoy}`).catch(() => null) : null,
 				leerAgenda(env, userId, lunes, 7).catch(() => ({ porDia: {}, calendario: { conectado: false } })),
+				leerDoc(env, userId, TEMPORADA_DOC),
 			]);
 			const objetivo = objetivoDe(estadoApp);
 			const plan = planCompleto(estadoApp);
@@ -4645,8 +4752,117 @@ const COACH_TOOLS = {
 				calendario: agenda.calendario,
 				...(conGarmin ? avisosGarmin(estadoGarmin(estadoG)) : {}),
 				siguiente_semana_planificada: semanaDe(sumaDias(lunes, 7)).some((f) => plan[f]),
+				// Del plan a futuro (coach_temporada): lo que pide esta semana y lo pre-programado en ella que aun no es plan.
+				...(temporada?.semanas?.[lunes] ? { objetivo_temporada: temporada.semanas[lunes] } : {}),
+				...(() => { const pre = semanaDe(lunes).filter((f) => f >= hoy && temporada?.sesiones?.[f] && !plan[f]).map((f) => ({ fecha: f, dia: diaDe(f), sesion: temporada.sesiones[f] }));
+					return pre.length ? { preprogramadas_sin_confirmar: pre } : {}; })(),
 				forma: forma && { forma_ctl: forma.ctl, fatiga_atl: forma.atl, frescura_tsb: forma.tsb, lectura: lecturaFrescura(forma.tsb) },
 			};
+		},
+	},
+
+	coach_temporada: {
+		title: "Entrenador: mi plan a futuro",
+		description:
+			"El plan de varias semanas (temporada) y donde esta frente a lo esperado: cada semana con su objetivo (horas, dias intensos, " +
+			"sesion larga, fuerza, fase) y lo hecho en las que ya han pasado, el acumulado, donde_estas (en_linea, por_detras, por_delante) " +
+			"y que_hacer. Trae tambien las sesiones PRE-PROGRAMADAS en dias futuros: no estan confirmadas ni validadas; cuando " +
+			"toca_confirmar=true (su semana ya es esta o la siguiente) propongalas con coach_proponer o descartelas. " +
+			"Uselo cuando pregunte como va su plan o su preparacion, antes de planificar una semana y antes de reajustar. Sin plan, dice como montarlo.",
+		schema: { type: "object", properties: {} },
+		run: async (env, userId) => {
+			const hoy = fechaLocal();
+			const [t, estadoApp, hist] = await Promise.all([leerDoc(env, userId, TEMPORADA_DOC), leerDoc(env, userId, "estado/app"), historico(env, userId)]);
+			if (!t || !Object.keys(t.semanas || {}).length) {
+				const pre = Object.keys(t?.sesiones || {}).filter((f) => f >= hoy).sort().map((f) => ({ fecha: f, dia: diaDe(f), sesion: t.sesiones[f], confirmada: false }));
+				return {
+					hay_plan: false, objetivo_app: objetivoDe(estadoApp), preprogramadas: pre,
+					como: "Aun no hay plan a futuro. Preguntele su objetivo y su fecha, cuantas horas tiene de verdad y que ha hecho estas semanas (coach_semana, coach_progreso); " +
+						"proponga las semanas con coach_temporada_guardar (guardar=false), enseñelas y guarde con su si.",
+				};
+			}
+			return vistaTemporada(t, hist.actividades, hoy, planCompleto(estadoApp));
+		},
+	},
+
+	coach_temporada_guardar: {
+		title: "Entrenador: guardar o reajustar el plan a futuro",
+		write: true,
+		description:
+			"Crea o reajusta el plan de varias semanas. 'semanas': mapa lunes AAAA-MM-DD -> { horas, intensos, larga_min, fuerza, fase, nota } " +
+			"(o null para quitar esa semana); solo de esta semana en adelante: lo esperado de una semana pasada no se cambia. " +
+			"'sesiones': mapa fecha -> sesion { dep, t, d, min } (o null para quitarla) para dejar PRE-PROGRAMADA una sesion en un dia " +
+			"posterior a la semana que viene: no se valida con las reglas ni cuenta como plan hasta confirmarla con coach_proponer. " +
+			"Solo cambia lo que pase; el resto del plan se queda. Con guardar=false (por defecto) devuelve el antes y el despues: " +
+			"enseñelo y llame otra vez con guardar=true cuando diga que si. borrar_todo=true quita el plan entero. " +
+			"Usted decide las semanas (base, construccion, descarga cada 3-4 semanas, bajada antes del reto): el motor no las genera.",
+		schema: {
+			type: "object",
+			properties: {
+				nombre: { type: "string", description: "Nombre corto del plan, p. ej. 'Quebrantahuesos 2027'." },
+				objetivo: { type: "string", description: "Para que es, en una frase." },
+				semanas: { type: "object", description: "Lunes AAAA-MM-DD -> objetivo de la semana, o null.", additionalProperties: { type: ["object", "null"], properties: {
+					horas: { type: "number" }, intensos: { type: "integer" }, larga_min: { type: "integer", description: "Minutos de la sesion mas larga." },
+					fuerza: { type: "integer" }, fase: { type: "string", description: "base, construccion, pico, descarga, puesta a punto..." }, nota: { type: "string" } } } },
+				sesiones: { type: "object", description: "Fecha AAAA-MM-DD -> sesion pre-programada { dep, t, d, min } como en coach_proponer, o null.", additionalProperties: { type: ["object", "null"] } },
+				porque: { type: "string", description: "Motivo en una frase; queda en el historial de cambios." },
+				guardar: { type: "boolean", description: "true solo cuando el usuario ya ha dicho que si." },
+				borrar_todo: { type: "boolean" },
+			},
+			required: ["porque"],
+		},
+		run: async (env, userId, { nombre, objetivo, semanas, sesiones, porque, guardar = false, borrar_todo = false } = {}) => {
+			const hoy = fechaLocal(), lunesHoy = lunesDe(hoy), finCerca = sumaDias(lunesHoy, 13), tope = sumaDias(lunesHoy, 7 * TEMPORADA_MAX_SEMANAS);
+			const [actual, estadoApp] = await Promise.all([leerDoc(env, userId, TEMPORADA_DOC), leerDoc(env, userId, "estado/app")]);
+			const antes = { nombre: actual?.nombre, objetivo: actual?.objetivo, semanas: { ...(actual?.semanas || {}) }, sesiones: { ...(actual?.sesiones || {}) } };
+			const despues = borrar_todo ? { semanas: {}, sesiones: {} } : structuredClone(antes);
+			const cambios = [];
+			if (!borrar_todo) {
+				if (nombre != null) despues.nombre = String(nombre).trim().slice(0, 60) || undefined;
+				if (objetivo != null) despues.objetivo = String(objetivo).trim().slice(0, 160) || undefined;
+				for (const [k, v] of Object.entries(semanas && typeof semanas === "object" && !Array.isArray(semanas) ? semanas : {})) {
+					if (!/^\d{4}-\d{2}-\d{2}$/.test(k)) throw new HttpError(400, `Fecha no valida: ${k}`);
+					const l = lunesDe(k);
+					if (l < lunesHoy) throw new HttpError(400, `La semana del ${l} ya ha pasado: lo esperado de una semana pasada no se cambia.`);
+					if (l > tope) throw new HttpError(400, `El plan llega como mucho a ${TEMPORADA_MAX_SEMANAS} semanas vista.`);
+					const nueva = v == null ? null : objetivoSemanaLimpio(v);
+					if (JSON.stringify(nueva) === JSON.stringify(despues.semanas[l] ?? null)) continue;
+					cambios.push({ fecha: l, antes: `Semana: ${textoObjetivoSemana(despues.semanas[l])}`, despues: `Semana: ${nueva ? textoObjetivoSemana(nueva) : "fuera del plan"}` });
+					if (nueva) despues.semanas[l] = nueva; else delete despues.semanas[l];
+				}
+				const dep = (estadoApp?.sports || []).find((x) => DEPORTES_ENTRENABLES.has(x));
+				for (const [f, v] of Object.entries(sesiones && typeof sesiones === "object" && !Array.isArray(sesiones) ? sesiones : {})) {
+					if (!/^\d{4}-\d{2}-\d{2}$/.test(f)) throw new HttpError(400, `Fecha no valida: ${f}`);
+					if (v != null && f <= finCerca) throw new HttpError(400, `El ${f} es de esta semana o de la siguiente: eso ya es plan de verdad, use coach_proponer.`);
+					if (f > sumaDias(tope, 6)) throw new HttpError(400, `Demasiado lejos: como mucho ${TEMPORADA_MAX_SEMANAS} semanas vista.`);
+					let nueva = null;
+					if (v != null) {
+						nueva = normalizarSesion(v, dep) || { dep: v.dep, t: v.t, d: String(v.d || v.t).slice(0, 120), min: Math.round(Number(v.min) || 0) };
+						if (!(nueva.min >= 0 && nueva.min <= 600)) throw new HttpError(400, `Duracion no valida el ${f}: ${nueva.min} min.`);
+					}
+					if (JSON.stringify(nueva) === JSON.stringify(despues.sesiones[f] ?? null)) continue;
+					cambios.push({ fecha: f, antes: `Pre-programada: ${textoSesion(despues.sesiones[f])}`, despues: `Pre-programada: ${textoSesion(nueva)}` });
+					if (nueva) despues.sesiones[f] = nueva; else delete despues.sesiones[f];
+				}
+				// Lo pre-programado que ya ha pasado sin confirmarse no se arrastra.
+				for (const f of Object.keys(despues.sesiones)) if (f < hoy) delete despues.sesiones[f];
+			} else if (Object.keys(antes.semanas).length || Object.keys(antes.sesiones).length) {
+				cambios.push({ fecha: hoy, antes: `Plan de ${Object.keys(antes.semanas).length} semanas`, despues: "Sin plan a futuro" });
+			}
+			if (Object.keys(despues.semanas).length > TEMPORADA_MAX_SEMANAS) throw new HttpError(400, `Como mucho ${TEMPORADA_MAX_SEMANAS} semanas.`);
+			if (Object.keys(despues.sesiones).length > TEMPORADA_MAX_SESIONES) throw new HttpError(400, `Como mucho ${TEMPORADA_MAX_SESIONES} sesiones pre-programadas.`);
+			const cambiaTexto = !borrar_todo && (despues.nombre !== antes.nombre || despues.objetivo !== antes.objetivo);
+			if (!cambios.length && !cambiaTexto) return { guardado: false, sin_cambios: true, texto: "Eso ya es lo que hay en el plan." };
+			const lunesOrden = Object.keys(despues.semanas).sort();
+			const resumen = {
+				semanas: lunesOrden.length, desde: lunesOrden[0] || null, hasta: lunesOrden.length ? sumaDias(lunesOrden.at(-1), 6) : null,
+				horas_totales: round(lunesOrden.reduce((a, l) => a + despues.semanas[l].horas, 0), 1),
+				preprogramadas: Object.keys(despues.sesiones).length,
+			};
+			if (!guardar) return { guardado: false, cambios, resumen, siguiente: "Enseñe estos cambios (antes y despues) y, si dice que si, llame de nuevo con guardar=true. Las sesiones pre-programadas no estan validadas: digaselo." };
+			await guardarDoc(env, userId, TEMPORADA_DOC, { ...despues, creado: actual?.creado || new Date().toISOString(), actualizado: new Date().toISOString() });
+			await anadirADoc(env, userId, "coach/decisiones", { at: new Date().toISOString(), fecha: hoy, tipo: "temporada", cambios: cambios.slice(0, 40), porque: String(porque || "").slice(0, 200) });
+			return { guardado: true, cambios, resumen, siguiente: "Digale que ya lo tiene en la app, en Calendario > Tu plan a futuro." };
 		},
 	},
 
@@ -4763,6 +4979,13 @@ const COACH_TOOLS = {
 			}
 			await guardarDoc(env, userId, "estado/app", { ...(estadoApp || {}), plan: planApp, next: Object.keys(nextApp).length ? nextApp : null });
 			await anadirADoc(env, userId, "coach/decisiones", { at: new Date().toISOString(), fecha: hoy, cambios, porque: String(porque || "").slice(0, 200) });
+			// Lo pre-programado en esos dias ya esta decidido (confirmado o cambiado): deja de estar pendiente.
+			const temporada = await leerDoc(env, userId, TEMPORADA_DOC);
+			if (temporada?.sesiones && fechas.some((f) => temporada.sesiones[f])) {
+				const sesionesT = { ...temporada.sesiones };
+				for (const f of fechas) delete sesionesT[f];
+				await guardarDoc(env, userId, TEMPORADA_DOC, { ...temporada, sesiones: sesionesT });
+			}
 			// El semaforo guardado describia el plan viejo.
 			if (hoyGuardado && fechas.includes(hoy)) await env.GARMIN.delete(appKey(userId, "coach/hoy"));
 			return { guardado: true, avisos: resultado.flatMap((r) => r.avisos), semanas: resultado.map((r) => r.semana) };
