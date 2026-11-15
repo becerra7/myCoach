@@ -46,7 +46,8 @@ Lo que no tienen Garmin Connect ni otras apps, todo a la vez:
 - Castellano de España, tuteando, frases cortas; los botones dicen lo que pasa.
 - Un único HTML por destino (web, Claude); sin framework. Tokens de color, radio y tipografía en `apps/web/src/app.css`.
 - Avisos push en la web: el semáforo de la mañana y, el domingo, semana sin plan o sin menús (ver la decisión 23 de `docs/PLAN-COACH.md`).
-- Sin decidir: suscripción para quien no tenga Claude; enlaces a contenido que explique las métricas.
+- Android: una app mínima (`apps/android`) con el widget de Hoy; no está en ninguna tienda.
+- Sin decidir: suscripción para quien no tenga Claude. La explicación de cada métrica ya vive en la app (Insights, pantalla de cada métrica).
 
 ## Brand Commitments
 

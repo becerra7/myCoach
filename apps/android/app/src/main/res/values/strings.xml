@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app">myCoach</string>
+    <string name="widget_nombre">Hoy</string>
+    <string name="widget_desc">Qué toca hoy y por qué, de un vistazo</string>
+    <string name="w_cargando">Leyendo tu día…</string>
+    <string name="w_entrar_t">Entra en myCoach</string>
+    <string name="w_entrar_s">Toca para abrir la app y entrar con tu cuenta. Después, el widget se rellena solo.</string>
+    <string name="w_sin_t">Sin conexión</string>
+    <string name="w_sin_s">No he podido leer tu día. Toca para abrir myCoach.</string>
+    <string name="sin_red_t">No hay conexión</string>
+    <string name="sin_red_s">myCoach necesita internet para leer tu Garmin.</string>
+    <string name="reintentar">Volver a probar</string>
+</resources>

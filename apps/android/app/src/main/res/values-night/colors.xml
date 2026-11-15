@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="paper">#0F1613</color>
+    <color name="surface">#17201B</color>
+    <color name="ink">#E6ECE8</color>
+    <color name="ink2">#A9B4AE</color>
+    <color name="fill">#222C27</color>
+    <color name="good">#52C38F</color>
+    <color name="good_soft">#16291F</color>
+    <color name="warn">#E3AC3F</color>
+    <color name="warn_soft">#2B2413</color>
+    <color name="bad">#F28C52</color>
+    <color name="bad_soft">#2F1E14</color>
+</resources>

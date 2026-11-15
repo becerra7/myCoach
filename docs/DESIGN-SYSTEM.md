@@ -4,6 +4,8 @@ Fuente de verdad: `apps/web/src/app.css`. Este documento recoge lo que hay hoy, 
 
 > **v1 (octubre 2026).** La app ya usa el lenguaje del rediseño: tinta sobre papel, el color solo para datos (deportes y estados), las acciones en tinta y la fuente Archivo (estrecha para cifras y titulares). Los tokens están en la capa "v1 · Rediseño" al final de `apps/web/src/app.css` (`--paper`, `--surface`, `--ink`, `--ink-2`, `--rule`, estados y `--s-<deporte>`), con un solo estilo para iOS y Android. Componentes nuevos: `blk` (bloque con regla), `info` (ⓘ que abre la explicación), `tag` (estado con palabra e icono), `met2`, `tot`, `dias`, `dia`, `sem7`/`d7v`, `seg2` y las gráficas `chart2` (una escala, tooltip). Lo de abajo describe la base anterior, que sigue debajo para las pantallas secundarias.
 
+> **v2 (noviembre 2026).** Encima de la v1 hay una capa opcional, `apps/web/src/app-v2.css` (se activa con `data-d2` en `.app`; decisión 33 de `PLAN-COACH.md`): mismos tokens de color, superficies agrupadas con radio 20 (16 en Android), botones en pastilla, texto en la fuente del sistema y Archivo solo en cifras y títulos. Reutiliza `card`, `list`/`li`, `btn`, `seg2`, `tag` y `sheet`, y añade `frase` (titular del entrenador), `facts` (tres datos), `teselas`/`tes` (resumen de Insights), `bar2` (avance), `opc4` (cuatro opciones), `tap-card` y `fv` (modo entreno). Se vuelve a la v1 en Ajustes › Avanzado.
+
 ## 1. Lo que había antes del rediseño
 
 ### Color

@@ -1,0 +1,18 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'app.mycoach.android'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'app.mycoach.android'
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName '0.1'
+        buildConfigField 'String', 'BASE_URL', "\"${project.findProperty('mycoachUrl')}\""
+    }
+    buildFeatures { buildConfig true }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    buildTypes { release { minifyEnabled false } }
+    lint { abortOnError false }
+}

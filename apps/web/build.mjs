@@ -36,7 +36,8 @@ if (args.includes('--check')) new vm.Script(js, { filename: 'app.js' });
 // En Claude (mcpapp) el HTML va casi vacío y el código se carga de la web: lo que Claude
 // descarga es pequeño (el móvil no carga pantallas de más de ~2 MB) y cada despliegue se ve al
 // momento. __ORIGEN__ lo rellena el Worker de la web con su dirección.
-const shell = read(join(src, 'shell.html')).replace('/*CSS*/', () => read(join(src, 'app.css')));
+// app-v2.css es la capa del diseño nuevo (decisión 33): va después y solo actúa con data-d2 en .app.
+const shell = read(join(src, 'shell.html')).replace('/*CSS*/', () => read(join(src, 'app.css')) + '\n' + read(join(src, 'app-v2.css')));
 const html = target === 'mcpapp'
   ? shell.replace(/<script>\s*\/\*JS\*\/\s*<\/script>/, `<script src="__ORIGEN__/mcp-app.js?v=${commit}"></script>`)
   : shell.replace('/*JS*/', () => js.replaceAll('</script', '<\\/script'));

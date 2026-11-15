@@ -31,6 +31,8 @@ export const TOOLS = new Set([
   'intervals_actividades', 'intervals_actividad', 'intervals_bienestar', 'intervals_curvas',
   // Fuerza: el entreno del día, su histórico y mandarlo al reloj (con confirmación en la app).
   'fuerza_dia', 'fuerza_historial',
+  // Diseño nuevo: apuntar el esfuerzo de una salida con un toque y registrar la fuerza serie a serie desde la app.
+  'salida_guardar', 'fuerza_registrar',
   // La librería de entrenos: verlos, editarlos y añadir ejercicios del catálogo de Garmin.
   'entrenos', 'fuerza_entreno_guardar', 'fuerza_ejercicios_garmin', 'entreno_enviar_garmin', 'entreno_enviar_intervals', 'peso_historico', 'peso_registrar', 'medidas', 'medidas_registrar', 'avisos', 'avisos_guardar',
   // Solo lectura: tus rutas guardadas en Garmin (Plan) y las comidas que registra tu Claude (Comer).
