@@ -8,7 +8,7 @@ Una app mínima para tener en la pantalla de inicio "qué toca hoy y por qué". 
 
 ## Instalar
 
-1. GitHub → Actions → **Android** → última ejecución → artefacto `mycoach-android` → `app-debug.apk`.
+1. GitHub → Actions → **Android** → última ejecución → artefacto `mycoach-android` → `app-debug.apk`. Para un APK contra el entorno de pruebas: **Run workflow** → entorno `pruebas` → artefacto `mycoach-android-pruebas`.
 2. Pásalo al teléfono y ábrelo (hay que permitir "instalar apps desconocidas" para el navegador o el gestor de archivos).
 3. Abre myCoach y entra con tu cuenta.
 4. Mantén pulsada la pantalla de inicio → Widgets → myCoach → **Hoy**.
@@ -26,6 +26,6 @@ Contra el entorno de pruebas: `gradle :app:assembleDebug -PmycoachUrl=https://my
 ## Límites (dichos claro)
 
 - **Sin probar en un teléfono.** Compila y el APK se genera, pero aquí no hay emulador: la primera instalación es la prueba.
-- Es un APK de depuración, firmado con una clave que cambia en cada compilación del CI: para actualizarlo hay que desinstalar el anterior (se vuelve a entrar). Para evitarlo hace falta una clave de firma fija guardada como secreto del repo.
+- Es un APK de depuración. Con el secreto `ANDROID_KEYSTORE_B64` en el repo (un almacén de claves de depuración en base64: alias `androiddebugkey`, contraseña `android`), todos los APK llevan la misma firma y se instalan uno encima de otro, también el de pruebas sobre el de producción (son la misma app: se queda el último). Sin el secreto, la firma cambia en cada compilación y hay que desinstalar el anterior; la ejecución lo avisa.
 - No está en Google Play. Publicarlo pide cuenta de desarrollador, ficha y política de privacidad.
 - Sin dependencias: solo el SDK de Android (Java, `RemoteViews`). Los colores son los tokens de la web (`app.css`), en claro y en oscuro.

@@ -11,6 +11,10 @@ android {
         versionName '0.1'
         buildConfigField 'String', 'BASE_URL', "\"${project.findProperty('mycoachUrl')}\""
     }
+    // Firma fija: si está apps/android/mycoach-debug.keystore (el CI lo saca del secreto ANDROID_KEYSTORE_B64),
+    // todos los APK llevan la misma firma y se instalan uno encima de otro. Si no está, la clave de depuración de siempre.
+    def claveFija = rootProject.file('mycoach-debug.keystore')
+    if (claveFija.exists()) signingConfigs.debug.storeFile = claveFija
     buildFeatures { buildConfig true }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
     buildTypes { release { minifyEnabled false } }

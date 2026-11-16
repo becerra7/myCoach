@@ -3,6 +3,12 @@ name: Android
 # deja el APK como artefacto de la ejecución para instalarlo a mano en el teléfono.
 on:
   workflow_dispatch:
+    inputs:
+      entorno:
+        description: A qué myCoach apunta el APK
+        type: choice
+        default: produccion
+        options: [produccion, pruebas]
   push:
     paths: ['apps/android/**', '.github/workflows/android.yml']
 jobs:
@@ -14,10 +20,26 @@ jobs:
         with: { distribution: temurin, java-version: 21 }
       - uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: 8.14.3 }
+      - name: Firma fija (si está el secreto)
+        working-directory: apps/android
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_B64" ]; then
+            echo "$ANDROID_KEYSTORE_B64" | base64 -d > mycoach-debug.keystore
+            echo "Firma fija: sí"
+          else
+            echo "::warning::Sin el secreto ANDROID_KEYSTORE_B64: este APK lleva una firma que cambia en cada compilación."
+          fi
       - name: Compilar
         working-directory: apps/android
-        run: gradle --no-daemon :app:assembleDebug
+        run: |
+          if [ "${{ inputs.entorno }}" = "pruebas" ]; then
+            gradle --no-daemon :app:assembleDebug -PmycoachUrl=https://mycoach-pruebas.albertbecervas.workers.dev
+          else
+            gradle --no-daemon :app:assembleDebug
+          fi
       - uses: actions/upload-artifact@v4
         with:
-          name: mycoach-android
+          name: mycoach-android${{ inputs.entorno == 'pruebas' && '-pruebas' || '' }}
           path: apps/android/app/build/outputs/apk/debug/app-debug.apk

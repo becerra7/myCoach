@@ -11,3 +11,7 @@ apps/web/dist/
 
 # Skills empaquetadas para subir a Claude (npm run skills)
 apps/skills/dist/
+
+# Android: la clave de firma fija no se sube (va en el secreto ANDROID_KEYSTORE_B64)
+apps/android/mycoach-debug.keystore
+apps/android/local.properties
