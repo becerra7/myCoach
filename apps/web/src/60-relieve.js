@@ -4,7 +4,7 @@
    Relieve: Mapterhorn. Mapa base: OpenFreeMap (datos de OpenStreetMap). Ninguno recibe el recorrido, solo la zona que se mira. */
 
 const ORIGEN_WEB = (() => { try { const s = document.currentScript; return s && s.src ? new URL(s.src).origin : ''; } catch (e) { return ''; } })();
-const REL = { a: null, t: null, modo: 'pend', map: null, punto: null, i: 0, foco: null, play: false, f: 0, vel: 1, rumbo: 0, raf: 0, ts: 0, tramo: null, ext: null, rotulos: null };
+const REL = { a: null, t: null, modo: 'pend', map: null, punto: null, i: 0, foco: null, play: false, f: 0, vel: 1, rumbo: 0, raf: 0, ts: 0, entra: null, zoomObj: null, tramo: null, ext: null, rotulos: null };
 const REL_TRAZAS = new Map(); // en memoria: no se guarda en el navegador (son cientos de puntos por salida)
 const REL_DEM = 'https://tiles.mapterhorn.com/tilejson.json', REL_EXAG = 1.4;
 // Mapa en color (bosque, agua, carreteras) también con la app en oscuro: en gris o en negro no se lee el terreno.
@@ -93,7 +93,6 @@ function abrirRelieve(id) {
       <p class="rel-estado" id="rel-estado" role="status">Cargando el relieve…</p>
       <div class="mf-zoom rel-zoom" hidden><button type="button" aria-label="Acercar" data-a="rel-zoom" data-v="1">${ic('plus', 22)}</button><button type="button" aria-label="Alejar" data-a="rel-zoom" data-v="-1">${ic('minus', 22)}</button><button type="button" aria-label="Ver el recorrido entero" data-a="rel-entero">${ic('sync', 20)}</button></div>
       <div class="seg rel-tipo" id="rel-tipo" role="group" aria-label="Tipo de mapa" hidden></div>
-      <button type="button" class="rel-detalle" id="rel-detalle" data-a="rel-detalle" aria-pressed="false" hidden>Calles y sitios</button>
       <div class="rel-play" id="rel-play" hidden></div></div>
     <div class="rel-panel" id="rel-panel" hidden></div>`;
   app.append(el); requestAnimationFrame(() => el.classList.add('in')); el.querySelector('.close').focus();
@@ -125,7 +124,7 @@ function relMontar(t) {
     return;
   }
   map.on('error', () => { }); // una tesela que falla no rompe el mapa
-  map.on('dragstart', e => { if (e.originalEvent && REL.play) relPausar(); }); // si mueves el mapa con el dedo, el repaso se para: mandas tú
+  map.on('dragstart', e => { const o = e.originalEvent; if (o && REL.play && !(o.touches && o.touches.length > 1)) relPausar(); }); // si arrastras el mapa con un dedo, el repaso se para: mandas tú. Con dos (pellizco para acercar) sigue
   map.on('load', () => {
     const rotulos = (map.getStyle().layers.find(l => l.type === 'symbol') || {}).id;
     map.addSource('relieve', { type: 'raster-dem', url: REL_DEM });
@@ -217,7 +216,7 @@ function relIr(i, enMarcha) {
 
 /* ===== Repasar la ruta: el punto recorre el trazado y la cámara lo sigue mirando hacia donde vas =====
    La ruta entera dura entre 45 s y 2 min y medio según los km (a 1×). Con "reducir movimiento", la cámara no se mueve: solo avanza el punto. */
-const REL_VELS = [1, 2, 4];
+const REL_VELS = [1, 2, 4, .5]; // 1× al empezar; el botón da la vuelta: 2×, 4×, 0,5× (para mirar despacio un tramo técnico)
 const relDura = t => Math.max(45, Math.min(150, (t.puntos[t.puntos.length - 1][2] || 1) * 1.2));
 /* Posición a una fracción f (0 a 1) de la distancia: entre dos puntos del trazado. */
 function relEn(t, f) {
@@ -232,30 +231,41 @@ function relBotones() {
   const el = $('#rel-play'); if (!el) return;
   if (REL.tramo) { el.innerHTML = '<button class="rel-vel" type="button" data-a="rel-tramo-fin">Quitar el tramo</button>'; return; }
   el.innerHTML = `<button class="btn fill" type="button" data-a="rel-play">${ic(REL.play ? 'pausa' : 'play', 18)} ${REL.play ? 'Pausar' : REL.f > 0 && REL.f < 1 ? 'Seguir' : 'Repasar la ruta'}</button>
-    ${REL.play ? `<button class="rel-vel" type="button" data-a="rel-vel" aria-label="Velocidad del repaso: ${REL.vel}×. Cambiar">${REL.vel}×</button>` : '<button class="rel-vel" type="button" data-a="rel-tramo">Medir un tramo</button>'}`;
+    ${REL.play ? `<button class="rel-vel" type="button" data-a="rel-vel" aria-label="Velocidad del repaso: ${nf(REL.vel, 1)}×. Cambiar">${nf(REL.vel, 1)}×</button>` : '<button class="rel-vel" type="button" data-a="rel-tramo">Medir un tramo</button>'}`;
 }
 function relPaso(ts) {
   const t = REL.t, map = REL.map; if (!REL.play || !t || !map) return;
-  const dt = REL.ts ? Math.min(.1, (ts - REL.ts) / 1000) : 0; REL.ts = ts;
+  // Si el móvil va justo de imágenes por segundo, el repaso no se ralentiza: avanza lo que toca (hasta un cuarto de segundo por imagen).
+  const dt = REL.ts ? Math.min(.25, (ts - REL.ts) / 1000) : 0; REL.ts = ts;
   REL.f = Math.min(1, REL.f + dt * REL.vel / relDura(t));
   const pos = relEn(t, REL.f); REL.punto.setLngLat([pos.lon, pos.lat]);
   if (pos.i !== REL.i) { relIr(pos.i, true); const r = $('#rel-rango'); if (r) r.value = pos.i; }
-  if (!reduced) { REL.rumbo += ((relMira(t, REL.f) - REL.rumbo + 540) % 360 - 180) * Math.min(1, dt * 1.5); map.jumpTo({ center: [pos.lon, pos.lat], bearing: REL.rumbo }); }
+  if (!reduced) {
+    const giro = (a, b) => (b - a + 540) % 360 - 180, e = REL.entra;
+    REL.rumbo += giro(REL.rumbo, relMira(t, REL.f)) * Math.min(1, dt * 1.5);
+    if (e) {
+      // El primer segundo: la cámara baja hasta el punto mientras este ya se mueve (antes se esperaba a que acabara de colocarse).
+      e.s += dt; const k = Math.min(1, e.s / 1), u = 1 - (1 - k) ** 3;
+      map.jumpTo({ center: [e.c[0] + (pos.lon - e.c[0]) * u, e.c[1] + (pos.lat - e.c[1]) * u], zoom: e.z0 + (e.z1 - e.z0) * u, pitch: e.p0 + (62 - e.p0) * u, bearing: e.b0 + giro(e.b0, REL.rumbo) * u, padding: { top: 140 * u, bottom: 0, left: 0, right: 0 } });
+      if (k >= 1) REL.entra = null;
+    } else {
+      const o = { center: [pos.lon, pos.lat], bearing: REL.rumbo };
+      // Acercar y alejar con los botones durante el repaso: el zoom va hacia su objetivo sin soltar al punto.
+      if (REL.zoomObj != null) { const z = map.getZoom(), n = z + (REL.zoomObj - z) * Math.min(1, dt * 8); if (Math.abs(REL.zoomObj - n) < .01) { o.zoom = REL.zoomObj; REL.zoomObj = null; } else o.zoom = n; }
+      map.jumpTo(o);
+    }
+  }
   if (REL.f >= 1) { relPausar(); return; }
   REL.raf = requestAnimationFrame(relPaso);
 }
 function relReproducir() {
   const t = REL.t, map = REL.map; if (!t || !map) return;
   if (REL.f >= 1) REL.f = 0;
-  REL.play = true; REL.ts = 0; relBotones();
-  let ya = false; const arranca = () => { if (ya) return; ya = true; if (REL.play && REL.map === map) { cancelAnimationFrame(REL.raf); REL.raf = requestAnimationFrame(relPaso); } };
-  if (reduced) { arranca(); return; }
-  // Antes de echar a andar, la cámara baja hasta el punto y se pone mirando hacia delante.
-  const pos = relEn(t, REL.f); REL.rumbo = relMira(t, REL.f);
-  map.easeTo({ center: [pos.lon, pos.lat], zoom: Math.max(map.getZoom(), 13), pitch: 62, bearing: REL.rumbo, duration: 900, padding: { top: 140, bottom: 0, left: 0, right: 0 } }); // el punto, algo por debajo del centro: se ve más de lo que viene
-  map.once('moveend', arranca); setTimeout(arranca, 1500); // si el aviso de fin de movimiento no llega, arranca igual
+  REL.play = true; REL.ts = 0; REL.zoomObj = null; relBotones();
+  if (!reduced) { map.stop(); REL.rumbo = relMira(t, REL.f); const c = map.getCenter(); REL.entra = { s: 0, c: [c.lng, c.lat], z0: map.getZoom(), z1: Math.max(map.getZoom(), 13), p0: map.getPitch(), b0: map.getBearing() }; }
+  cancelAnimationFrame(REL.raf); REL.raf = requestAnimationFrame(relPaso);
 }
-function relPausar() { REL.play = false; cancelAnimationFrame(REL.raf); relBotones(); }
+function relPausar() { REL.play = false; REL.entra = null; REL.zoomObj = null; cancelAnimationFrame(REL.raf); relBotones(); }
 
 /* ===== Tipo de mapa: el de siempre, foto aérea o topográfico. Se recuerda (S.relMapa). =====
    La foto y el topográfico solo se piden cuando se eligen. Con el topográfico se quitan los nombres del mapa base: ya trae los suyos. */
@@ -267,15 +277,13 @@ function relMapa() {
   map.setLayoutProperty('sombras-sat', 'visibility', k === 'sat' ? 'visible' : 'none');
   // Los edificios en 3D del mapa base son bloques blancos: sobre la foto o el topográfico estorban.
   map.getStyle().layers.filter(l => l.type === 'fill-extrusion').forEach(l => map.setLayoutProperty(l.id, 'visibility', k === 'mapa' ? 'visible' : 'none'));
-  // Sobre la foto, por defecto solo los nombres de pueblos, agua y cumbres: limpia para la montaña. Con "Calles y sitios" (S.relDetalle)
-  // salen también calles, carreteras y lugares, para ver por dónde pasaste en un pueblo. Todo en blanco. El topográfico trae sus nombres.
+  // Sobre la foto, solo los nombres de pueblos, agua y cumbres, en blanco: carreteras, escudos y comercios la tapan. El topográfico trae los suyos.
   (REL.rotulos || []).forEach(({ id, lugar, color, halo }) => {
-    map.setLayoutProperty(id, 'visibility', k === 'topo' || (k === 'sat' && !lugar && !S.relDetalle) ? 'none' : 'visible');
+    map.setLayoutProperty(id, 'visibility', k === 'topo' || (k === 'sat' && !lugar) ? 'none' : 'visible');
     map.setPaintProperty(id, 'text-color', k === 'sat' ? '#ffffff' : color); map.setPaintProperty(id, 'text-halo-color', k === 'sat' ? 'rgba(0,0,0,.75)' : halo);
   });
   const el = $('#rel-tipo'); el.hidden = false;
   el.innerHTML = REL_MAPAS.map(([v, l]) => `<button type="button" data-a="rel-mapa" data-v="${v}" aria-pressed="${k === v}">${l}</button>`).join('');
-  const det = $('#rel-detalle'); det.hidden = k !== 'sat'; det.setAttribute('aria-pressed', !!S.relDetalle);
 }
 
 /* ===== Medir un tramo: dos asas sobre el perfil y las medias de lo que queda entre ellas =====
@@ -342,7 +350,6 @@ function relTramoDedo(perfil) {
 }
 
 Object.assign(ACTIONS, {
-  'rel-detalle': () => { S.relDetalle = !S.relDetalle; save(); relMapa(); },
   'rel-mapa': el => { S.relMapa = el.dataset.v; save(); relMapa(); const b = $(`#rel-tipo [data-v="${S.relMapa}"]`); if (b) b.focus(); },
   'rel-tramo': () => { const t = REL.t; if (!t) return; if (REL.play) relPausar(); const n = t.puntos.length - 1, i0 = REL.i < n - 1 ? REL.i : 0;
     REL.tramo = [i0, Math.min(n, i0 + Math.max(2, Math.round(n / 5)))]; relPintar(); relBotones(); relTramoEncuadrar(); const r = $('#rel-t0'); if (r) r.focus({ preventScroll: true }); },
@@ -351,7 +358,9 @@ Object.assign(ACTIONS, {
   'rel-vel': () => { REL.vel = REL_VELS[(REL_VELS.indexOf(REL.vel) + 1) % REL_VELS.length]; relBotones(); const b = $('#rel-play .rel-vel'); if (b) b.focus(); },
   'rel-abrir': el => abrirRelieve(el.dataset.v), 'rel-cerrar': () => cerrarRelieve(),
   'rel-modo': el => { REL.modo = el.dataset.v; relPintar(); const b = $(`#rel-seg [data-v="${REL.modo}"]`); if (b) b.focus(); },
-  'rel-zoom': el => { if (REL.map) REL.map.easeTo({ zoom: REL.map.getZoom() + +el.dataset.v, duration: reduced ? 0 : 300 }); },
+  'rel-zoom': el => { const m = REL.map, v = +el.dataset.v; if (!m) return;
+    if (REL.play && !reduced) { if (REL.entra) REL.entra.z1 = Math.min(m.getMaxZoom(), REL.entra.z1 + v); else REL.zoomObj = Math.max(m.getMinZoom(), Math.min(m.getMaxZoom(), (REL.zoomObj ?? m.getZoom()) + v)); return; }
+    m.easeTo({ zoom: m.getZoom() + v, duration: reduced ? 0 : 300 }); },
   'rel-entero': () => { if (REL.play) relPausar(); if (REL.tramo) { relTramoEncuadrar(); return; } if (REL.map) REL.map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 }); if (REL.map) REL.map.fitBounds(REL.caja, { padding: 48, pitch: 55, bearing: 0, duration: reduced ? 0 : 600 }); },
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('#relieve')) { e.stopPropagation(); cerrarRelieve(); } }, true);
