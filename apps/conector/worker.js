@@ -2546,10 +2546,11 @@ const TOOLS = {
 				hasta: { type: "integer", description: "Indice donde acaba. Igual que desde y en el ultimo punto: alarga la ruta por el final." },
 				por: { type: "array", description: "Puntos por los que pasa el tramo nuevo, en orden: [[lon, lat]] (con altitud si es a mano).", items: { type: "array" } },
 				a_mano: { type: "boolean", description: "Lineas rectas entre los puntos, sin seguir caminos (fuera de sendero, en skimo)." },
+				quitar: { type: "boolean", description: "Quita el tramo de desde a hasta. En un extremo, la ruta se recorta ahi; en medio, sus dos puntas se unen por el camino mas directo." },
 			},
-			required: ["deporte", "por"],
+			required: ["deporte"],
 		},
-		run: async (env, userId, { deporte, firme, evitar_trafico, ruta, desde, hasta, por, a_mano }) => {
+		run: async (env, userId, { deporte, firme, evitar_trafico, ruta, desde, hasta, por, a_mano, quitar }) => {
 			if (!["bici", "correr", "skimo"].includes(deporte)) throw new HttpError(400, "Deporte no valido.");
 			const antes = leerRuta(ruta);
 			const vias = leerRuta(por);
@@ -2563,7 +2564,23 @@ const TOOLS = {
 				alarga = i0 === i1;
 				if (alarga && i0 !== n - 1) throw new HttpError(400, "El tramo a cambiar necesita un principio y un final distintos.");
 			}
-			const paso = [...(n ? [antes[i0]] : []), ...vias, ...(n && !alarga ? [antes[i1]] : [])];
+			if (quitar === true) {
+				if (n < 2 || alarga) throw new HttpError(400, "Para quitar un tramo hace falta marcar su principio y su final.");
+				if (i0 === 0 && i1 === n - 1) throw new HttpError(400, "Eso es la ruta entera: para empezar de nuevo, crea otra.");
+				// En un extremo no hay nada que unir: la ruta empieza o acaba donde acababa el tramo.
+				if (i0 === 0 || i1 === n - 1) {
+					const linea = i0 === 0 ? antes.slice(i1) : antes.slice(0, i0 + 1);
+					if (linea.length < 2) throw new HttpError(400, "No queda ruta si quitas ese tramo.");
+					const vieja = medirRuta(antes), medida = medirRuta(linea);
+					return {
+						...medida, nuevo: null, recortada: i0 === 0 ? "principio" : "final",
+						tramo: { antes: { km: round(vieja.puntos[i1][2] - vieja.puntos[i0][2], 2), subida: Math.round(vieja.puntos[i1][8] - vieja.puntos[i0][8]) }, despues: { km: 0, subida: 0 } },
+						total_antes: vieja.total,
+						avisos: avisosDeRuta(medida.puntos, 0, medida.puntos.length - 1, deporte, firme),
+					};
+				}
+			}
+			const paso = [...(n ? [antes[i0]] : []), ...(quitar === true && !a_mano ? [] : vias), ...(n && !alarga ? [antes[i1]] : [])];
 			if (paso.length < 2) throw new HttpError(400, "Hacen falta al menos dos puntos para trazar.");
 			if (a_mano && deporte === "bici") throw new HttpError(400, "En bici la ruta va siempre por carreteras o caminos.");
 
@@ -4255,6 +4272,26 @@ const ALIAS_DEPORTE = [
 ];
 const buscar = (tabla, texto) => tabla.find(([re]) => re.test(texto))?.[1] ?? null;
 
+/**
+ * El titulo de una sesion (d) es corto; como hacerla (series, zonas, condiciones) va en `detalle`.
+ * Si llega todo junto y largo en d, se parte por el primer corte natural: antes se cortaba a 120 caracteres
+ * y la app ensenaba la frase a medias ("3 × 10' a 185-1").
+ */
+function tituloYDetalle(d, detalle) {
+	let t = String(d || "").replace(/\s+/g, " ").trim();
+	let det = typeof detalle === "string" ? detalle.trim() : "";
+	if (t.length > 80) {
+		const corte = [": ", ". ", "; ", " ("]
+			.map((sep) => [t.indexOf(sep, 12), sep]).filter(([i]) => i > 0 && i <= 70).sort((a, b) => a[0] - b[0])[0];
+		let resto;
+		if (corte) { resto = t.slice(corte[1] === " (" ? corte[0] + 1 : corte[0] + corte[1].length); t = t.slice(0, corte[0]); }
+		else { const i = t.lastIndexOf(" ", 60); resto = t; t = `${t.slice(0, i > 20 ? i : 60)}…`; }
+		resto = resto.charAt(0).toUpperCase() + resto.slice(1);
+		det = det ? `${resto}\n${det}` : resto;
+	}
+	return { d: t, ...(det ? { detalle: det.slice(0, 800) } : {}) };
+}
+
 function normalizarSesion(s, deporteDefecto) {
 	if (!s || typeof s !== "object") return null;
 	if (DEPORTES_APP.has(s.dep) && TIPOS_SESION.has(s.t)) return null; // ya esta bien
@@ -4268,12 +4305,15 @@ function normalizarSesion(s, deporteDefecto) {
 	if (!t || !dep) throw new HttpError(400,
 		`No entiendo la sesion ${JSON.stringify(s).slice(0, 120)}. Formato del plan: { "AAAA-MM-DD": { "dep": "bici|correr|skimo|fuerza", ` +
 		`"t": "rec|fondo|tempo|int|otros|descanso", "d": "descripcion corta", "min": 60 } }. Mejor aun: use coach_proponer.`);
-	const titulo = [s.titulo ?? s.title, s.detalle ?? s.descripcion ?? s.d].filter((x) => typeof x === "string" && x.trim()).join(": ");
+	const texto2 = (x) => (typeof x === "string" && x.trim() ? x : "");
+	const cabecera = texto2(s.titulo ?? s.title), cuerpo = texto2(s.detalle ?? s.descripcion ?? (cabecera ? s.d : ""));
+	const partes = tituloYDetalle(cabecera || texto2(s.d) || cuerpo, cabecera || texto2(s.d) ? cuerpo : "");
 	const minutos = [s.min, s.minutos, s.duracion_min, s.duracion, s.duration_min].find((x) => Number.isFinite(Number(x)) && x !== null && x !== "");
 	return {
 		dep: t === "otros" && dep !== "fuerza" && /fuerza|core|gym|superior|inferior/.test(texto) ? "fuerza" : dep,
 		t: dep === "fuerza" && t !== "descanso" ? "otros" : t,
-		d: (titulo || (t === "descanso" ? "Descanso" : t)).slice(0, 120),
+		d: partes.d || (t === "descanso" ? "Descanso" : t),
+		...(partes.detalle ? { detalle: partes.detalle } : {}),
 		min: t === "descanso" ? 0 : Math.round(Number(minutos) || 0),
 		...(Number.isFinite(Number(s.fc_max)) ? { fc_max: Math.round(Number(s.fc_max)) } : {}),
 		// Un dia de fuerza puede apuntar a un entreno con nombre (entrenos).
@@ -4973,7 +5013,8 @@ const esquemaSesion = {
 		dep: { type: "string", description: "bici, correr o skimo; fuerza como complemento" },
 		t: { type: "string", description: "rec, fondo, tempo, int, otros o descanso" },
 		ajustada: { type: "boolean", description: "true si viene de una propuesta de coach_hoy (no se vuelve a ajustar)" },
-		d: { type: "string", description: "Descripcion corta, p. ej. 'Umbral: 3 x 10 min a 160-166 ppm'" },
+		d: { type: "string", description: "Titulo corto (hasta 60 caracteres), p. ej. 'Rodillo: 3 x 10 min sweet spot'. Es lo que se lee en el calendario." },
+		detalle: { type: "string", description: "Como hacerla, completo: calentamiento, series con vatios o pulso y recuperaciones, condiciones ('solo si el semaforo esta en verde'), alternativas. La app lo ensena al abrir el dia. Hasta 800 caracteres." },
 		min: { type: "number", description: "Duracion en minutos" },
 		entreno: { type: "string", description: "Dia de fuerza: id del entreno con nombre que toca (entrenos), p. ej. 'tren-superior-en-casa'." },
 		entreno_cardio: { type: "string", description: "Dia de bici o correr: id del entreno guiado (entrenos)." },
@@ -5148,7 +5189,7 @@ const COACH_TOOLS = {
 					if (f > sumaDias(tope, 6)) throw new HttpError(400, `Demasiado lejos: como mucho ${TEMPORADA_MAX_SEMANAS} semanas vista.`);
 					let nueva = null;
 					if (v != null) {
-						nueva = normalizarSesion(v, dep) || { dep: v.dep, t: v.t, d: String(v.d || v.t).slice(0, 120), min: Math.round(Number(v.min) || 0) };
+						nueva = normalizarSesion(v, dep) || { dep: v.dep, t: v.t, ...tituloYDetalle(v.d || v.t, v.detalle), min: Math.round(Number(v.min) || 0) };
 						if (!(nueva.min >= 0 && nueva.min <= 600)) throw new HttpError(400, `Duracion no valida el ${f}: ${nueva.min} min.`);
 					}
 					if (JSON.stringify(nueva) === JSON.stringify(despues.sesiones[f] ?? null)) continue;
@@ -5244,7 +5285,8 @@ const COACH_TOOLS = {
 					enlace.entreno_cardio = id;
 				} else if (antes?.entreno_cardio && antes.dep === s.dep) enlace.entreno_cardio = antes.entreno_cardio;
 				nuevo[f] = {
-					dep: s.dep, t: s.t, d: String(s.d || "").slice(0, 120),
+					// Sin detalle nuevo, se conserva el que tenia si la sesion es la misma (p. ej. al moverla de dia la app o el motor).
+					dep: s.dep, t: s.t, ...tituloYDetalle(s.d, s.detalle ?? (antes && antes.d === String(s.d || "").trim() ? antes.detalle : "")),
 					min: s.min == null ? undefined : Math.round(Number(s.min)),
 					...(s.ajustada === true ? { ajustada: true } : {}),
 					...enlace,
@@ -5724,7 +5766,7 @@ function choquesConElPlan(plan, porDia, { objetivo, hoy, perfil, fechas }) {
 
 /** Una sesión del plan tal y como la recibe coach_proponer. */
 const sesionParaProponer = (s) => s
-	? { dep: s.dep, t: s.t, d: s.d, ...(s.min != null ? { min: s.min } : {}), ...(s.entreno ? { entreno: s.entreno } : {}), ...(s.entreno_cardio ? { entreno_cardio: s.entreno_cardio } : {}) }
+	? { dep: s.dep, t: s.t, d: s.d, ...(s.detalle ? { detalle: s.detalle } : {}), ...(s.min != null ? { min: s.min } : {}), ...(s.entreno ? { entreno: s.entreno } : {}), ...(s.entreno_cardio ? { entreno_cardio: s.entreno_cardio } : {}) }
 	: null;
 
 const AGENDA_TOOLS = {

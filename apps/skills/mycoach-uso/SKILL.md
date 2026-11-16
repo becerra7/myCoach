@@ -50,6 +50,7 @@ Si `coach_hoy` trae `fuentes.sin_descanso: true`, su dispositivo no mide sueño 
 ## Escritura
 - Toda escritura (plan, Garmin, perfil) se valida y se confirma con el usuario antes; tras escribir, se relee una vez para verificar.
 - `coach_proponer`, `coach_temporada_guardar` y `comida_proponer` siempre con `porque` en una frase: es el registro de decisiones.
+- Sesiones del plan: `d` = título corto; `detalle` = cómo hacerla (series, zonas, condiciones). Si la sesión tiene series y quiere verlas paso a paso o llevarlas al reloj, `entreno_enviar_garmin tipo=cardio`: queda enlazada al día y la app enseña los pasos.
 - Una sesión pre-programada (`coach_temporada_guardar`, `sesiones`) no está confirmada ni validada: nunca la presentes como plan cerrado.
 
 ## Presupuesto

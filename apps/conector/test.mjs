@@ -580,7 +580,7 @@ const rpc = async (env, token, message) => {
 			plan["2026-09-28"].t === "descanso" && plan["2026-09-29"].dep === "fuerza" && plan["2026-09-29"].t === "otros" && plan["2026-09-29"].min === 45 &&
 			plan["2026-09-30"].dep === "bici" && plan["2026-09-30"].t === "fondo" && plan["2026-09-30"].min === 60 && plan["2026-09-30"].fc_max === 140,
 			JSON.stringify(plan));
-		check("sin deporte, usa el deporte principal del usuario", plan["2026-10-02"].dep === "bici" && plan["2026-10-02"].t === "fondo" && plan["2026-10-02"].d.includes("2 h"));
+		check("sin deporte, usa el deporte principal del usuario", plan["2026-10-02"].dep === "bici" && plan["2026-10-02"].t === "fondo" && plan["2026-10-02"].d === "Salida larga" && plan["2026-10-02"].detalle.includes("2 h"));
 		const raro = await call("app_guardar", { doc: "estado/app", datos: { plan: { "2026-10-01": { cosa: 1 } } } });
 		check("lo que no se entiende se rechaza explicando el formato", raro.body.result.isError === true && txt(raro).includes("coach_proponer"));
 
@@ -1445,6 +1445,19 @@ const rpc = async (env, token, message) => {
 	check("ruta: lo de después tampoco", JSON.stringify(r3.puntos.slice(j1).map((p) => [p[0], p[1]])) === JSON.stringify(ruta2.slice(15).map((p) => [p[0], p[1]])));
 	check("ruta: enseña antes → después del tramo y de la ruta entera", r3.tramo.antes.km > 0 && r3.tramo.despues.km > 0 && r3.total_antes.km === r2.total.km && Math.abs(r3.total.km - (r2.total.km - r3.tramo.antes.km + r3.tramo.despues.km)) < 0.02);
 
+	// Quitar un tramo: en medio, une sus dos puntas por lo mas directo (sin puntos de paso); en un extremo, recorta.
+	llamadas.length = 0;
+	const q = await call("ruta_editar", { deporte: "bici", ruta: ruta2, desde: 4, hasta: 15, quitar: true });
+	check("ruta: quitar un tramo del medio une sus puntas directamente", llamadas[0].includes(`lonlats=${ruta2[4][0]},${ruta2[4][1]}|${ruta2[15][0]},${ruta2[15][1]}&`) && q.nuevo[0] === 4 && q.tramo.antes.km > 0, llamadas[0]);
+	check("ruta: y lo de fuera sigue igual", JSON.stringify(q.puntos.slice(0, 5).map(fila)) === JSON.stringify(ruta2.slice(0, 5)) && JSON.stringify(q.puntos.at(-1).slice(0, 2)) === JSON.stringify(ruta2.at(-1).slice(0, 2)));
+	llamadas.length = 0;
+	const qf = await call("ruta_editar", { deporte: "bici", ruta: ruta2, desde: 15, hasta: 20, quitar: true });
+	check("ruta: quitar el final recorta sin llamar al router", llamadas.length === 0 && qf.puntos.length === 16 && qf.recortada === "final" && qf.nuevo === null && qf.tramo.despues.km === 0 && qf.total.km < r2.total.km);
+	const qi = await call("ruta_editar", { deporte: "bici", ruta: ruta2, desde: 0, hasta: 6, quitar: true });
+	check("ruta: quitar el principio hace que empiece donde acababa el tramo", qi.recortada === "principio" && qi.puntos.length === 15 && qi.puntos[0][0] === ruta2[6][0] && qi.puntos[0][2] === 0);
+	try { await call("ruta_editar", { deporte: "bici", ruta: ruta2, desde: 0, hasta: 20, quitar: true }); check("ruta: quitarla entera debería fallar", false); }
+	catch (e) { check("ruta: no deja quitar la ruta entera", /ruta entera/.test(e.message)); }
+
 	// Gravel y a pie usan otro perfil; a mano no pregunta al router y solo vale fuera de la bici.
 	llamadas.length = 0;
 	const g = await call("ruta_editar", { deporte: "bici", firme: "gravel", por: [[2.10, 41.50], [2.14, 41.50]] });
@@ -1987,6 +2000,20 @@ const rpc = async (env, token, message) => {
 		despues.next?.[mas(proxLunes, 1)]?.d === "Umbral 3x10" && despues.plan[HOY_C]?.t === "int" && typeof despues.at === "number");
 	check("la decision queda registrada con su porque",
 		(await llamar(ana, "app_leer", { doc: "coach/decisiones" })).at(-1).porque === "Semana que viene");
+
+	// Titulo corto y detalle aparte: una descripcion larga se parte, no se corta.
+	const larga = "Solo si semáforo verde y piernas frescas (si no, intercambia con el miércoles): rodillo 15' progresivo + 3 × 10' a 185-195 W con 5' suaves entre series y 10' de vuelta a la calma";
+	await llamar(ana, "coach_proponer", { cambios: { [mas(proxLunes, 1)]: { dep: "bici", t: "int", d: larga, min: 60 } }, porque: "Detalle", guardar: true });
+	const conLarga = (await llamar(ana, "app_leer", { doc: "estado/app" })).next[mas(proxLunes, 1)];
+	check("sesion: una descripcion larga se parte en titulo y detalle sin perder texto",
+		conLarga.d === "Solo si semáforo verde y piernas frescas" && conLarga.detalle.endsWith("10' de vuelta a la calma") && conLarga.detalle.includes("185-195 W"), JSON.stringify(conLarga));
+	await llamar(ana, "coach_proponer", { cambios: { [mas(proxLunes, 1)]: { dep: "bici", t: "int", d: "Rodillo: 3 × 10 min sweet spot", detalle: "15' progresivo.\n3 × 10' a 185-195 W, rec 5'.", min: 60 } }, porque: "Detalle", guardar: true });
+	const conDetalle = (await llamar(ana, "app_leer", { doc: "estado/app" })).next[mas(proxLunes, 1)];
+	check("sesion: titulo y detalle se guardan tal cual", conDetalle.d === "Rodillo: 3 × 10 min sweet spot" && conDetalle.detalle.includes("\n3 × 10'"), JSON.stringify(conDetalle));
+	await llamar(ana, "coach_proponer", { cambios: { [mas(proxLunes, 1)]: { dep: "bici", t: "int", d: "Rodillo: 3 × 10 min sweet spot", min: 70 } }, porque: "Mas largo", guardar: true });
+	check("sesion: si no cambia el titulo, el detalle se conserva", (await llamar(ana, "app_leer", { doc: "estado/app" })).next[mas(proxLunes, 1)].detalle === conDetalle.detalle);
+	await llamar(ana, "coach_proponer", { cambios: { [mas(proxLunes, 1)]: { dep: "bici", t: "int", d: "Umbral 3x10", min: 60 } }, porque: "Vuelta", guardar: true });
+	check("sesion: con otro titulo y sin detalle, el viejo no se queda", !(await llamar(ana, "app_leer", { doc: "estado/app" })).next[mas(proxLunes, 1)].detalle);
 
 	const pasado = await llamar(ana, "coach_proponer", { cambios: { [mas(HOY_C, -1)]: null }, porque: "x" });
 	check("el pasado no se cambia", Boolean(pasado.error));

@@ -22,7 +22,7 @@ Antes de llamar herramientas, sigue la skill `mycoach-uso`.
 3. Entrenador: reparto entre deportes según la época y el progreso real (no reglas fijas de horas).
 4. Fisio: sueño, VFC, readiness, carga de Garmin y notas físicas → ajusta la carga. Sin reloj, lo que cuente el usuario.
 5. Nutricionista: días de más o menos HC según las sesiones.
-6. Propón con `coach_proponer` (validar), enseña, guarda con su sí y verifica con `coach_semana`.
+6. Propón con `coach_proponer` (validar), enseña, guarda con su sí y verifica con `coach_semana`. En cada sesión, `d` es un **título corto** (hasta 60 caracteres: "Rodillo: 3 × 10 min sweet spot") y `detalle` lleva **cómo hacerla**, entero: calentamiento, series con vatios o pulso y recuperaciones, condiciones ("solo si el semáforo está en verde; si no, cámbiala con la del miércoles") y alternativas. La app enseña el título en el calendario y el detalle al abrir el día: no metas todo en `d`.
 7. Si quiere también los menús: después de guardar los entrenos (la carga de cada comida sale de ellos), el nutricionista los propone con `comida_plan` → `comida_proponer`. Si cambias un entreno con menús ya puestos, mira en `comida_plan` si algún hidrato ha quedado fuera de su código.
 
 ## Plan a futuro (temporada)

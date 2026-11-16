@@ -16,7 +16,7 @@ const edMano = () => ED.dep !== 'bici' && !!S.edMano;
 const edRuta = (P = ED.P) => P.map(p => [p[0], p[1], p[12], p[13]]);
 const edLinea = (P, a = 0, b = P.length - 1) => ({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: P.slice(a, b + 1).map(p => [p[0], p[1]]) } });
 const ED_NADA = { type: 'FeatureCollection', features: [] };
-const edKm = v => nf(v, v < 10 ? 2 : 1);
+const edKm = v => v ? nf(v, v < 10 ? 2 : 1) : '0';
 
 /* Abrir: de cero ({ dep }), una ruta de Garmin ({ course_id, nombre }) o una actividad ({ activity_id, dep, nombre }). */
 function abrirEditor(origen) {
@@ -153,7 +153,7 @@ function edPintar() {
   map.getSource('tierra').setData({ type: 'FeatureCollection', features: tierra });
   const t = ED.tramo;
   map.getSource('viejo').setData(t && t.b != null && t.b > t.a ? edLinea(P, t.a, t.b) : ED_NADA);
-  map.getSource('nuevo').setData(prev ? edLinea(prev.puntos, prev.nuevo[0], prev.nuevo[1]) : ED_NADA);
+  map.getSource('nuevo').setData(prev && prev.nuevo ? edLinea(prev.puntos, prev.nuevo[0], prev.nuevo[1]) : ED_NADA);
   ED.marcas.forEach(m => m.remove()); ED.marcas = [];
   if (ED.salida && !P.length) edMarca('rel-salida', ED.salida, 'Salida');
   if (P.length) { edMarca('rel-salida', P[0], 'Salida'); const f = P[P.length - 1]; if (Math.hypot(f[0] - P[0][0], f[1] - P[0][1]) > 2e-4) edMarca('rel-ext ed-meta', f, 'Final de la ruta'); }
@@ -172,7 +172,8 @@ function edPista() {
   if (ED.modo === 'tramo' && n > 1) {
     if (!t) return 'Toca la ruta donde empieza lo que quieres cambiar';
     if (t.b == null) return 'Ahora toca la ruta donde acaba';
-    return ED.prev ? 'Arrastra un punto para afinar, o toca el mapa para añadir otro' : 'Toca el mapa por donde quieres pasar';
+    if (ED.prev && !ED.vias.length) return ED.prev.recortada ? (ED.prev.recortada === 'principio' ? 'La ruta empezaría donde acaba el tramo' : 'La ruta acabaría donde empieza el tramo') : 'Sin ese tramo, la ruta va por lo más directo';
+    return ED.prev ? 'Arrastra un punto para afinar, o toca el mapa para añadir otro' : 'Toca el mapa por donde quieres pasar, o quita el tramo';
   }
   if (!n) return ED.salida ? 'Toca el siguiente punto: la ruta sigue el camino' : 'Toca el mapa donde quieres salir';
   return 'Toca el mapa para alargar la ruta';
@@ -197,7 +198,7 @@ function edPanel() {
     const W = 1000, H = 100, kmT = Q[Q.length - 1][2] || 1, alts = Q.map(p => p[3]).filter(v => v != null), a0 = alts.length ? Math.min(...alts) : 0, a1 = alts.length ? Math.max(...alts) : 1;
     const y = v => v == null ? H * .55 : 6 + (1 - (v - a0) / ((a1 - a0) || 1)) * (H - 10), asas = ED.modo === 'tramo' && t && t.b != null && !prev;
     perfil = `<div class="rel-perfil ed-perfil${asas ? ' tramo' : ''}" id="ed-perfil"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true"><path d="M0,${H} ${Q.map(p => `L${(p[2] / kmT * W).toFixed(1)},${y(p[3]).toFixed(1)}`).join(' ')} L${W},${H}Z"/></svg>
-        ${prev ? `<div class="rel-banda" style="left:${Q[prev.nuevo[0]][2] / kmT * 100}%;width:${(Q[prev.nuevo[1]][2] - Q[prev.nuevo[0]][2]) / kmT * 100}%"></div>` : ''}
+        ${prev && prev.nuevo ? `<div class="rel-banda" style="left:${Q[prev.nuevo[0]][2] / kmT * 100}%;width:${(Q[prev.nuevo[1]][2] - Q[prev.nuevo[0]][2]) / kmT * 100}%"></div>` : ''}
         ${asas ? `<div class="rel-banda" id="ed-banda"></div><div class="rel-asa" id="ed-asa0"></div><div class="rel-asa" id="ed-asa1"></div>
           <input class="vh" type="range" id="ed-t0" min="0" max="${P.length - 1}" step="1" aria-label="Principio del tramo que cambias"><input class="vh" type="range" id="ed-t1" min="0" max="${P.length - 1}" step="1" aria-label="Final del tramo que cambias">` : ''}</div>
       <div class="rel-eje"><span>0 km</span><span>${alts.length ? `De ${nf(a0, 0)} a ${nf(a1, 0)} m` : 'Sin altitud'}</span><span>${nf(kmT, 1)} km</span></div>`;
@@ -207,7 +208,8 @@ function edPanel() {
   const notas = `${avisos.map(a => `<p class="ed-aviso"><b>Ojo:</b> ${esc(a.texto)}</p>`).join('')}${hayTierra ? '<p class="ed-ley"><i aria-hidden="true"></i>A rayas, lo que no está asfaltado</p>' : ''}`;
   let botones;
   if (prev && t) botones = `<button class="btn fill" type="button" data-a="ed-aplicar" ${ED.busy ? 'disabled' : ''}>Aplicar el cambio</button><button class="btn text" type="button" data-a="ed-descartar">Descartar</button>`;
-  else if (t) botones = '<button class="btn text" type="button" data-a="ed-descartar">Dejar el tramo como estaba</button>';
+  else if (t && t.b != null) botones = `<button class="btn tonal" type="button" data-a="ed-quitar" ${ED.busy ? 'disabled' : ''}>Quitar este tramo</button><button class="btn text" type="button" data-a="ed-descartar">Dejarlo como estaba</button>`;
+  else if (t) botones = '<button class="btn text" type="button" data-a="ed-descartar">Dejar la ruta como estaba</button>';
   else {
     const cerrada = P.length > 1 && Math.hypot(P[P.length - 1][0] - P[0][0], P[P.length - 1][1] - P[0][1]) < 2e-4;
     botones = `${P.length > 1 ? `<button class="btn fill" type="button" data-a="ed-resumen" ${ED.busy ? 'disabled' : ''}>Ver el resumen</button>` : ''}
@@ -289,6 +291,14 @@ async function edLlamar(args) {
   catch (e) { const m = (e && e.message) || ''; ED.error = /^(Por ahí|Ahí|El trazador)/.test(m) ? m : 'No he podido trazar ese tramo. Prueba otra vez.'; return null; }
   finally { ED.busy = false; }
 }
+/* Quitar el tramo marcado: en un extremo la ruta se recorta; en medio, sus dos puntas se unen por lo más directo.
+   Es una vista previa como las demás: no cambia nada hasta "Aplicar el cambio". */
+async function edQuitarTramo() {
+  const t = ED.tramo; if (!t || t.b == null || ED.busy) return; ED.vias = [];
+  const r = await edLlamar({ ruta: edRuta(), desde: t.a, hasta: t.b, quitar: true, por: edMano() ? edRellenar([ED.P[t.a], ED.P[t.b]]).slice(1, -1) : [] });
+  if (!$('#editor')) return;
+  if (r) ED.prev = r; edPintar(); const b = $('#ed-panel [data-a="ed-aplicar"]'); if (b) b.focus();
+}
 /* Vista previa del tramo nuevo (no cambia la ruta hasta "Aplicar el cambio"). */
 async function edPedirTramo() {
   const t = ED.tramo; if (!t || t.b == null || !ED.vias.length) return;
@@ -362,6 +372,7 @@ Object.assign(ACTIONS, {
     toast('Tramo cambiado', { undo: () => edDeshacer() }); const b = $('#ed-panel .btn'); if (b) b.focus(); },
   'ed-descartar': () => { ED.prev = null; ED.tramo = null; ED.vias = []; edPintar(); edEncuadrar(ED.P); },
   'ed-deshacer': () => edDeshacer(),
+  'ed-quitar': () => edQuitarTramo(),
   'ed-resumen': () => edResumen(),
   'ed-guardar': () => edGuardarHoja(),
 });
@@ -369,6 +380,7 @@ Object.assign(ACTIONS, {
 function edDeshacer() {
   if (ED.busy) return;
   if (ED.vias.length) { ED.vias.pop(); if (ED.vias.length) { edPintar(); edPedirTramo(); return; } ED.prev = null; }
+  else if (ED.prev) ED.prev = null; // la vista previa de quitar el tramo
   else if (ED.tramo) ED.tramo = ED.tramo.b != null ? { a: ED.tramo.a, b: null } : null;
   else if (ED.salida && !ED.P.length) ED.salida = null;
   else if (ED.hist.length) { const h = ED.hist.pop(); ED.P = h.P; ED.total = h.total; ED.salida = h.salida; ED.avisos = h.avisos; }

@@ -37,7 +37,7 @@ function sheetDia(f) {
     const pasado = f < HOY;
     const cuerpo = bloqueFuerza(f) || bloqueCardio(f);
     return `<div class="dia-cab">${sportDot2(s.dep)} <b>${SPORTS[s.dep].n}</b>${s.t !== 'otros' ? chip(s.t) : ''}${s.min ? `<span class="muted small">${dur(s.min)}</span>` : ''}</div>
-      <p class="dia-t">${esc(s.d)}</p>${s.ruta ? `<p class="small muted">Ruta: ${esc(s.ruta)}</p>` : ''}
+      <p class="dia-t">${esc(s.d)}</p>${s.detalle ? `<p class="dia-det">${esc(s.detalle)}</p>` : ''}${s.ruta ? `<p class="small muted">Ruta: ${esc(s.ruta)}</p>` : ''}
       ${pasado ? `<p class="small" style="color:var(--bad)">${ic('info', 16)} No consta en Garmin. Si la hiciste sin reloj, márcala como hecha.</p>` : ''}
       ${cuerpo}
       <div class="list">

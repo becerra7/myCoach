@@ -5,6 +5,9 @@
    El método lo pone el conector (coach_hoy); aquí solo se ordena y se dice en llano. */
 
 const minus1 = t => t ? t.charAt(0).toLowerCase() + t.slice(1) : t;
+// "Hoy toca fondo largo", pero "Hoy toca Bellver": solo se pasa a minúscula lo que es una palabra de entreno, no un nombre propio.
+const PAL_SESION = /^(fondo|rodillo|rodaje|series|umbral|tempo|correr|bici|fuerza|tren|salida|recuperaci[oó]n|intervalos|skimo|largo|suave|tirada|cuestas|core|pierna|sweet|subida|trote|z[1-5])\b/i;
+const tituloHoy = t => PAL_SESION.test(t) ? minus1(t) : t;
 /* La frase: lo que propone el motor o la sesión del plan, y su porqué (las mismas razones que da coach_hoy) */
 function fraseHoy(c, s, hecho) {
   const sm = c && c.semaforo, motivos = sm ? (sm.color === 'verde' ? sm.positivos : sm.razones) || [] : [];
@@ -14,13 +17,15 @@ function fraseHoy(c, s, hecho) {
   if (c?.propuesta?.texto) return { t: c.propuesta.texto, s: porque };
   if (!s) return { t: 'Hoy tienes el día libre.', s: sm ? (sm.color === 'verde' ? `${porque} Buen día para algo suave si te apetece.`.trim() : `${porque} Hoy, mejor descansar.`.trim()) : '' };
   if (s.t === 'descanso') return { t: 'Hoy toca descanso.', s: porque };
-  return { t: `Hoy toca ${minus1(String(s.d).split(',')[0])}.`, s: porque };
+  return { t: `Hoy toca ${tituloHoy(String(s.d).split(',')[0])}.`, s: porque };
 }
 const TXT_SEM = { verde: 'Vas bien', ambar: 'Mejor suave', rojo: 'Toca recuperar' };
 
 function tarjetaSesion(c, s) {
   if (!s || s.t === 'descanso') return '';
   const resto = String(s.d).split(',').slice(1).join(',').trim();
+  // Cómo hacerla (series, zonas, condiciones): unas líneas aquí y entera en "Ver la sesión".
+  const como = [resto && resto.length > 12 ? cap1(resto) : '', s.detalle || ''].filter(Boolean).join('. ').replace(/\.\. /g, '. ');
   const prop = c?.propuesta?.sesion ? `<div class="cambio" role="group" aria-label="Cambio propuesto" style="margin-top:0">
       <p>${tag('warn', '!', 'Con tu estado, mejor ajustarla')}</p>
       <div class="antes-despues"><div><span class="xs muted">Antes</span><p><s>${esc(s.d)}</s></p></div><div class="ahora"><span class="xs muted">Después</span><p><b>${esc(c.propuesta.sesion.d || '')}</b></p></div></div>
@@ -28,7 +33,7 @@ function tarjetaSesion(c, s) {
   return `<section class="card" aria-label="La sesión de hoy">
     ${depL(s.dep, `${SPORTS[s.dep]?.n || ''}${s.ruta ? ` · ${esc(s.ruta)}` : ''}`)}
     ${facts2([s.min ? ['Duración', dur(s.min)] : null, TIPOS[s.t] && s.t !== 'otros' ? ['Intensidad', TIPOS[s.t].n] : null, resto && resto.length <= 12 ? ['Objetivo', esc(resto)] : null])}
-    ${resto && resto.length > 12 ? `<p class="small muted">${esc(cap1(resto))}</p>` : ''}
+    ${como ? `<p class="small muted ses-como">${esc(como)}</p>` : ''}
     ${prop}
     <div class="btns-col">${s.dep === 'fuerza' ? `<button class="btn ${prop ? 'tonal' : 'fill'} wide" type="button" data-a="fv-empezar" data-v="${HOY}">Empezar el entreno</button><button class="link" type="button" data-a="day" data-v="${HOY}">Ver los ejercicios</button>`
       : `<button class="btn ${prop ? 'tonal' : 'fill'} wide" type="button" data-a="day" data-v="${HOY}">Ver la sesión</button>`}<button class="link" type="button" data-a="v-no100">No estoy al 100 %</button></div>
