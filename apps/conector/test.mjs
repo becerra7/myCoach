@@ -556,7 +556,7 @@ const rpc = async (env, token, message) => {
 	check("un navegador en la raiz sigue viendo la pagina", (await (await get(env, "/")).text()).includes("<h1>"));
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("tools/list devuelve 56 herramientas", list.body.result.tools.length === 56);
+	check("tools/list devuelve 57 herramientas", list.body.result.tools.length === 57);
 	check("app_guardar se anuncia como escritura", anot0(list).app_guardar.readOnlyHint === false);
 	{
 		const call = (name, args) => rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name, arguments: args } });
@@ -924,10 +924,18 @@ const rpc = async (env, token, message) => {
 		`${puntos.at(-1).latitude.toFixed(4)},${puntos.at(-1).longitude.toFixed(4)}`);
 	check("los puntos van como lat,lon", detalle.waypoints.every((p) => /^4\d\.\d{4},\d\.\d{4}$/.test(p)));
 
+	// La misma ruta, punto a punto, para verla en relieve antes de hacerla.
+	const enRelieve = await call("garmin_course_track", { course_id: "517620552" });
+	check("ruta en relieve: lleva su nombre y todos sus puntos, del km 0 al final", enRelieve.name === "Cerdanya: bucle solana" && enRelieve.puntos.length === puntos.length && enRelieve.puntos[0][2] === 0 && enRelieve.puntos.at(-1)[2] > 0, `(${enRelieve.puntos?.length})`);
+	check("ruta en relieve: sin velocidad, pulso ni tiempo (aún no se ha hecho)", !enRelieve.tiene.vel && !enRelieve.tiene.fc && !enRelieve.tiene.t && enRelieve.puntos.every((p) => p[5] === null && p[6] === null));
+	check("ruta en relieve: empieza donde la ruta", Math.abs(enRelieve.puntos[0][1] - 42.37) < 1e-4 && Math.abs(enRelieve.puntos[0][0] - 1.76) < 1e-4);
+
 	// Un recorrido sin trazado no debe reventar: se dice y ya.
 	globalThis.fetch = async () => new Response(JSON.stringify({ courseId: 5, courseName: "Sin linea" }));
 	const vacio = await call("garmin_courses", { course_id: "5" });
 	check("un recorrido sin trazado no rompe", vacio.waypoints.length === 0 && vacio.name === "Sin linea");
+	const sinLinea = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 77, method: "tools/call", params: { name: "garmin_course_track", arguments: { course_id: "5" } } });
+	check("ruta en relieve: sin trazado, lo dice", JSON.stringify(sinLinea.body).includes("no ha devuelto el trazado"));
 
 	// Si ninguna ruta contesta, el error dice que se intento.
 	globalThis.fetch = async (url) =>
@@ -1404,7 +1412,7 @@ const rpc = async (env, token, message) => {
 	check("el token de acceso vale sin leer del KV", init.body.result?.serverInfo?.name === "garmin");
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("las herramientas se listan igualmente", list.body.result.tools.length === 56);
+	check("las herramientas se listan igualmente", list.body.result.tools.length === 57);
 
 	// Y el dato que si vive en KV avisa en vez de mentir
 	const call = await rpc(env, tokens.access_token, {
@@ -2284,7 +2292,7 @@ const rpc = async (env, token, message) => {
 	check("convención: todas con título, descripción y esquema de objeto", tools.every((t) => t.title && t.description?.length > 40 && t.inputSchema?.type === "object"));
 	check("convención: descripciones de menos de 1500 caracteres", tools.every((t) => t.description.length < 1500), tools.filter((t) => t.description.length >= 1500).map((t) => t.name).join());
 	const soloApp = tools.filter((t) => t._meta?.ui?.visibility?.join() === "app").map((t) => t.name).sort();
-	check("las de la app no se le enseñan al modelo (visibility app)", soloApp.join() === "agenda_calendario,app_guardar,avisos,avisos_guardar,fuerza_dia,garmin_activity_track,intervals_conectar,intervals_desconectar", soloApp.join());
+	check("las de la app no se le enseñan al modelo (visibility app)", soloApp.join() === "agenda_calendario,app_guardar,avisos,avisos_guardar,fuerza_dia,garmin_activity_track,garmin_course_track,intervals_conectar,intervals_desconectar", soloApp.join());
 	check("la app sigue pudiendo llamarlas", !(await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 31, method: "tools/call", params: { name: "app_guardar", arguments: { doc: "notas", datos: [] } } })).body.result.isError);
 	const viejas = ["garmin_sleep", "garmin_hrv", "garmin_daily_summary", "garmin_body_battery", "garmin_training_readiness", "garmin_course_detail", "fuerza_entrenos", "cardio_entrenos", "fuerza_enviar_garmin", "cardio_enviar_garmin"];
 	check("las herramientas juntadas ya no existen", !tools.some((t) => viejas.includes(t.name)));

@@ -13,7 +13,8 @@ async function cargarRutas() {
   render();
 }
 const listaRutas = d => (Array.isArray(d) ? d : d?.recorridos || d?.courses || []).map(r => ({
-  n: r.nombre || r.name || r.courseName || 'Ruta', km: r.distancia_km ?? r.km ?? (r.distance ? r.distance / 1000 : null), desn: r.desnivel_m ?? r.elevacion_m ?? r.elevationGain ?? null }));
+  id: r.course_id ?? r.courseId ?? r.id ?? null, n: r.nombre || r.name || r.courseName || 'Ruta', // El conector las da como distance_km y elevation_gain_m: sin esos nombres, la lista salía sin kilómetros ni desnivel.
+  km: r.distance_km ?? r.distancia_km ?? r.km ?? (r.distance ? r.distance / 1000 : null), desn: r.elevation_gain_m ?? r.desnivel_m ?? r.elevacion_m ?? r.elevationGain ?? null }));
 
 function nombreSemana(w) {
   if (w === SEM) return 'Esta semana'; if (w === PROX) return 'La semana que viene'; if (w === addDays(SEM, -7)) return 'La semana pasada';
@@ -107,9 +108,12 @@ function scrRutas() {
   if (RUT.datos === undefined) cargarRutas();
   const cuerpo = RUT.datos === 'cargando' || RUT.datos === undefined ? '<p class="small muted" role="status">Leyendo tus rutas de Garmin…</p>'
     : RUT.datos === null ? '<p class="small">No he podido leer tus rutas. Vuelve a probar en un rato.</p>'
-    : (() => { const l = listaRutas(RUT.datos); return l.length ? `<div class="list">${l.map(x => `<div class="li"><span class="main"><b>${esc(x.n)}</b>${x.km != null ? `<span>${nf(x.km)} km${x.desn != null ? ` y ${nf(x.desn, 0)} m de desnivel` : ''}</span>` : ''}</span></div>`).join('')}</div>`
+    : (() => { const l = listaRutas(RUT.datos), det = x => x.km != null ? `<span>${nf(x.km)} km${x.desn != null ? ` y ${nf(x.desn, 0)} m de desnivel` : ''}</span>` : '';
+      // Con datos de Garmin, cada ruta abre su mapa en relieve; en el ejemplo no hay trazado que enseñar.
+      return l.length ? `<div class="list">${l.map(x => x.id != null && !RUT.datos.demo ? `<button type="button" class="li" data-a="rel-ruta" data-v="${esc(x.id)}" data-n="${esc(x.n)}" aria-label="${esc(x.n)}. Ver en relieve"><span class="main"><b>${esc(x.n)}</b>${det(x)}</span><span aria-hidden="true">${ic('chev', 18)}</span></button>`
+        : `<div class="li"><span class="main"><b>${esc(x.n)}</b>${det(x)}</span></div>`).join('')}</div>`
       : '<div class="card stack" style="gap:8px"><b>Aún no tienes rutas guardadas en Garmin</b><p class="small">Pídele una a tu Claude: la traza por carreteras reales y, si te gusta, la guarda.</p></div>'; })();
-  return { title: 'Tus rutas', html: head('Tus rutas', `Guardadas en Garmin${RUT.datos?.demo ? ' · <span class="demo-tag">Ejemplo</span>' : ''}`) + `<div class="content stack" style="max-width:640px;gap:12px">${cuerpo}
+  return { title: 'Tus rutas', html: head('Tus rutas', RUT.datos?.demo ? 'Guardadas en Garmin · <span class="demo-tag">Ejemplo</span>' : 'Guardadas en Garmin. Toca una para verla en relieve antes de salir.') + `<div class="content stack" style="max-width:640px;gap:12px">${cuerpo}
     <div class="btns" style="margin-top:0"><button class="btn tonal" type="button" data-a="v-encargo" data-v="2">Trazar una con Claude</button></div></div>` };
 }
 Object.assign(ACTIONS, { 'v-plan-mano': () => { V.planMano = !V.planMano; render(); },
