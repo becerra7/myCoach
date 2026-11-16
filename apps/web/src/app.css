@@ -15,6 +15,7 @@
   --bad:#B83D0A;--bad-soft:#FCE8DE;
   --map-off:#E3E8EC;--map-off-line:#FFFFFF;--map-on:#9DB9E6;--map-on-line:#1D4FA0;
   --sim:#7A5AB8;
+  --huella:#8A4FD6; /* por donde ya has pasado, en el editor de rutas: va sobre el mapa, que es claro en los dos temas */
   --font-ui:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display",system-ui,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
   --font-num:"Barlow Condensed","Roboto Condensed","Arial Narrow",-apple-system,system-ui,sans-serif;
   --spring:linear(0,.009,.035 2.1%,.141,.281 6.7%,.723 12.9%,.938 16.7%,1.017,1.077,1.121,1.149 24.3%,1.159,1.163,1.161,1.154 29.9%,1.129 32.8%,1.051 39.6%,1.017 43.1%,.991,.977 51%,.974 53.8%,.975 57.1%,.997 69.8%,1.003 76.9%,1.004 83.8%,1);
@@ -450,6 +451,40 @@ body.framed .toasts{top:50px}
 .rel-ley div{margin-top:4px}
 .relieve .maplibregl-ctrl-attrib{font-size:11px}
 @container app (min-width:840px){.rel-panel{padding:16px 24px 20px}.rel-perfil{height:96px}.rel-cifras{grid-auto-columns:120px;justify-content:start}}
+/* Editor de rutas (61-rutas-editor.js): el mismo marco que el mapa en relieve, con el mapa plano y el panel de la ruta debajo */
+.app:has(.mapfull.relieve) .layer{z-index:65} /* las hojas y los diálogos del editor van por encima del mapa */
+.rel-guardar{flex:none;min-height:40px;padding:0 14px;font-size:14px}
+.ed-top{flex:none;min-height:var(--tap);padding:0 10px;font-size:15px}
+.ed-top:disabled{color:var(--label-2);opacity:.55;cursor:default}
+.ed-pista{position:absolute;left:12px;bottom:12px;z-index:2;margin:0;max-width:calc(100% - 24px);padding:8px 14px;border-radius:18px;background:var(--card);color:var(--label);box-shadow:0 4px 14px rgba(0,0,0,.2);font-size:14px;font-weight:600;line-height:1.3;pointer-events:none}
+.ed-pista[hidden]{display:none}
+.ed-pista.fallo::before{content:"No se puede. ";font-weight:700}
+.ed-panel{gap:10px;max-height:54%;overflow-y:auto}
+.ed-panel .fields{grid-template-columns:repeat(3,minmax(0,1fr))}
+.ed-panel .field .v{font-size:22px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.ed-panel .field .v small{font-size:11px}
+.ed-panel .ed-ad .v{font-size:18px}
+.ed-panel .rel-tramo-h{margin:0}
+.ed-perfil{height:52px}
+.ed-perfil path{fill:color-mix(in srgb,var(--tint) 38%,var(--card))}
+.ed-perfil.tramo{margin-top:10px}
+.rel-perfil:has(#ed-t0:focus-visible) #ed-asa0::before,.rel-perfil:has(#ed-t1:focus-visible) #ed-asa1::before{outline:2px solid var(--tint);outline-offset:3px}
+.ed-aviso{margin:0;font-size:14px;line-height:1.35}
+.ed-aviso b{color:var(--warn)}
+.ed-ley{margin:0;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--label-2)}
+.ed-ley i{width:26px;border-top:3px dashed var(--label-2)}
+.ed-h{margin:0;font-size:13px;font-weight:600;color:var(--label-2)}
+.ed-via{position:relative;width:var(--tap);height:var(--tap);padding:0;border:0;background:none;display:grid;place-items:center;font:700 13px/1 var(--font-ui);color:#fff;cursor:grab;touch-action:none}
+.ed-via::before{content:"";position:absolute;inset:9px;z-index:-1;border-radius:50%;background:#15191E;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35)}
+.ed-via:focus-visible::before{outline:2px solid #fff;outline-offset:2px}
+.rel-ext.ed-meta{border-radius:50%;background:#15191E;border-color:#fff;box-shadow:0 1px 4px rgba(0,0,0,.35)}
+@container app (min-width:840px){
+  .mapfull.editor{display:grid;grid-template-columns:minmax(0,1fr) 360px;grid-template-rows:auto minmax(0,1fr)}
+  .mapfull.editor .mf-top,.mapfull.editor .rel-view{grid-column:1/-1}
+  .mapfull.editor:has(.ed-panel:not([hidden])) .rel-view{grid-column:1}
+  .mapfull.editor .ed-panel{max-height:none;padding:16px 20px;overflow-y:auto;justify-content:flex-start;gap:14px;border-left:.5px solid var(--sep)}
+  .mapfull.editor .ed-perfil{height:84px}
+}
 
 /* Chat Claude */
 .chat{display:flex;flex-direction:column;gap:10px}

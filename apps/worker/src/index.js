@@ -17,7 +17,7 @@
 
 const COOKIE = 'mc_s';
 const SESSION_TTL = 60 * 60 * 24 * 60;
-// Solo lo que usa la app. Nada de guardar rutas en Garmin desde la web.
+// Solo lo que usa la app.
 export const TOOLS = new Set([
   'garmin_status', 'garmin_activities', 'garmin_activity_detail', 'garmin_activity_route', 'garmin_activity_track',
   // Garmin: el día (sueño, VFC, readiness…) y la forma (carga, Load Focus, VO2máx, umbrales).
@@ -35,8 +35,10 @@ export const TOOLS = new Set([
   'salida_guardar', 'fuerza_registrar',
   // La librería de entrenos: verlos, editarlos y añadir ejercicios del catálogo de Garmin.
   'entrenos', 'fuerza_entreno_guardar', 'fuerza_ejercicios_garmin', 'entreno_enviar_garmin', 'entreno_enviar_intervals', 'peso_historico', 'peso_registrar', 'medidas', 'medidas_registrar', 'avisos', 'avisos_guardar',
-  // Solo lectura: tus rutas guardadas en Garmin (Plan) y las comidas que registra tu Claude (Comer).
+  // Tus rutas guardadas en Garmin (Más) y las comidas que registra tu Claude (Comer).
   'garmin_courses', 'comidas',
+  // El editor de rutas: abrir una, cambiarle un tramo y guardarla en Garmin como ruta nueva (con confirmación en la app).
+  'ruta_abrir', 'ruta_editar', 'ruta_guardar',
   // El plan de comidas de la semana (lo propone tu Claude; la web lo enseña y saca la lista de la compra).
   'comida_plan',
   // Tu agenda: lo que te ocupa (compromisos y calendario), anotar algo y conectar el calendario.

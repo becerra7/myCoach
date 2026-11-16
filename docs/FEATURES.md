@@ -87,8 +87,8 @@ El inventario salió de leer el código con un agente; los puntos marcados ✔ l
 | Recorrido en relieve | En cada actividad con GPS: mapa 3D con el trazado pintado por pendiente, velocidad o pulso, el perfil con cursor, "Repasar la ruta" (la cámara sigue al punto), "Medir un tramo" (medias entre dos puntos) y tres tipos de mapa (Mapa, Satélite, Topo) | Garmin (`garmin_activity_track`) + Mapterhorn + OpenFreeMap + Esri + OpenTopoMap | 🟡 prototipo | Probar dentro de Claude; después, repasar la ruta y satélite |
 | Mapa a pantalla completa | Zoom, ficha del pueblo con km por deporte y primera vez. "Núcleos: pendiente de OpenStreetMap" | Garmin | 🟡 | Mejorar: quitar el texto pendiente |
 | Banner "+3 pueblos" | Aviso de actividad nueva | Demo | 🧪 | Mejorar: hacerlo real tras sincronizar |
-| **Planificar una ruta de bici** | No existe en la app. Claude puede hacerlo con `garmin_plan_route` | Coach | ❌ | Añadir: ver y revisar rutas en la app |
-| **Revisar rutas guardadas** | No existe (`garmin_courses`) | Coach | ❌ | Añadir |
+| **Crear una ruta o cambiarle un tramo** | Más → Rutas: editor sobre el mapa para bici, correr y skimo. Cambia solo el tramo que marcas (antes → después), alarga, deshace, avisa de lo no asfaltado y guarda en Garmin como ruta nueva. Claude sigue pudiendo trazar con `garmin_plan_route` | Conector (`ruta_abrir`, `ruta_editar`, `ruta_guardar`) + BRouter | ✅ (decisión 35) | Mejorar: tus salidas en fino y el mapa de popularidad de Garmin |
+| **Revisar rutas guardadas** | Más → Rutas: la lista de Garmin; tocar una la abre en el editor y de ahí al resumen en relieve | Garmin (`garmin_courses`, `ruta_abrir`) | ✅ | Quedarse |
 | Ruta de cada sesión del plan | Texto inventado por el generador ("80 km por el Vallès") | Local | 🟡 | Mejorar: ruta real ligada a la sesión |
 
 ## G. Claude y plataforma

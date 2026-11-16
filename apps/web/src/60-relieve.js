@@ -64,12 +64,15 @@ async function relTraza(a) {
     const linea = decodePoly((DSET.rutas || {})[a.id] || ''); if (linea.length < 2) throw new Error('sin trazado');
     t = { puntos: linea.map(([lon, lat]) => [lon, lat, 0, null, null, null, null, null, null, null, null, null]), tiene: { alt: false, vel: false, fc: false, t: false, w: false }, ejemplo: true };
   }
-  // Distancia sobre el mapa de cada punto (0 a 1): es lo que usa el degradado de la línea.
+  REL_TRAZAS.set(a.id, relFrac(t)); return t;
+}
+/* Distancia sobre el mapa de cada punto (0 a 1): es lo que usa el degradado de la línea. */
+function relFrac(t) {
   const R = Math.PI / 180; let d = 0; const acum = [0];
   for (let i = 1; i < t.puntos.length; i++) { const p = t.puntos[i - 1], q = t.puntos[i]; d += Math.hypot((q[0] - p[0]) * Math.cos(p[1] * R), q[1] - p[1]) * 111.32; acum.push(d); }
   t.frac = acum.map(x => x / (d || 1));
   if (t.ejemplo) t.puntos.forEach((p, i) => { p[2] = Math.round(acum[i] * 100) / 100; });
-  REL_TRAZAS.set(a.id, t); return t;
+  return t;
 }
 /* Solo en el ejemplo: la altitud se lee del relieve ya cargado y la pendiente sale de ahí (en vivo lo calcula el conector). */
 function relAltitudDeEjemplo(map, t) {
@@ -83,12 +86,13 @@ function relAltitudDeEjemplo(map, t) {
   } catch (e) { return false; }
 }
 
-function abrirRelieve(id) {
-  const a = actById(id); if (!a) return;
+/* `a` es la actividad; el editor de rutas pasa la suya ({ ruta: true }): mismo mapa, con "Guardar en Garmin" arriba. */
+function abrirRelieve(id, a = actById(id)) {
+  if (!a) return;
   cerrarRelieve(true); REL.a = a; REL.t = null; REL.i = 0; REL.f = 0; REL.vel = 1; REL.play = false; REL.tramo = null; REL.ext = null; REL.modo = 'pend'; REL.foco = document.activeElement;
   const el = document.createElement('div'); el.className = 'mapfull relieve'; el.id = 'relieve'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true'); el.setAttribute('aria-label', `Recorrido en relieve: ${a.lugar}`);
   el.innerHTML = `<div class="mf-top"><button class="close" type="button" aria-label="Cerrar el mapa" data-a="rel-cerrar">${ic('close', 18)}</button>
-      <div class="seg" role="group" aria-label="Pintar el recorrido según" id="rel-seg" style="flex:1" hidden></div><h2 class="rel-titulo" id="rel-titulo">${esc(a.lugar)}</h2></div>
+      <div class="seg" role="group" aria-label="Pintar el recorrido según" id="rel-seg" style="flex:1" hidden></div><h2 class="rel-titulo" id="rel-titulo">${esc(a.lugar)}</h2>${a.ruta ? '<button class="btn fill rel-guardar" type="button" data-a="ed-guardar">Guardar en Garmin</button>' : ''}</div>
     <div class="rel-view"><div class="rel-map" id="rel-map"></div>
       <p class="rel-estado" id="rel-estado" role="status">Cargando el relieve…</p>
       <div class="mf-zoom rel-zoom" hidden><button type="button" aria-label="Acercar" data-a="rel-zoom" data-v="1">${ic('plus', 22)}</button><button type="button" aria-label="Alejar" data-a="rel-zoom" data-v="-1">${ic('minus', 22)}</button><button type="button" aria-label="Ver el recorrido entero" data-a="rel-entero">${ic('sync', 20)}</button></div>
@@ -231,7 +235,8 @@ function relMira(t, f) { const kmT = t.puntos[t.puntos.length - 1][2] || 1, g = 
 function relBotones() {
   const el = $('#rel-play'); if (!el) return;
   if (REL.tramo) { el.innerHTML = '<button class="rel-vel" type="button" data-a="rel-tramo-fin">Quitar el tramo</button>'; return; }
-  el.innerHTML = `<button class="btn fill" type="button" data-a="rel-play">${ic(REL.play ? 'pausa' : 'play', 18)} ${REL.play ? 'Pausar' : REL.f > 0 && REL.f < 1 ? 'Seguir' : 'Repasar la ruta'}</button>
+  // En el resumen de una ruta la acción principal es guardarla (arriba): repasar pasa a secundaria.
+  el.innerHTML = `<button class="btn ${REL.a.ruta ? 'tonal' : 'fill'}" type="button" data-a="rel-play">${ic(REL.play ? 'pausa' : 'play', 18)} ${REL.play ? 'Pausar' : REL.f > 0 && REL.f < 1 ? 'Seguir' : 'Repasar la ruta'}</button>
     ${REL.play ? `<button class="rel-vel" type="button" data-a="rel-vel" aria-label="Velocidad del repaso: ${REL.vel}×. Cambiar">${REL.vel}×</button>` : '<button class="rel-vel" type="button" data-a="rel-tramo">Medir un tramo</button>'}`;
 }
 function relPaso(ts) {

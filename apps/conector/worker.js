@@ -568,6 +568,275 @@ const gpxFrom = (name, coords) =>
 ${coords.map(([lon, lat, ele]) => `<trkpt lat="${lat}" lon="${lon}">${ele != null ? `<ele>${ele}</ele>` : ""}</trkpt>`).join("\n")}
 </trkseg></trk></gpx>`;
 
+// ──────────────────────── Editor de rutas de la app ────────────────────────
+//
+// La app deja cambiar solo un trozo de una ruta: manda la ruta que tiene y el
+// tramo a rehacer, y aqui se traza ese tramo, se empalma, se mide entera y se
+// dice por que firme va. El resto de la ruta no se toca ni se vuelve a trazar.
+
+/** Con que perfil del router se traza cada deporte, y que se le prohibe. */
+function perfilRuta(deporte, firme, evitarTrafico) {
+	// Escaleras y ferris fuera siempre: en bici no se pasa, y a pie no es una ruta de entreno.
+	if (deporte === "bici" && firme === "gravel")
+		return { profile: "gravel", extra: `&profile:allow_steps=0&profile:allow_ferries=0${evitarTrafico ? "&profile:consider_traffic_estimate=1" : ""}` };
+	if (deporte === "bici")
+		return { profile: "fastbike", extra: `&profile:allow_steps=0&profile:allow_ferries=0${evitarTrafico ? "&profile:consider_traffic=1" : ""}` };
+	return { profile: "hiking-mountain", extra: "&profile:allow_ferries=0" };
+}
+
+const FIRME_TIERRA = /^(unpaved|ground|dirt|earth|gravel|fine_gravel|compacted|grass|sand|mud|pebblestone|rock|woodchips|snow|ice)$/;
+
+/** El firme de un tramo segun sus etiquetas de OpenStreetMap: asfalto, principal (carretera con trafico), tierra, escaleras o autopista. */
+function claseDeVia(tags) {
+	const t = String(tags || "");
+	const via = t.match(/highway=([a-z_]+)/)?.[1] || "";
+	const firme = t.match(/surface=([a-z_:]+)/)?.[1] || "";
+	if (via === "steps") return "escaleras";
+	if (/^motorway/.test(via)) return "autopista";
+	if (FIRME_TIERRA.test(firme)) return "tierra";
+	// Sin firme apuntado: una pista o un sendero se dan por tierra; una calle o una carretera, por asfalto.
+	if (!firme && /^(track|path|bridleway)$/.test(via)) return "tierra";
+	if (/^(trunk|primary)/.test(via)) return "principal";
+	return "asfalto";
+}
+
+/**
+ * Traza un tramo por donde ese deporte puede pasar y dice el firme de cada punto.
+ * Devuelve [[lon, lat, altitud, clase]]; la clase de un punto es la del trozo que llega hasta el.
+ */
+async function trazarTramo(puntos, deporte, firme, evitarTrafico) {
+	const { profile, extra } = perfilRuta(deporte, firme, evitarTrafico);
+	const lonlats = puntos.map((p) => `${p[0]},${p[1]}`).join("|");
+	let res;
+	try {
+		res = await fetch(`${BROUTER}?lonlats=${lonlats}&profile=${profile}${extra}&alternativeidx=0&format=geojson`, { headers: { Accept: "application/json" } });
+	} catch {
+		throw new HttpError(502, "El trazador de rutas no responde. Prueba otra vez en un momento.");
+	}
+	if (!res.ok) {
+		const txt = (await res.text().catch(() => "")).slice(0, 200);
+		// El router contesta en texto cuando un punto no cae en ningun camino o no hay manera de unirlos.
+		if (/not mapped|island|no track found|not found/i.test(txt))
+			throw new HttpError(422, "Por ahí no se puede pasar: no hay camino que una esos puntos. Mueve el punto a una carretera o un sendero.");
+		throw new HttpError(502, `El trazador no ha podido con ese tramo (${res.status}).`);
+	}
+	const f = (await res.json())?.features?.[0];
+	const coords = f?.geometry?.coordinates;
+	if (!Array.isArray(coords) || coords.length < 2) throw new HttpError(422, "Por ahí no se puede pasar: no hay camino que una esos puntos.");
+	// El router lleva cada punto al camino mas cercano, este donde este. Si lo ha movido mucho, es que ahi no hay por donde pasar.
+	for (const [p, q] of [[puntos[0], coords[0]], [puntos.at(-1), coords.at(-1)]]) {
+		const m = metresBetween(p, q);
+		if (m > 400) throw new HttpError(422, `Ahí no hay por dónde pasar: el camino más cercano está a ${Math.round(m)} m. Acerca el punto.`);
+	}
+	const filas = f.properties?.messages || [];
+	const col = filas[0] || [], iLon = col.indexOf("Longitude"), iLat = col.indexOf("Latitude"), iTags = col.indexOf("WayTags");
+	const clases = new Array(coords.length).fill(null);
+	if (iTags >= 0 && iLon >= 0) {
+		// Cada fila acaba en un punto del trazado: todo lo que hay desde la fila anterior hasta ese punto tiene sus etiquetas.
+		let j = 0;
+		for (const fila of filas.slice(1)) {
+			const lon = Number(fila[iLon]) / 1e6, lat = Number(fila[iLat]) / 1e6, clase = claseDeVia(fila[iTags]);
+			let fin = -1;
+			for (let k = j; k < coords.length; k++) if (Math.abs(coords[k][0] - lon) < 2e-6 && Math.abs(coords[k][1] - lat) < 2e-6) { fin = k; break; }
+			if (fin < 0) continue;
+			for (let k = j; k <= fin; k++) if (k > 0 || fin === 0) clases[k] = clase;
+			j = fin + 1;
+		}
+		for (let k = 1; k < clases.length; k++) if (clases[k] == null) clases[k] = clases[k - 1];
+		clases[0] = clases[1] ?? clases[0];
+	}
+	return coords.map(([lon, lat, ele], i) => [lon, lat, typeof ele === "number" ? ele : null, clases[i]]);
+}
+
+/**
+ * Quita los puntos que no cambian la forma (menos de `tol` metros de desvio), sin tocar los extremos ni
+ * donde cambia el firme. El router pone un punto cada pocos metros; sin esto, una ruta de 100 km son miles.
+ */
+function aligerarLinea(linea, tol = 2.5) {
+	if (linea.length < 3) return linea;
+	const guarda = new Uint8Array(linea.length);
+	guarda[0] = guarda[linea.length - 1] = 1;
+	for (let i = 1; i < linea.length - 1; i++) if (linea[i][3] !== linea[i + 1][3]) guarda[i] = 1;
+	const k = Math.cos((linea[0][1] * Math.PI) / 180) * 111320;
+	const desvio = (p, a, b) => {
+		const ax = (a[0] - p[0]) * k, ay = (a[1] - p[1]) * 110540, bx = (b[0] - p[0]) * k, by = (b[1] - p[1]) * 110540;
+		const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+		const t = l2 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / l2)) : 0;
+		return Math.hypot(ax + t * dx, ay + t * dy);
+	};
+	const pila = [[0, linea.length - 1]];
+	while (pila.length) {
+		const [a, b] = pila.pop();
+		let max = 0, idx = -1;
+		for (let i = a + 1; i < b; i++) { const d = guarda[i] ? Infinity : desvio(linea[i], linea[a], linea[b]); if (d > max) { max = d; idx = i; } }
+		if (idx >= 0 && max > tol) { guarda[idx] = 1; pila.push([a, idx], [idx, b]); }
+	}
+	return linea.filter((_, i) => guarda[i]);
+}
+
+const MAX_PUNTOS_RUTA = 6000;
+
+/** Lo que manda la app: [[lon, lat, altitud|null, clase|null]]. Se comprueba antes de usarlo. */
+function leerRuta(ruta) {
+	if (ruta == null) return [];
+	if (!Array.isArray(ruta) || ruta.length > MAX_PUNTOS_RUTA) throw new HttpError(400, "Ruta no valida o demasiado larga.");
+	return ruta.map((p) => {
+		const lon = Number(p?.[0]), lat = Number(p?.[1]);
+		if (!Number.isFinite(lon) || !Number.isFinite(lat) || Math.abs(lat) > 90 || Math.abs(lon) > 180) throw new HttpError(400, "Ruta con un punto no valido.");
+		return [lon, lat, typeof p[2] === "number" ? p[2] : null, typeof p[3] === "string" ? p[3].slice(0, 12) : null];
+	});
+}
+
+/**
+ * La ruta medida para la app, con el mismo formato que el trazado de una actividad (asi el mapa en relieve
+ * la dibuja igual), mas dos columnas: la altitud sin suavizar y el firme, que la app devuelve en el siguiente cambio.
+ */
+function medirRuta(linea) {
+	if (linea.length < 2) return { columnas: [], puntos: [], tiene: { alt: false, vel: false, fc: false, t: false, w: false }, total: { km: 0, subida: 0, bajada: 0 }, firmes: {} };
+	const t = trazadoDeActividad({ geoPolylineDTO: { polyline: linea.map(([lon, lat, ele]) => ({ lat, lon, altitude: ele })) } }, Infinity);
+	t.puntos.forEach((p, i) => { p[0] = round(linea[i][0], 6); p[1] = round(linea[i][1], 6); p[5] = null; p.push(linea[i][2], linea[i][3]); });
+	t.columnas = [...t.columnas, "alt_cruda", "firme"];
+	t.tiene = { ...t.tiene, vel: false };
+	const firmes = {};
+	for (let i = 1; i < t.puntos.length; i++) { const c = linea[i][3] || "sin_comprobar"; firmes[c] = (firmes[c] || 0) + (t.puntos[i][2] - t.puntos[i - 1][2]); }
+	for (const c of Object.keys(firmes)) firmes[c] = round(firmes[c], 2);
+	const fin = t.puntos.at(-1);
+	return { ...t, total: { km: round(fin[2], 2), subida: Math.round(fin[8]), bajada: Math.round(fin[9]) }, firmes };
+}
+
+/** Avisos de por donde pasa un trozo de la ruta medida (de j0 a j1): lo que en ese deporte no conviene o no se puede. */
+function avisosDeRuta(puntos, j0, j1, deporte, firme) {
+	const suma = {}, donde = {};
+	for (let i = j0 + 1; i <= j1; i++) {
+		const c = puntos[i][13]; if (!c) continue;
+		suma[c] = (suma[c] || 0) + (puntos[i][2] - puntos[i - 1][2]) * 1000;
+		if (donde[c] == null) donde[c] = puntos[i - 1][2];
+	}
+	const m = (x) => (x >= 950 ? `${String(round(x / 1000, 1)).replace(".", ",")} km` : `${Math.round(x / 10) * 10} m`);
+	const km = (c) => `km ${String(round(donde[c], 1)).replace(".", ",")}`;
+	const avisos = [];
+	if (suma.autopista > 20) avisos.push({ clase: "autopista", texto: `Pasa ${m(suma.autopista)} por autovía o autopista (${km("autopista")}). Mueve el punto: por ahí no se puede ir.` });
+	if (deporte === "bici" && firme !== "gravel" && suma.tierra > 40) avisos.push({ clase: "tierra", texto: `${m(suma.tierra)} sin asfaltar, desde el ${km("tierra")}.` });
+	if (suma.escaleras > 5) avisos.push({ clase: "escaleras", texto: `Hay escaleras (${km("escaleras")}).` });
+	return avisos;
+}
+
+/** Los puntos de un recorrido guardado en Garmin como linea de la app. */
+async function lineaDeCourse(env, userId, courseId) {
+	const path = `/course-service/course/${encodeURIComponent(String(courseId))}`;
+	let c;
+	try { c = await apiGet(env, userId, path, { includeGeoPoints: "true" }); } catch { c = await apiGet(env, userId, path); }
+	const pts = (c?.geoPoints || []).filter((p) => typeof p?.latitude === "number" && typeof p?.longitude === "number");
+	if (pts.length < 2) throw new HttpError(404, "Garmin no ha devuelto el trazado de esa ruta.");
+	const paso = Math.max(1, Math.ceil(pts.length / 3000));
+	const linea = pts.filter((_, i) => i % paso === 0 || i === pts.length - 1).map((p) => [p.longitude, p.latitude, typeof p.elevation === "number" ? p.elevation : null, null]);
+	const tipo = c?.activityTypePk;
+	return { linea, nombre: c?.courseName || "Ruta", deporte: [1, 6, 7].includes(tipo) ? "correr" : [3, 37].includes(tipo) ? "skimo" : "bici" };
+}
+
+/** Tipo de actividad de Garmin para un recorrido (activity-service/activity/activityTypes). */
+const TIPO_COURSE = { bici: 10, gravel: 2, correr: 1, skimo: 3 };
+
+/** Sube una ruta ({ name, coords [[lon, lat, alt]], profile | descripcion, tipo }) a Garmin como recorrido y relee lo guardado. */
+async function subirCourse(env, userId, route) {
+	// Los recorridos de Garmin no necesitan la densidad del router, y
+	// un cuerpo enorme es la forma mas facil de que rechace la subida.
+	// Se mide sobre el trazado COMPLETO, no sobre el submuestreado: las
+	// rectas entre los puntos que se conservan recortan las curvas y
+	// acortan la ruta cerca de un 1%. Cada punto conservado se queda
+	// con su distancia real, no con la del atajo.
+	const acumuladas = [0];
+	for (let i = 1; i < route.coords.length; i++)
+		acumuladas.push(acumuladas[i - 1] + metresBetween(route.coords[i - 1], route.coords[i]));
+
+	const step = Math.ceil(route.coords.length / 1000);
+	const indices = route.coords
+		.map((_, i) => i)
+		.filter((i) => i % step === 0 || i === route.coords.length - 1);
+
+	// Garmin calcula distancia y desnivel a partir del campo `distance`
+	// de cada punto, no del total que se le manda: dejandolo a null,
+	// el recorrido aparecia con 0 km y 0 m de desnivel aunque el perfil
+	// de elevacion se dibujase bien. Es la distancia acumulada desde
+	// el inicio, y se mide sobre los puntos ya submuestreados para que
+	// cuadre con la linea que Garmin acaba guardando.
+	// El desnivel tambien se acumula sobre el trazado completo, por el
+	// mismo motivo: saltarse puntos se come subidas y bajadas cortas.
+	let desnivelPositivo = 0;
+	let desnivelNegativo = 0;
+	for (let i = 1; i < route.coords.length; i++) {
+		const salto = (route.coords[i][2] ?? 0) - (route.coords[i - 1][2] ?? 0);
+		if (salto > 0) desnivelPositivo += salto;
+		else desnivelNegativo -= salto;
+	}
+
+	const recorrido = acumuladas[acumuladas.length - 1];
+
+	const geoPoints = indices.map((idx) => {
+		const [lon, lat, ele] = route.coords[idx];
+		return {
+			longitude: lon,
+			latitude: lat,
+			...(ele != null ? { elevation: ele } : {}),
+			distance: Number(acumuladas[idx].toFixed(1)),
+		};
+	});
+
+	const body = {
+		courseName: route.name,
+		description: route.descripcion || `Trazada con perfil ${route.profile}.`,
+		// Nombres tomados del recorrido tal y como Garmin lo devuelve.
+		// Se manda tambien `distance` porque el DTO de creacion y el de
+		// lectura no tienen por que coincidir, y sobrar no cuesta nada.
+		distance: Number(recorrido.toFixed(1)),
+		distanceMeter: Number(recorrido.toFixed(1)),
+		elevationGainMeter: Math.round(desnivelPositivo),
+		elevationLossMeter: Math.round(desnivelNegativo),
+		// Garmin guardaba el desnivel a cero aunque se lo enviara
+		// relleno, y el recorrido sale con `elevationSource: 2`: parece
+		// que el servidor lo recalcula por su cuenta. Con 1 se le pide
+		// que respete la altitud que viene en los puntos.
+		elevationSource: 1,
+		activityTypePk: route.tipo || 2, // ciclismo, salvo que la app diga otro deporte
+		// Los tres campos que Garmin exige y que no estan documentados
+		// en ningun sitio: los dicta su propio error de validacion.
+		rulePK: 2, // privacidad: 1 publica, 2 privada, 4 grupo
+		sourceTypeId: 1,
+		coordinateSystem: "WGS84",
+		geoPoints,
+		startPoint: geoPoints[0],
+	};
+
+	const res = await apiPost(env, userId, "/course-service/course", body);
+	const courseId = res?.courseId ?? null;
+
+	// Se relee lo que Garmin ha guardado de verdad. Subir sin mirar es
+	// como se colaron una distancia un 1% corta y un desnivel a cero:
+	// la subida decia "correcta" y el recorrido estaba mal.
+	let guardado = null;
+	if (courseId) {
+		try {
+			const c = await apiGet(env, userId, `/course-service/course/${courseId}`);
+			guardado = {
+				distancia_km: round((c?.distanceMeter ?? 0) / 1000, 2),
+				desnivel_m: c?.elevationGainMeter ?? null,
+			};
+		} catch {
+			// No poder comprobarlo no invalida la subida, que ya esta hecha.
+			guardado = { error: "No se pudo releer el recorrido para comprobarlo." };
+		}
+	}
+
+	return {
+		saved: true,
+		course_id: courseId,
+		name: route.name,
+		// Lo que Garmin dice tener, para poder contrastarlo con lo pedido.
+		segun_garmin: guardado,
+		hint: "Abre Garmin Connect y usa 'Enviar al dispositivo' para tenerla en el ciclocomputador.",
+	};
+}
+
 // ──────────────────────────── Herramientas MCP ────────────────────────────
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -2209,102 +2478,121 @@ const TOOLS = {
 			if (!route) throw new HttpError(404, "No existe esa ruta (o ha caducado). Vuelva a trazarla.");
 			if (route.userId !== userId) throw new HttpError(403, "Esa ruta pertenece a otro usuario.");
 
-			// Los recorridos de Garmin no necesitan la densidad del router, y
-			// un cuerpo enorme es la forma mas facil de que rechace la subida.
-			// Se mide sobre el trazado COMPLETO, no sobre el submuestreado: las
-			// rectas entre los puntos que se conservan recortan las curvas y
-			// acortan la ruta cerca de un 1%. Cada punto conservado se queda
-			// con su distancia real, no con la del atajo.
-			const acumuladas = [0];
-			for (let i = 1; i < route.coords.length; i++)
-				acumuladas.push(acumuladas[i - 1] + metresBetween(route.coords[i - 1], route.coords[i]));
+			return subirCourse(env, userId, route);
+		},
+	},
 
-			const step = Math.ceil(route.coords.length / 1000);
-			const indices = route.coords
-				.map((_, i) => i)
-				.filter((i) => i % step === 0 || i === route.coords.length - 1);
-
-			// Garmin calcula distancia y desnivel a partir del campo `distance`
-			// de cada punto, no del total que se le manda: dejandolo a null,
-			// el recorrido aparecia con 0 km y 0 m de desnivel aunque el perfil
-			// de elevacion se dibujase bien. Es la distancia acumulada desde
-			// el inicio, y se mide sobre los puntos ya submuestreados para que
-			// cuadre con la linea que Garmin acaba guardando.
-			// El desnivel tambien se acumula sobre el trazado completo, por el
-			// mismo motivo: saltarse puntos se come subidas y bajadas cortas.
-			let desnivelPositivo = 0;
-			let desnivelNegativo = 0;
-			for (let i = 1; i < route.coords.length; i++) {
-				const salto = (route.coords[i][2] ?? 0) - (route.coords[i - 1][2] ?? 0);
-				if (salto > 0) desnivelPositivo += salto;
-				else desnivelNegativo -= salto;
+	ruta_abrir: {
+		// Solo la app: el editor de rutas. Son miles de puntos; a Claude no le sirven (tiene garmin_courses y garmin_activity_route).
+		soloApp: true,
+		title: "Abrir una ruta en el editor",
+		description: "Una ruta guardada en Garmin (course_id) o el recorrido de una actividad (activity_id), punto a punto y medida, para el editor de rutas de la app.",
+		schema: {
+			type: "object",
+			properties: {
+				course_id: { type: "string", description: "Un recorrido de garmin_courses." },
+				activity_id: { type: "string", description: "Una actividad de garmin_activities." },
+			},
+		},
+		run: async (env, userId, { course_id, activity_id }) => {
+			if (course_id) {
+				const c = await lineaDeCourse(env, userId, course_id);
+				return { nombre: c.nombre, deporte: c.deporte, ...medirRuta(c.linea) };
 			}
+			if (!activity_id) throw new HttpError(400, "Falta course_id o activity_id.");
+			const data = await apiGet(env, userId, `/activity-service/activity/${encodeURIComponent(activity_id)}/details`, { maxChartSize: "2000", maxPolylineSize: "2000" });
+			const t = trazadoDeActividad(data);
+			if (!t) throw new HttpError(404, "Esa actividad no tiene trazado guardado.");
+			return medirRuta(t.puntos.map((p) => [p[0], p[1], p[3], null]));
+		},
+	},
 
-			const recorrido = acumuladas[acumuladas.length - 1];
-
-			const geoPoints = indices.map((idx) => {
-				const [lon, lat, ele] = route.coords[idx];
-				return {
-					longitude: lon,
-					latitude: lat,
-					...(ele != null ? { elevation: ele } : {}),
-					distance: Number(acumuladas[idx].toFixed(1)),
-				};
-			});
-
-			const body = {
-				courseName: route.name,
-				description: `Trazada con perfil ${route.profile}.`,
-				// Nombres tomados del recorrido tal y como Garmin lo devuelve.
-				// Se manda tambien `distance` porque el DTO de creacion y el de
-				// lectura no tienen por que coincidir, y sobrar no cuesta nada.
-				distance: Number(recorrido.toFixed(1)),
-				distanceMeter: Number(recorrido.toFixed(1)),
-				elevationGainMeter: Math.round(desnivelPositivo),
-				elevationLossMeter: Math.round(desnivelNegativo),
-				// Garmin guardaba el desnivel a cero aunque se lo enviara
-				// relleno, y el recorrido sale con `elevationSource: 2`: parece
-				// que el servidor lo recalcula por su cuenta. Con 1 se le pide
-				// que respete la altitud que viene en los puntos.
-				elevationSource: 1,
-				activityTypePk: 2, // ciclismo
-				// Los tres campos que Garmin exige y que no estan documentados
-				// en ningun sitio: los dicta su propio error de validacion.
-				rulePK: 2, // privacidad: 1 publica, 2 privada, 4 grupo
-				sourceTypeId: 1,
-				coordinateSystem: "WGS84",
-				geoPoints,
-				startPoint: geoPoints[0],
-			};
-
-			const res = await apiPost(env, userId, "/course-service/course", body);
-			const courseId = res?.courseId ?? null;
-
-			// Se relee lo que Garmin ha guardado de verdad. Subir sin mirar es
-			// como se colaron una distancia un 1% corta y un desnivel a cero:
-			// la subida decia "correcta" y el recorrido estaba mal.
-			let guardado = null;
-			if (courseId) {
-				try {
-					const c = await apiGet(env, userId, `/course-service/course/${courseId}`);
-					guardado = {
-						distancia_km: round((c?.distanceMeter ?? 0) / 1000, 2),
-						desnivel_m: c?.elevationGainMeter ?? null,
-					};
-				} catch {
-					// No poder comprobarlo no invalida la subida, que ya esta hecha.
-					guardado = { error: "No se pudo releer el recorrido para comprobarlo." };
-				}
+	ruta_editar: {
+		soloApp: true,
+		title: "Cambiar un tramo de una ruta",
+		description:
+			"El editor de rutas de la app: traza solo el tramo que cambia por donde ese deporte puede pasar (sin autopistas, escaleras ni ferris), lo empalma en la ruta, la mide entera y avisa del firme. No guarda nada.",
+		schema: {
+			type: "object",
+			properties: {
+				deporte: { type: "string", enum: ["bici", "correr", "skimo"] },
+				firme: { type: "string", enum: ["carretera", "gravel"], description: "Solo bici. Por defecto carretera." },
+				evitar_trafico: { type: "boolean" },
+				ruta: { type: "array", description: "La ruta actual: [[lon, lat, altitud, firme]]. Vacia para empezar una.", items: { type: "array" } },
+				desde: { type: "integer", description: "Indice del punto donde empieza el cambio. Sin ruta, no se usa." },
+				hasta: { type: "integer", description: "Indice donde acaba. Igual que desde y en el ultimo punto: alarga la ruta por el final." },
+				por: { type: "array", description: "Puntos por los que pasa el tramo nuevo, en orden: [[lon, lat]] (con altitud si es a mano).", items: { type: "array" } },
+				a_mano: { type: "boolean", description: "Lineas rectas entre los puntos, sin seguir caminos (fuera de sendero, en skimo)." },
+			},
+			required: ["deporte", "por"],
+		},
+		run: async (env, userId, { deporte, firme, evitar_trafico, ruta, desde, hasta, por, a_mano }) => {
+			if (!["bici", "correr", "skimo"].includes(deporte)) throw new HttpError(400, "Deporte no valido.");
+			const antes = leerRuta(ruta);
+			const vias = leerRuta(por);
+			// A mano la app manda la recta ya rellena de puntos (uno cada 60 m, con su altitud): ahi el tope es otro.
+			if (vias.length > (a_mano ? 1500 : 25)) throw new HttpError(400, "Demasiados puntos en un solo tramo.");
+			const n = antes.length;
+			let i0 = 0, i1 = 0, alarga = false;
+			if (n) {
+				i0 = Math.max(0, Math.min(n - 1, Math.round(Number(desde ?? n - 1))));
+				i1 = Math.max(i0, Math.min(n - 1, Math.round(Number(hasta ?? i0))));
+				alarga = i0 === i1;
+				if (alarga && i0 !== n - 1) throw new HttpError(400, "El tramo a cambiar necesita un principio y un final distintos.");
 			}
+			const paso = [...(n ? [antes[i0]] : []), ...vias, ...(n && !alarga ? [antes[i1]] : [])];
+			if (paso.length < 2) throw new HttpError(400, "Hacen falta al menos dos puntos para trazar.");
+			if (a_mano && deporte === "bici") throw new HttpError(400, "En bici la ruta va siempre por carreteras o caminos.");
 
+			let tramo;
+			if (a_mano) tramo = paso.map((p) => [p[0], p[1], p[2], "mano"]);
+			else tramo = aligerarLinea(await trazarTramo(paso, deporte, firme, evitar_trafico === true));
+			// El tramo empalma en los puntos de la ruta que ya habia: el resto se queda exactamente como estaba.
+			if (n) tramo[0] = [antes[i0][0], antes[i0][1], antes[i0][2] ?? tramo[0][2], antes[i0][3]];
+			if (n && !alarga) { const f = tramo.length - 1; tramo[f] = [antes[i1][0], antes[i1][1], antes[i1][2] ?? tramo[f][2], tramo[f][3]]; }
+			const linea = n ? [...antes.slice(0, i0), ...tramo, ...(alarga ? [] : antes.slice(i1 + 1))] : tramo;
+			if (linea.length > MAX_PUNTOS_RUTA) throw new HttpError(400, "La ruta ya es demasiado larga para seguir alargandola.");
+
+			const j0 = i0, j1 = i0 + tramo.length - 1;
+			const medida = medirRuta(linea);
+			const trozo = (m, a, b) => ({ km: round(m.puntos[b][2] - m.puntos[a][2], 2), subida: Math.round(m.puntos[b][8] - m.puntos[a][8]) });
+			const vieja = n >= 2 ? medirRuta(antes) : null;
 			return {
-				saved: true,
-				course_id: courseId,
-				name: route.name,
-				// Lo que Garmin dice tener, para poder contrastarlo con lo pedido.
-				segun_garmin: guardado,
-				hint: "Abre Garmin Connect y usa 'Enviar al dispositivo' para tenerla en el ciclocomputador.",
+				...medida,
+				nuevo: [j0, j1],
+				// Antes -> despues, del tramo y de la ruta entera: la app lo ensena antes de aplicar el cambio.
+				tramo: { antes: vieja && !alarga ? trozo(vieja, i0, i1) : null, despues: trozo(medida, j0, j1) },
+				total_antes: vieja ? vieja.total : null,
+				// De la ruta entera (lo que no se ha trazado aqui no tiene firme y no cuenta): asi no se quedan viejos al seguir editando.
+				avisos: avisosDeRuta(medida.puntos, 0, medida.puntos.length - 1, deporte, firme),
 			};
+		},
+	},
+
+	ruta_guardar: {
+		soloApp: true,
+		write: true,
+		title: "Guardar en Garmin una ruta del editor",
+		description:
+			"Sube a Garmin Connect, como recorrido nuevo, la ruta hecha en el editor de la app. ESCRIBE en la cuenta del usuario: la app pide su confirmacion y pasa confirm=true. Nunca sustituye un recorrido que ya exista.",
+		schema: {
+			type: "object",
+			properties: {
+				nombre: { type: "string" },
+				deporte: { type: "string", enum: ["bici", "correr", "skimo"] },
+				firme: { type: "string", enum: ["carretera", "gravel"] },
+				ruta: { type: "array", items: { type: "array" } },
+				confirm: { type: "boolean", description: "Debe ser true, y solo tras que el usuario lo autorice." },
+			},
+			required: ["nombre", "deporte", "ruta", "confirm"],
+		},
+		run: async (env, userId, { nombre, deporte, firme, ruta, confirm }) => {
+			if (confirm !== true) throw new HttpError(400, "Falta la confirmacion explicita del usuario.");
+			const linea = leerRuta(ruta);
+			if (linea.length < 2) throw new HttpError(400, "La ruta esta vacia.");
+			const name = String(nombre || "").trim().slice(0, 80) || "Ruta de myCoach";
+			const tipo = TIPO_COURSE[deporte === "bici" && firme === "gravel" ? "gravel" : deporte] || 2;
+			return subirCourse(env, userId, { name, descripcion: "Hecha en myCoach.", tipo, coords: linea.map(([lon, lat, ele]) => [lon, lat, ele]) });
 		},
 	},
 
@@ -5984,10 +6272,10 @@ const RECURSOS_UI = [{
 		ui: {
 			prefersBorder: true,
 			// Los servidores de mapas son para el recorrido en relieve: Mapterhorn (altitud), OpenFreeMap (mapa base),
-			// Esri (foto aérea), OpenTopoMap (topográfico) y OpenSnowMap (pistas de esquí).
+			// Esri (foto aérea), OpenTopoMap (topográfico), OpenSnowMap (pistas de esquí) y Waymarked Trails (rutas señalizadas, en el editor de rutas).
 			csp: {
-				resourceDomains: ["https://fonts.googleapis.com", "https://fonts.gstatic.com", "https://tiles.mapterhorn.com", "https://tiles.openfreemap.org", "https://server.arcgisonline.com", "https://tile.opentopomap.org", "https://tiles.opensnowmap.org"],
-				connectDomains: ["https://tiles.mapterhorn.com", "https://tiles.openfreemap.org", "https://server.arcgisonline.com", "https://tile.opentopomap.org", "https://tiles.opensnowmap.org"],
+				resourceDomains: ["https://fonts.googleapis.com", "https://fonts.gstatic.com", "https://tiles.mapterhorn.com", "https://tiles.openfreemap.org", "https://server.arcgisonline.com", "https://tile.opentopomap.org", "https://tiles.opensnowmap.org", "https://tile.waymarkedtrails.org"],
+				connectDomains: ["https://tiles.mapterhorn.com", "https://tiles.openfreemap.org", "https://server.arcgisonline.com", "https://tile.opentopomap.org", "https://tiles.opensnowmap.org", "https://tile.waymarkedtrails.org"],
 			},
 			// El codigo de la app se carga de la web (ver metaApp).
 		},

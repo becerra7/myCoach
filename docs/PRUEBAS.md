@@ -105,6 +105,11 @@ Web myCoach (mycoach / mycoach-pruebas) ─────────────�
    - Prueba **¿Cómo te encuentras? → Reventado**: el semáforo se recalcula.
    - **Hablarlo con Claude** copia un encargo para pegarlo en Claude.
 4. **Intervals.icu** (opcional): en intervals.icu, *Settings → Connections* conecta tu Garmin. Luego, en *Settings → Developer Settings*, copia el **Athlete ID** y crea la **API Key**. En la web de pruebas: **Ajustes → Conexiones → Intervals.icu**, pega los dos y pulsa *Conectar*. El conector comprueba la clave con Intervals.icu antes de guardarla.
+5. **Editor de rutas** (decisión 35): **Más → Rutas**.
+   - Toca una ruta guardada: se abre en **Cambiar un tramo**. Toca la ruta donde empieza y donde acaba el cambio, y luego el mapa por donde quieres pasar. Mira el antes → después y **Aplicar el cambio**. El resto de la ruta tiene que seguir igual. **Deshacer** lo devuelve.
+   - **Crear una ruta → Empezar de cero**: toca la salida y dos o tres puntos; **Volver a la salida** cierra el circuito. Prueba a poner un punto en el mar o en medio del monte: tiene que decir que por ahí no se puede.
+   - **Opciones**: Gravel, "Evitar carreteras con tráfico", y en skimo "Trazar a mano". Las capas (tus salidas en lila, lo señalizado) se apagan ahí.
+   - **Ver el resumen → Guardar en Garmin**: guarda una ruta nueva (la original no cambia). Comprueba en Garmin Connect que sale con sus km y su desnivel. **Sin probar contra Garmin:** guardar una de correr o de skimo.
 
 ### C. Plan de comidas (unos 10 minutos)
 

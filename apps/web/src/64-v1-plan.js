@@ -2,7 +2,7 @@
    La semana día a día (con lo hecho y lo que falta) y el mes, para mirar hacia atrás. Rutas y entrenos viven en Más.
    Preparar o cambiar la semana se hace con tu Claude; aquí también se puede a mano. */
 
-/* Rutas guardadas en Garmin (garmin_courses), solo lectura */
+/* Rutas guardadas en Garmin (garmin_courses). Tocar una la abre en el editor (61-rutas-editor.js), que guarda siempre una ruta nueva. */
 const RUT = { datos: undefined };
 async function cargarRutas() {
   if (RUT.datos === 'cargando') return;
@@ -13,7 +13,8 @@ async function cargarRutas() {
   render();
 }
 const listaRutas = d => (Array.isArray(d) ? d : d?.recorridos || d?.courses || []).map(r => ({
-  n: r.nombre || r.name || r.courseName || 'Ruta', km: r.distancia_km ?? r.km ?? (r.distance ? r.distance / 1000 : null), desn: r.desnivel_m ?? r.elevacion_m ?? r.elevationGain ?? null }));
+  id: r.course_id ?? r.courseId ?? null, n: r.nombre || r.name || r.courseName || 'Ruta', km: r.distancia_km ?? r.distance_km ?? r.km ?? (r.distance ? r.distance / 1000 : null), desn: r.desnivel_m ?? r.elevation_gain_m ?? r.elevacion_m ?? r.elevationGain ?? null,
+  dep: /run/.test(r.activity_type || '') ? 'correr' : /hik|mountaineer|ski/.test(r.activity_type || '') ? 'skimo' : 'bici' }));
 
 function nombreSemana(w) {
   if (w === SEM) return 'Esta semana'; if (w === PROX) return 'La semana que viene'; if (w === addDays(SEM, -7)) return 'La semana pasada';
@@ -105,12 +106,16 @@ function tabMasV1() {
 }
 function scrRutas() {
   if (RUT.datos === undefined) cargarRutas();
+  const vivo = fuenteDatos() === 'vivo';
   const cuerpo = RUT.datos === 'cargando' || RUT.datos === undefined ? '<p class="small muted" role="status">Leyendo tus rutas de Garmin…</p>'
     : RUT.datos === null ? '<p class="small">No he podido leer tus rutas. Vuelve a probar en un rato.</p>'
-    : (() => { const l = listaRutas(RUT.datos); return l.length ? `<div class="list">${l.map(x => `<div class="li"><span class="main"><b>${esc(x.n)}</b>${x.km != null ? `<span>${nf(x.km)} km${x.desn != null ? ` y ${nf(x.desn, 0)} m de desnivel` : ''}</span>` : ''}</span></div>`).join('')}</div>`
-      : '<div class="card stack" style="gap:8px"><b>Aún no tienes rutas guardadas en Garmin</b><p class="small">Pídele una a tu Claude: la traza por carreteras reales y, si te gusta, la guarda.</p></div>'; })();
+    : (() => { const l = listaRutas(RUT.datos); const med = x => x.km != null ? `<span>${nf(x.km)} km${x.desn != null ? ` y ${nf(x.desn, 0)} m de desnivel` : ''}</span>` : '';
+      return l.length ? `<div class="list">${l.map(x => vivo && x.id != null ? `<button class="li" type="button" data-a="ed-abrir" data-v="${esc(x.id)}" data-dep="${x.dep}" data-n="${esc(x.n)}" aria-label="${esc(x.n)}. Abrir para verla o cambiarle un tramo"><span class="main"><b>${esc(x.n)}</b>${med(x)}</span>${ic('chev', 18)}</button>`
+        : `<div class="li"><span class="main"><b>${esc(x.n)}</b>${med(x)}</span></div>`).join('')}</div>`
+      : '<div class="card stack" style="gap:8px"><b>Aún no tienes rutas guardadas en Garmin</b><p class="small">Crea una aquí tocando el mapa, o pídesela a tu Claude.</p></div>'; })();
   return { title: 'Tus rutas', html: head('Tus rutas', `Guardadas en Garmin${RUT.datos?.demo ? ' · <span class="demo-tag">Ejemplo</span>' : ''}`) + `<div class="content stack" style="max-width:640px;gap:12px">${cuerpo}
-    <div class="btns" style="margin-top:0"><button class="btn tonal" type="button" data-a="v-encargo" data-v="2">Trazar una con Claude</button></div></div>` };
+    ${vivo ? '' : '<p class="small muted">Con tu Garmin conectado podrás crear rutas aquí y cambiarles solo un tramo.</p>'}
+    <div class="btns" style="margin-top:0">${vivo ? '<button class="btn fill" type="button" data-a="ed-nueva">Crear una ruta</button>' : ''}<button class="btn tonal" type="button" data-a="v-encargo" data-v="2">Trazar una con Claude</button></div></div>` };
 }
 Object.assign(ACTIONS, { 'v-plan-mano': () => { V.planMano = !V.planMano; render(); },
   'cal-vista': el => { V.calVista = el.dataset.v; render(); const b = $(`.cal-sel [data-v="${V.calVista}"]`); if (b) b.focus(); },

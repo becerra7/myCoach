@@ -556,7 +556,7 @@ const rpc = async (env, token, message) => {
 	check("un navegador en la raiz sigue viendo la pagina", (await (await get(env, "/")).text()).includes("<h1>"));
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("tools/list devuelve 56 herramientas", list.body.result.tools.length === 56);
+	check("tools/list devuelve 59 herramientas", list.body.result.tools.length === 59);
 	check("app_guardar se anuncia como escritura", anot0(list).app_guardar.readOnlyHint === false);
 	{
 		const call = (name, args) => rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name, arguments: args } });
@@ -1386,6 +1386,89 @@ const rpc = async (env, token, message) => {
 	check("codifica el recorrido como polilínea de Google", out.polilinea === "_p~iF~ps|U_ulLnnqC_mqNvxq`@", `(${out.polilinea})`);
 }
 
+// ── 8b2. Editor de rutas de la app: cambiar solo un tramo ──
+{
+	mockGarmin({ "ana@x.com": { password: "a", data: { displayName: "ana", hrv: 50 } } });
+	const env = makeEnv();
+	const { tokens } = await connect(env, "ana@x.com", "a");
+	const llamadas = [];
+	let respuesta = null, subido = null;
+	const realFetch = globalThis.fetch;
+	// El router de mentira une los puntos pedidos con una recta de 11 puntos; la segunda mitad es una pista de tierra.
+	globalThis.fetch = async (url, init) => {
+		const u = String(url);
+		if (u.startsWith("https://brouter.de/")) {
+			llamadas.push(u);
+			if (respuesta) return respuesta();
+			const pts = new URL(u).searchParams.get("lonlats").split("|").map((p) => p.split(",").map(Number));
+			const a = pts[0], b = pts.at(-1);
+			const coords = Array.from({ length: 11 }, (_, i) => [a[0] + ((b[0] - a[0]) * i) / 10, a[1] + ((b[1] - a[1]) * i) / 10 + (i % 2 ? 0.0004 : 0), 100 + i * 5]);
+			const fila = (i, tags) => [String(Math.round(coords[i][0] * 1e6)), String(Math.round(coords[i][1] * 1e6)), tags];
+			return new Response(JSON.stringify({ features: [{ geometry: { coordinates: coords }, properties: { messages: [["Longitude", "Latitude", "WayTags"], fila(5, "highway=tertiary surface=asphalt"), fila(10, "highway=track")] } }] }));
+		}
+		if (u.includes("/course-service/course") && init?.method === "POST") { subido = JSON.parse(init.body); return new Response(JSON.stringify({ courseId: 77 })); }
+		if (u.includes("/course-service/course/77")) return new Response(JSON.stringify({ distanceMeter: 5000, elevationGainMeter: 50 }));
+		return realFetch(url, init);
+	};
+	const call = async (name, args) => {
+		const r = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 7, method: "tools/call", params: { name, arguments: args } });
+		if (r.body.result?.isError) throw new Error(r.body.result.content[0].text);
+		return JSON.parse(r.body.result.content[0].text);
+	};
+	const fila = (p) => [p[0], p[1], p[12], p[13]];
+
+	// De cero: dos toques.
+	const r1 = await call("ruta_editar", { deporte: "bici", por: [[2.10, 41.50], [2.14, 41.50]] });
+	check("ruta: traza en bici sin autopistas, escaleras ni ferris", llamadas[0].includes("profile=fastbike") && llamadas[0].includes("allow_steps=0") && llamadas[0].includes("allow_ferries=0"));
+	check("ruta: devuelve el trazado medido y el firme de cada punto", r1.puntos.length === 11 && r1.total.km > 3 && r1.columnas.at(-1) === "firme" && r1.puntos[3][13] === "asfalto" && r1.puntos[9][13] === "tierra");
+	check("ruta: avisa de lo que no está asfaltado en bici de carretera", r1.avisos.some((a) => a.clase === "tierra"), JSON.stringify(r1.avisos));
+
+	// Alargar por el final y cambiar solo el tramo del medio: lo de fuera queda punto por punto igual.
+	const ruta1 = r1.puntos.map(fila);
+	const r2 = await call("ruta_editar", { deporte: "bici", ruta: ruta1, desde: 10, hasta: 10, por: [[2.18, 41.50]] });
+	check("ruta: alargar añade el trozo y no toca lo anterior", r2.puntos.length === 21 && JSON.stringify(r2.puntos.slice(0, 11).map(fila)) === JSON.stringify(ruta1) && r2.tramo.antes === null);
+	const ruta2 = r2.puntos.map(fila);
+	llamadas.length = 0;
+	const r3 = await call("ruta_editar", { deporte: "bici", evitar_trafico: true, ruta: ruta2, desde: 4, hasta: 15, por: [[2.14, 41.53]] });
+	check("ruta: el tramo sale del punto donde empieza, pasa por el nuevo y llega al final", llamadas[0].includes(`lonlats=${ruta2[4][0]},${ruta2[4][1]}|2.14,41.53|${ruta2[15][0]},${ruta2[15][1]}`), llamadas[0]);
+	check("ruta: 'evitar tráfico' se le pide al router", llamadas[0].includes("consider_traffic=1"));
+	const [j0, j1] = r3.nuevo;
+	check("ruta: lo de antes del tramo no cambia", j0 === 4 && JSON.stringify(r3.puntos.slice(0, 5).map(fila)) === JSON.stringify(ruta2.slice(0, 5)));
+	check("ruta: lo de después tampoco", JSON.stringify(r3.puntos.slice(j1).map((p) => [p[0], p[1]])) === JSON.stringify(ruta2.slice(15).map((p) => [p[0], p[1]])));
+	check("ruta: enseña antes → después del tramo y de la ruta entera", r3.tramo.antes.km > 0 && r3.tramo.despues.km > 0 && r3.total_antes.km === r2.total.km && Math.abs(r3.total.km - (r2.total.km - r3.tramo.antes.km + r3.tramo.despues.km)) < 0.02);
+
+	// Gravel y a pie usan otro perfil; a mano no pregunta al router y solo vale fuera de la bici.
+	llamadas.length = 0;
+	const g = await call("ruta_editar", { deporte: "bici", firme: "gravel", por: [[2.10, 41.50], [2.14, 41.50]] });
+	check("ruta: gravel usa su perfil y no avisa de la tierra", llamadas[0].includes("profile=gravel") && !g.avisos.length);
+	await call("ruta_editar", { deporte: "skimo", por: [[2.10, 42.40], [2.14, 42.40]] });
+	check("ruta: skimo y correr van por senderos", llamadas[1].includes("profile=hiking-mountain"));
+	llamadas.length = 0;
+	const mano = await call("ruta_editar", { deporte: "skimo", a_mano: true, por: [[2.10, 42.40, 2000], [2.11, 42.41, 2300], [2.12, 42.42, 2500]] });
+	check("ruta: a mano no llama al router y marca el firme como 'mano'", llamadas.length === 0 && mano.puntos.length === 3 && mano.puntos[1][13] === "mano" && mano.total.subida > 300);
+	try { await call("ruta_editar", { deporte: "bici", a_mano: true, por: [[2.1, 41.5], [2.2, 41.5]] }); check("ruta: a mano en bici debería fallar", false); }
+	catch (e) { check("ruta: en bici no se traza a mano", /carreteras o caminos/.test(e.message)); }
+
+	// Donde no se puede pasar, lo dice (y no devuelve una ruta inventada).
+	respuesta = () => new Response("via1-position not mapped in existing datafile", { status: 400 });
+	try { await call("ruta_editar", { deporte: "bici", por: [[2.1, 41.5], [2.2, 41.5]] }); check("ruta: sin camino debería fallar", false); }
+	catch (e) { check("ruta: sin camino entre los puntos, lo dice", /no se puede pasar/.test(e.message), e.message); }
+	respuesta = () => new Response(JSON.stringify({ features: [{ geometry: { coordinates: [[2.3, 41.5, 10], [2.31, 41.5, 10]] }, properties: { messages: [] } }] }));
+	try { await call("ruta_editar", { deporte: "bici", por: [[2.1, 41.5], [2.31, 41.5]] }); check("ruta: un punto lejos de todo camino debería fallar", false); }
+	catch (e) { check("ruta: un punto lejos de cualquier camino no se acepta", /camino más cercano/.test(e.message), e.message); }
+	respuesta = () => new Response(JSON.stringify({ features: [{ geometry: { coordinates: [[2.1, 41.5, 10], [2.2, 41.5, 10]] }, properties: { messages: [["Longitude", "Latitude", "WayTags"], ["2200000", "41500000", "highway=motorway"]] } }] }));
+	const auto = await call("ruta_editar", { deporte: "bici", por: [[2.1, 41.5], [2.2, 41.5]] });
+	check("ruta: si aun así pisa una autopista, avisa", auto.avisos.some((a) => a.clase === "autopista"));
+	respuesta = null;
+
+	// Guardar: con confirmación, como ruta nueva y con el deporte que toca.
+	try { await call("ruta_guardar", { nombre: "X", deporte: "bici", ruta: ruta2, confirm: false }); check("ruta: sin confirmar debería fallar", false); }
+	catch (e) { check("ruta: no escribe en Garmin sin confirmación", e.message.includes("confirmacion")); }
+	const ok = await call("ruta_guardar", { nombre: "Vuelta nueva", deporte: "correr", ruta: ruta2, confirm: true });
+	check("ruta: guarda un recorrido nuevo con su nombre y su deporte", ok.saved && ok.course_id === 77 && subido.courseName === "Vuelta nueva" && subido.activityTypePk === 1 && subido.geoPoints.length === 21);
+	globalThis.fetch = realFetch;
+}
+
 // ── 8c. El caso de Paula: el KV no ha propagado ──
 {
 	mockGarmin({ "paula@x.com": { password: "p", data: { displayName: "paula", hrv: 61 } } });
@@ -1404,7 +1487,7 @@ const rpc = async (env, token, message) => {
 	check("el token de acceso vale sin leer del KV", init.body.result?.serverInfo?.name === "garmin");
 
 	const list = await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-	check("las herramientas se listan igualmente", list.body.result.tools.length === 56);
+	check("las herramientas se listan igualmente", list.body.result.tools.length === 59);
 
 	// Y el dato que si vive en KV avisa en vez de mentir
 	const call = await rpc(env, tokens.access_token, {
@@ -2279,12 +2362,12 @@ const rpc = async (env, token, message) => {
 	const env = makeEnv();
 	const { tokens } = await connect(env, "ana@x.com", "a");
 	const tools = (await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 30, method: "tools/list" })).body.result.tools;
-	const FAMILIAS = /^(agenda|garmin|coach|entrenos?|entreno|fuerza|cardio|comida|comidas|peso|medidas|avisos|salida|intervals|app|mycoach)(_[a-z0-9]+)*$/;
+	const FAMILIAS = /^(agenda|garmin|coach|entrenos?|entreno|fuerza|cardio|comida|comidas|peso|medidas|avisos|salida|intervals|app|mycoach|ruta)(_[a-z0-9]+)*$/;
 	check("convención: cada herramienta empieza por su familia", tools.every((t) => FAMILIAS.test(t.name)), tools.filter((t) => !FAMILIAS.test(t.name)).map((t) => t.name).join());
 	check("convención: todas con título, descripción y esquema de objeto", tools.every((t) => t.title && t.description?.length > 40 && t.inputSchema?.type === "object"));
 	check("convención: descripciones de menos de 1500 caracteres", tools.every((t) => t.description.length < 1500), tools.filter((t) => t.description.length >= 1500).map((t) => t.name).join());
 	const soloApp = tools.filter((t) => t._meta?.ui?.visibility?.join() === "app").map((t) => t.name).sort();
-	check("las de la app no se le enseñan al modelo (visibility app)", soloApp.join() === "agenda_calendario,app_guardar,avisos,avisos_guardar,fuerza_dia,garmin_activity_track,intervals_conectar,intervals_desconectar", soloApp.join());
+	check("las de la app no se le enseñan al modelo (visibility app)", soloApp.join() === "agenda_calendario,app_guardar,avisos,avisos_guardar,fuerza_dia,garmin_activity_track,intervals_conectar,intervals_desconectar,ruta_abrir,ruta_editar,ruta_guardar", soloApp.join());
 	check("la app sigue pudiendo llamarlas", !(await rpc(env, tokens.access_token, { jsonrpc: "2.0", id: 31, method: "tools/call", params: { name: "app_guardar", arguments: { doc: "notas", datos: [] } } })).body.result.isError);
 	const viejas = ["garmin_sleep", "garmin_hrv", "garmin_daily_summary", "garmin_body_battery", "garmin_training_readiness", "garmin_course_detail", "fuerza_entrenos", "cardio_entrenos", "fuerza_enviar_garmin", "cardio_enviar_garmin"];
 	check("las herramientas juntadas ya no existen", !tools.some((t) => viejas.includes(t.name)));

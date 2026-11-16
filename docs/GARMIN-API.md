@@ -94,6 +94,7 @@ Leyenda: ✅ herramienta propia · 🟡 a medias · 🔎 solo con `garmin_api`.
 | Planes de Garmin Coach y adaptativos | `trainingplan-service/...` | 🔎 |
 | Objetivos | `goal-service/goal/goals` | 🔎 |
 | Recorridos | `course-service/...` | ✅ `garmin_courses` |
+| Recorrido guardado punto a punto, y guardar uno nuevo desde el editor de la app | `course-service/course/{id}` (GET y POST) | ✅ `ruta_abrir`, `ruta_guardar` (solo la app) |
 | Material (zapatillas, bicis) y su desgaste | `gear-service/...` | 🔎 |
 | Relojes, reloj principal, carga solar | `device-service/...`, `web-gateway/...` | 🔎 |
 | Ajustes del usuario | `userprofile-service/userprofile/user-settings` | 🟡 (edad, peso y umbral en `garmin_training_readiness`) |
