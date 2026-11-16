@@ -2131,6 +2131,29 @@ const TOOLS = {
 		},
 	},
 
+	garmin_course_track: {
+		// Solo la app: una ruta guardada en Garmin, punto a punto, para verla en relieve antes de hacerla.
+		soloApp: true,
+		title: "Trazado de una ruta guardada punto a punto",
+		description: "Una ruta guardada en Garmin con posicion, altitud y pendiente en cada punto, para el mapa en relieve de la app.",
+		schema: {
+			type: "object",
+			properties: { course_id: { type: "string", description: "El course_id devuelto por garmin_courses." } },
+			required: ["course_id"],
+		},
+		run: async (env, userId, { course_id }) => {
+			const path = `/course-service/course/${encodeURIComponent(String(course_id))}`;
+			let c;
+			try { c = await apiGet(env, userId, path, { includeGeoPoints: "true" }); } catch { c = await apiGet(env, userId, path); }
+			// Mismo formato que una actividad, sin velocidad, pulso ni tiempo: aún no se ha hecho.
+			const linea = (c?.geoPoints || []).map((p) => ({ lat: Number(p.latitude), lon: Number(p.longitude), altitude: typeof (p.elevation ?? p.altitude) === "number" ? p.elevation ?? p.altitude : undefined }))
+				.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
+			const t = trazadoDeActividad({ geoPolylineDTO: { polyline: linea } });
+			if (!t) throw new HttpError(404, "Garmin no ha devuelto el trazado de esta ruta.");
+			return { ...resumirCourse(c || {}), ...t };
+		},
+	},
+
 	garmin_plan_route: {
 		title: "Trazar y medir una ruta de bici",
 		description:

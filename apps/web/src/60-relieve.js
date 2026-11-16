@@ -59,7 +59,8 @@ function relParadas(t, modo) {
 async function relTraza(a) {
   if (REL_TRAZAS.has(a.id)) return REL_TRAZAS.get(a.id);
   let t;
-  if (LIVE && S.modo === 'vivo' && !a.sim) t = await coachCall('garmin_activity_track', { activity_id: a.id });
+  if (a.ruta) t = await coachCall('garmin_course_track', { course_id: a.ruta });
+  else if (LIVE && S.modo === 'vivo' && !a.sim) t = await coachCall('garmin_activity_track', { activity_id: a.id });
   else {
     const linea = decodePoly((DSET.rutas || {})[a.id] || ''); if (linea.length < 2) throw new Error('sin trazado');
     t = { puntos: linea.map(([lon, lat]) => [lon, lat, 0, null, null, null, null, null, null, null, null, null]), tiene: { alt: false, vel: false, fc: false, t: false, w: false }, ejemplo: true };
@@ -74,17 +75,20 @@ async function relTraza(a) {
 /* Solo en el ejemplo: la altitud se lee del relieve ya cargado y la pendiente sale de ahí (en vivo lo calcula el conector). */
 function relAltitudDeEjemplo(map, t) {
   try {
-    const z = Math.min(12, Math.round(map.getZoom()));
-    for (const p of t.puntos) { const e = map.terrain.getElevationForLngLatZoom(new maplibregl.LngLat(p[0], p[1]), z); p[3] = e == null ? null : Math.round(e / REL_EXAG); }
-    const P = t.puntos;
-    for (let i = 0; i < P.length; i++) { const a = P[Math.max(0, i - 1)], b = P[Math.min(P.length - 1, i + 1)], m = (b[2] - a[2]) * 1000; P[i][4] = m > 50 && a[3] != null && b[3] != null ? Math.max(-30, Math.min(30, Math.round((b[3] - a[3]) / m * 1000) / 10)) : null; }
+    const z = Math.min(12, Math.round(map.getZoom())), P = t.puntos;
+    for (const p of P) { const e = map.terrain.getElevationForLngLatZoom(new maplibregl.LngLat(p[0], p[1]), z); p[3] = e == null ? null : Math.round(e / REL_EXAG); }
+    // Pendiente en los 200 m de alrededor, como hace el conector con las actividades.
+    let a = 0, b = 0;
+    for (let i = 0; i < P.length; i++) { while (P[i][2] - P[a][2] > .1) a++; while (b < P.length - 1 && P[b][2] - P[i][2] < .1) b++; const m = (P[b][2] - P[a][2]) * 1000;
+      P[i][4] = m >= 50 && P[a][3] != null && P[b][3] != null ? Math.max(-30, Math.min(30, Math.round((P[b][3] - P[a][3]) / m * 1000) / 10)) : null; }
     let asc = 0, des = 0; P.forEach((p, i) => { const d = i && p[3] != null && P[i - 1][3] != null ? p[3] - P[i - 1][3] : 0; asc += Math.max(0, d); des += Math.max(0, -d); p[8] = asc; p[9] = des; });
-    t.tiene.alt = P.some(p => p[3] != null); return t.tiene.alt;
+    t.tiene.alt = P.some(p => p[3] != null); if (!t.ejemplo) t.altMapa = t.tiene.alt; return t.tiene.alt;
   } catch (e) { return false; }
 }
 
-function abrirRelieve(id) {
-  const a = actById(id); if (!a) return;
+/* `ruta`: una ruta guardada en Garmin que aún no se ha hecho ({ id, ruta: course_id, lugar, dep }); sin ella, la actividad `id`. */
+function abrirRelieve(id, ruta) {
+  const a = ruta || actById(id); if (!a) return;
   cerrarRelieve(true); REL.a = a; REL.t = null; REL.i = 0; REL.f = 0; REL.vel = 1; REL.play = false; REL.tramo = null; REL.ext = null; REL.modo = 'pend'; REL.foco = document.activeElement;
   const el = document.createElement('div'); el.className = 'mapfull relieve'; el.id = 'relieve'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true'); el.setAttribute('aria-label', `Recorrido en relieve: ${a.lugar}`);
   el.innerHTML = `<div class="mf-top"><button class="close" type="button" aria-label="Cerrar el mapa" data-a="rel-cerrar">${ic('close', 18)}</button>
@@ -101,7 +105,7 @@ function abrirRelieve(id) {
 function relFallo(e) {
   const est = $('#rel-estado'); if (!est) return;
   const sinRed = e && e.message === 'mapa';
-  est.innerHTML = `<b>${sinRed ? 'No se ha podido descargar el mapa' : 'No hay recorrido que enseñar'}</b><span>${sinRed ? 'Comprueba la conexión y vuelve a abrirlo.' : 'Garmin no ha devuelto el trazado de esta actividad. Vuelve a Hoy, actualiza y ábrela otra vez.'}</span>`;
+  est.innerHTML = `<b>${sinRed ? 'No se ha podido descargar el mapa' : 'No hay recorrido que enseñar'}</b><span>${sinRed ? 'Comprueba la conexión y vuelve a abrirlo.' : REL.a && REL.a.ruta ? 'Garmin no ha devuelto el trazado de esta ruta. Vuelve a probar en un rato.' : 'Garmin no ha devuelto el trazado de esta actividad. Vuelve a Hoy, actualiza y ábrela otra vez.'}</span>`;
   est.classList.add('fallo');
 }
 function cerrarRelieve(instant) {
@@ -164,7 +168,8 @@ function relMontar(t) {
     $('#rel-estado').hidden = true; $('.rel-zoom').hidden = false; $('#rel-play').hidden = false; relBotones(); relMapa();
     const atr = $('#rel-map .maplibregl-ctrl-attrib'); if (atr) atr.classList.remove('maplibregl-compact-show'); // los créditos, plegados tras el botón ⓘ
     relPintar();
-    if (t.ejemplo) map.once('idle', () => { if (REL.map === map && relAltitudDeEjemplo(map, t)) relPintar(); });
+    // Sin altitud (el ejemplo, o una ruta que Garmin guarda sin ella), se lee del relieve del mapa.
+    if (t.ejemplo || !t.tiene.alt) map.once('idle', () => { if (REL.map === map && relAltitudDeEjemplo(map, t)) relPintar(); });
   });
 }
 
@@ -194,7 +199,7 @@ function relPintar() {
       <input type="range" id="rel-rango" min="0" max="${P.length - 1}" step="1" value="${REL.i}" aria-label="Recorrer la actividad" ${enTramo ? 'hidden' : ''}>
       ${enTramo ? `<div class="rel-banda" id="rel-banda"></div><div class="rel-asa" id="rel-asa0"></div><div class="rel-asa" id="rel-asa1"></div>
         <input class="vh" type="range" id="rel-t0" min="0" max="${P.length - 1}" step="1" aria-label="Inicio del tramo"><input class="vh" type="range" id="rel-t1" min="0" max="${P.length - 1}" step="1" aria-label="Final del tramo">` : ''}</div>
-    <div class="rel-eje"><span>0 km</span><span>${alts.length ? `De ${nf(a0, 0)} a ${nf(a1, 0)} m` : 'Sin altitud'}${t.ejemplo ? ' ' + simTag('Ejemplo') : ''}</span><span>${nf(kmT, 1)} km</span></div>
+    <div class="rel-eje"><span>0 km</span><span>${alts.length ? `De ${nf(a0, 0)} a ${nf(a1, 0)} m${t.altMapa ? ' (altitud del mapa)' : ''}` : 'Sin altitud'}${t.ejemplo ? ' ' + simTag('Ejemplo') : ''}</span><span>${nf(kmT, 1)} km</span></div>
     ${leyenda}`;
   $('#rel-rango').addEventListener('input', e => relIr(+e.target.value));
   relIr(REL.i);
@@ -356,7 +361,8 @@ Object.assign(ACTIONS, {
   'rel-tramo-fin': () => { relTramoQuitar(); relPintar(); relBotones(); const b = $('#rel-play [data-a="rel-tramo"]'); if (b) b.focus(); },
   'rel-play': () => { if (REL.play) relPausar(); else relReproducir(); const b = $('#rel-play .btn'); if (b) b.focus(); },
   'rel-vel': () => { REL.vel = REL_VELS[(REL_VELS.indexOf(REL.vel) + 1) % REL_VELS.length]; relBotones(); const b = $('#rel-play .rel-vel'); if (b) b.focus(); },
-  'rel-abrir': el => abrirRelieve(el.dataset.v), 'rel-cerrar': () => cerrarRelieve(),
+  'rel-abrir': el => abrirRelieve(el.dataset.v),
+  'rel-ruta': el => abrirRelieve(null, { id: `ruta:${el.dataset.v}`, ruta: el.dataset.v, lugar: el.dataset.n || 'Ruta', dep: 'bici' }), 'rel-cerrar': () => cerrarRelieve(),
   'rel-modo': el => { REL.modo = el.dataset.v; relPintar(); const b = $(`#rel-seg [data-v="${REL.modo}"]`); if (b) b.focus(); },
   'rel-zoom': el => { const m = REL.map, v = +el.dataset.v; if (!m) return;
     if (REL.play && !reduced) { if (REL.entra) REL.entra.z1 = Math.min(m.getMaxZoom(), REL.entra.z1 + v); else REL.zoomObj = Math.max(m.getMinZoom(), Math.min(m.getMaxZoom(), (REL.zoomObj ?? m.getZoom()) + v)); return; }
