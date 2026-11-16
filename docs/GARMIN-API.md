@@ -157,7 +157,7 @@ De 47 herramientas a **40, de las que Claude ve 36**. No se pierde nada, porque 
 | `garmin_courses` + `garmin_course_detail` | **`garmin_courses`** (con `course_id`, el detalle). |
 | `fuerza_entrenos` + `cardio_entrenos` | **`entrenos`** (con `tipo`). |
 | `fuerza_enviar_garmin` + `cardio_enviar_garmin` | **`entreno_enviar_garmin`** (con `tipo`). |
-| `app_guardar`, `intervals_conectar`, `intervals_desconectar`, `fuerza_dia`, `garmin_activity_track` | Siguen, pero **solo para la app** (`_meta.ui.visibility: ["app"]`): Claude no las ve. |
+| `app_guardar`, `intervals_conectar`, `intervals_desconectar`, `fuerza_dia`, `garmin_activity_track`, `garmin_course_track` | Siguen, pero **solo para la app** (`_meta.ui.visibility: ["app"]`): Claude no las ve. |
 
 Las convenciones para seguir creciendo sin romper están en el README del
 conector ("Convenciones de las herramientas"), y las comprueba un test.

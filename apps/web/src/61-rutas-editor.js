@@ -21,7 +21,7 @@ const edKm = v => nf(v, v < 10 ? 2 : 1);
 /* Abrir: de cero ({ dep }), una ruta de Garmin ({ course_id, nombre }) o una actividad ({ activity_id, dep, nombre }). */
 function abrirEditor(origen) {
   if (fuenteDatos() !== 'vivo') { toast('Conecta tu Garmin para crear rutas aquí.'); return; }
-  cerrarEditor(true); closeSheet(true);
+  cerrarEditor(true); closeSheet(true); cerrarRelieve(true); // se puede llegar desde una ruta abierta en relieve ("Cambiar un tramo")
   Object.assign(ED, { dep: origen.dep || 'bici', nombre: origen.nombre || '', P: [], total: null, hist: [], modo: 'alargar', tramo: null, cual: 0, vias: [], prev: null, busy: false, error: '', salida: null, avisos: [], sucia: false, marcas: [], foco: document.activeElement, centro: null });
   const el = document.createElement('div'); el.className = 'mapfull relieve editor'; el.id = 'editor'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true'); el.setAttribute('aria-label', 'Editor de rutas');
   el.innerHTML = `<div class="mf-top"><button class="close" type="button" aria-label="Cerrar el editor" data-a="ed-cerrar">${ic('close', 18)}</button>
@@ -313,7 +313,7 @@ function edResumen() {
   if (ED.P.length < 2) return;
   const t = { puntos: ED.P, tiene: { alt: ED.P.some(p => p[3] != null), vel: false, fc: false, t: false, w: false } };
   REL_TRAZAS.set('ruta-editor', relFrac(t));
-  abrirRelieve('ruta-editor', { id: 'ruta-editor', lugar: ED.nombre || 'Ruta nueva', dep: ED.dep, ruta: true });
+  abrirRelieve('ruta-editor', { id: 'ruta-editor', lugar: ED.nombre || 'Ruta nueva', dep: ED.dep, ruta: 'editor', editor: true });
 }
 function edGuardarHoja() {
   const tot = ED.total; if (!tot) return;

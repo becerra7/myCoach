@@ -19,7 +19,7 @@ const COOKIE = 'mc_s';
 const SESSION_TTL = 60 * 60 * 24 * 60;
 // Solo lo que usa la app.
 export const TOOLS = new Set([
-  'garmin_status', 'garmin_activities', 'garmin_activity_detail', 'garmin_activity_route', 'garmin_activity_track',
+  'garmin_status', 'garmin_activities', 'garmin_activity_detail', 'garmin_activity_route', 'garmin_activity_track', 'garmin_course_track',
   // Garmin: el día (sueño, VFC, readiness…) y la forma (carga, Load Focus, VO2máx, umbrales).
   'garmin_dia', 'garmin_forma',
   'app_leer', 'app_guardar',
