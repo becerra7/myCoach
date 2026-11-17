@@ -366,6 +366,18 @@ Objetivo: que funcione sin ti delante y aprender qué enamora.
     - **Límite:** las sesiones ya guardadas cortadas no se recuperan solas; se arreglan cuando Claude las vuelva a guardar.
     - **De paso:** "Hoy toca Bellver." ya no pone en minúscula un nombre propio.
 
+37. **Repaso de todas las pantallas, 17 de noviembre.** A petición del usuario: revisar cada pantalla, subpantalla y hoja, y corregir lo encontrado. Lo que cambia de comportamiento:
+    - **Hoy, una sola puerta para "no estoy bien".** Antes había tres entradas (el enlace "No estoy al 100 %", la fila "Ajustar duración o intensidad" y la fila "Cuéntame cómo te encuentras"). Ahora todo está en "No estoy al 100 %": los tres motivos de siempre, "Quiero ajustarla yo" y "Contarte cómo me encuentro". La fila de cómo te encuentras solo se queda si ya has contado algo ese día, si tu Garmin no mide el descanso o si no hay sesión pendiente.
+    - **"Prepararla"** (la semana que viene) pasa a botón secundario: en Hoy la acción principal es la sesión. Para la semana en curso sin plan sigue siendo principal.
+    - **Cambios del plan, antes → después.** El conector guarda también lo que había en cada día (`antes`) al aplicar un cambio; los cambios anteriores a hoy solo enseñan cómo quedó.
+    - **Comer:** la nota de qué llevar en una sesión larga sale solo en la línea del entreno; la tarjeta "Durante el entreno" se queda para avisar de que con menos de 90 min basta agua.
+    - **Tu plan a futuro:** cada semana con "Previsto" y "Hecho" (o "Llevas") en dos líneas y el porcentaje rotulado "de las horas"; la frase de arriba ya no repite lo que dice la etiqueta.
+    - **Insights:** las teselas dicen con qué se miden (Endurance Score, VO2máx, Hill Score) y su unidad; "Tus números" (umbrales) pasa a llamarse "Umbrales y predicciones"; en la tabla por terreno no se pinta la casilla sin dato; el rodillo con menos de tres semanas dice la cifra en vez de una gráfica de una barra.
+    - **Estados vacíos con salida:** entrenos, avisos y "Poner un entreno de fuerza" con datos de ejemplo dicen qué hace falta y traen el botón "Entrar en myCoach" (antes, texto sin salida o "Cargando…" para siempre). Fuera la palabra "conector" de lo que lee el usuario.
+    - **Buscar** enseña lo último que has hecho antes de escribir. **Primera pantalla** con un ejemplo de lo que se ve cada mañana.
+    - **Pequeños:** el botón de cerrar de las hojas se toca en 44 px; las cuatro intensidades de "Ajustar la sesión" caben; "Cuánto" pasa a dos filas; las filas de filtros se difuminan por la derecha cuando siguen; la leyenda de deportes de Pueblos junta los menores en "Otros"; en la actividad, "Distinto del plan" y lo que tocaba van en líneas separadas; el nombre de la ruta en el editor va en su línea; rótulos de pestañas a 11 px en iPhone.
+    - **Revisado y sin cambio** (eran efecto de las capturas o del estado de prueba): tamaño de los rótulos de las gráficas y de la tira de la semana, casillas de "Comparar actividades" (la fila entera ya se toca), "Deportes: Ninguno" y la etiqueta "Ejemplo" repetida.
+
 ## 10. Próximos pasos concretos (2 semanas)
 1. Sacar `packages/domain` con carga TRIMP, semáforo y tests.
 2. Documento `atleta/perfil` más registro de decisiones.

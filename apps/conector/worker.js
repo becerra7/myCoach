@@ -5331,7 +5331,9 @@ const COACH_TOOLS = {
 				else delete destino[f];
 			}
 			await guardarDoc(env, userId, "estado/app", { ...(estadoApp || {}), plan: planApp, next: Object.keys(nextApp).length ? nextApp : null });
-			await anadirADoc(env, userId, "coach/decisiones", { at: new Date().toISOString(), fecha: hoy, cambios, porque: String(porque || "").slice(0, 200) });
+			// Tambien lo que habia en cada dia: la app ensena los cambios como antes -> despues.
+			const habia = Object.fromEntries(fechas.map((f) => [f, plan[f] ? { dep: plan[f].dep, t: plan[f].t, d: plan[f].d } : null]));
+			await anadirADoc(env, userId, "coach/decisiones", { at: new Date().toISOString(), fecha: hoy, cambios, antes: habia, porque: String(porque || "").slice(0, 200) });
 			// Lo pre-programado en esos dias ya esta decidido (confirmado o cambiado): deja de estar pendiente.
 			const temporada = await leerDoc(env, userId, TEMPORADA_DOC);
 			if (temporada?.sesiones && fechas.some((f) => temporada.sesiones[f])) {

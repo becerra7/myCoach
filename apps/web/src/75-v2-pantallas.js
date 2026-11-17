@@ -19,7 +19,7 @@ function scrActividadV2(scr) {
     ${(DSET.rutas || {})[a.id] ? `<button type="button" class="trackmap mapprev" data-a="rel-abrir" data-v="${a.id}" aria-label="Abrir el recorrido en relieve">${trackSvg(a.id)}<span class="mp-atr">Foto: Esri</span><span class="mp-cta">${ic('pueblos', 18)} Ver en relieve</span></button>` : ''}
     <header class="act-cab"><h1>${esc(a.lugar)}</h1>${depL(a.dep, `${SPORTS[a.dep].n} · ${fLarga(a.f)}${a.sim ? ' · ejemplo' : ''}`)}</header>
     ${facts2([cardio && a.km ? ['Distancia', `${nf(a.km)} km`] : null, [a.mov ? 'En movimiento' : 'Tiempo', dur(Math.round(mov))], cardio && a.desn ? ['Desnivel', `${nf(a.desn, 0)} m`] : a.fc ? ['Pulso medio', `${a.fc} ppm`] : null])}
-    ${plan ? `<p style="padding:0 4px">${cumple ? tag('good', '✓', 'Lo que tocaba') : tag('warn', '!', 'Distinto del plan')} <span class="small muted">${esc(plan.d)}</span></p>` : ''}
+    ${plan ? `<div class="act-vs">${cumple ? tag('good', '✓', 'Lo que tocaba') : tag('warn', '!', 'Distinto del plan')}<p class="small muted">${cumple ? '' : 'Tocaba: '}${esc(plan.d)}</p></div>` : ''}
     ${pidiendo ? '<p class="small muted" role="status" style="padding:0 4px">Leyendo el detalle de Garmin…</p>' : ''}
     ${cardio ? actEntrenador(a) : a.dep === 'fuerza' ? `<section class="card" aria-labelledby="act-fz"><h2 class="card-t" id="act-fz">${plan ? 'El plan frente a lo que hiciste' : 'Tus ejercicios'}</h2>${bloqueFuerza(a.f, true)}</section>` : ''}
     ${grupo2(filas)}
@@ -44,7 +44,7 @@ function tabMasV2() {
   const lista = (items, vacio) => items && items.length ? `<span class="prev-l">${items.join('')}</span>` : `<span class="small muted">${vacio}</span>`;
   const cabT = t => `<span class="cab"><span>${t}</span>${ic('chev', 18)}</span>`;
   return { title: 'Más', html: `<div class="v2">${cab2('Más')}
-    <button class="li" type="button" data-a="push" data-v="buscar" style="background:var(--surface);border-radius:999px;min-height:var(--tap)">${ic('search', 20)}<span class="main"><span style="font-size:16px">Buscar una actividad, un pueblo o un entreno</span></span></button>
+    <button class="li" type="button" data-a="push" data-v="buscar" style="background:var(--surface);border-radius:999px;min-height:var(--tap)">${ic('search', 20)}<span class="main"><span style="font-size:16px">Buscar actividad, pueblo o entreno</span></span></button>
     <div class="v2-cols"><div class="col">
     <button class="tap-card" type="button" data-a="push" data-v="pueblos">${cabT('Pueblos')}
       ${nP ? `<span><span class="cifra xl">${nP}</span></span><span>municipios por los que has pasado. El que más: ${esc(towns[0].n)}, ${nf(towns[0].km)} km.</span>` : '<span class="small muted">Por dónde has pasado, tu mapa y tus totales. Actualiza para leer tus trazados.</span>'}</button>

@@ -332,7 +332,8 @@ body.framed .app[data-os="android"] .tabs{padding-bottom:22px}
 .sheet-h h3{flex:1;margin:0;font-size:20px;font-weight:700;line-height:1.2}
 .app[data-os="android"] .sheet-h h3{font-weight:400;font-size:24px}
 .sheet-b{overflow-y:auto;padding:8px 20px calc(20px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:16px;flex:1}
-.close{width:32px;height:32px;min-width:32px;border-radius:50%;background:var(--fill);color:var(--label-2);border:0;display:grid;place-items:center;cursor:pointer}
+.close{width:32px;height:32px;min-width:32px;border-radius:50%;background:var(--fill);color:var(--label-2);border:0;display:grid;place-items:center;cursor:pointer;position:relative}
+.close::after{content:"";position:absolute;inset:-6px} /* se ve de 32 px, se toca en 44 */
 @container app (min-width:840px){
   .sheet,.app:not([data-os="android"]) .sheet.medium,.app:not([data-os="android"]) .sheet.auto{left:auto;right:16px;top:16px;bottom:16px;width:440px;height:auto!important;max-height:none;border-radius:28px;transform:translateX(110%)}
   .sheet.in,.app:not([data-os="android"]) .sheet.in{transform:none}
@@ -450,6 +451,9 @@ body.framed .toasts{top:50px}
 .app:has(.mapfull.relieve) .layer{z-index:65} /* las hojas y los diálogos del editor van por encima del mapa */
 .rel-guardar{flex:none;min-height:40px;padding:0 14px;font-size:14px}
 .ed-top{flex:none;min-height:var(--tap);padding:0 10px;font-size:15px}
+/* En móvil el nombre de la ruta va en su línea: al lado de "Deshacer" y "Opciones" se cortaba */
+.editor .mf-top{flex-wrap:wrap;row-gap:0}.editor .mf-top .close{margin-right:auto}
+.editor #ed-titulo{order:3;flex:1 1 100%;padding:0 2px 4px}
 .ed-top:disabled{color:var(--label-2);opacity:.55;cursor:default}
 .ed-pista{position:absolute;left:12px;bottom:12px;z-index:2;margin:0;max-width:calc(100% - 24px);padding:8px 14px;border-radius:18px;background:var(--card);color:var(--label);box-shadow:0 4px 14px rgba(0,0,0,.2);font-size:14px;font-weight:600;line-height:1.3;pointer-events:none}
 .ed-pista[hidden]{display:none}
@@ -474,6 +478,7 @@ body.framed .toasts{top:50px}
 .ed-via:focus-visible::before{outline:2px solid #fff;outline-offset:2px}
 .rel-ext.ed-meta{border-radius:50%;background:#15191E;border-color:#fff;box-shadow:0 1px 4px rgba(0,0,0,.35)}
 @container app (min-width:840px){
+  .mapfull.editor #ed-titulo{order:0;flex:1;flex-basis:auto}
   .mapfull.editor{display:grid;grid-template-columns:minmax(0,1fr) 360px;grid-template-rows:auto minmax(0,1fr)}
   .mapfull.editor .mf-top,.mapfull.editor .rel-view{grid-column:1/-1}
   .mapfull.editor:has(.ed-panel:not([hidden])) .rel-view{grid-column:1}
@@ -508,6 +513,15 @@ body.framed .ob-in{padding-top:72px}
 .ob h1{margin:0;font-size:34px;line-height:1.1;font-weight:800;text-wrap:balance}
 .app[data-os="android"] .ob h1{font-weight:400;font-size:36px}
 .ob .lead{font-size:17px;color:var(--label-2);line-height:1.45}
+/* Primera pantalla: un ejemplo de lo que se ve cada mañana, hecho con las mismas piezas que Hoy */
+.ob-prev{margin:20px 0 0;display:flex;flex-direction:column;gap:8px}
+.ob-prev figcaption{font-size:13px;font-weight:600;color:var(--label-2)}
+.ob-prev-c{background:var(--card);border-radius:var(--r-card);padding:16px;display:flex;flex-direction:column;gap:6px;font-size:15px;color:var(--label-2)}
+.ob-prev-c b{font-size:22px;line-height:1.15;color:var(--label)}
+.ob-prev-s{align-self:flex-start;font-size:13px;font-weight:700;color:var(--good);background:var(--good-soft);border-radius:999px;padding:3px 10px}
+.ob-prev-f{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:6px}
+.ob-prev-f span{background:var(--fill);border-radius:12px;padding:8px 10px;font-weight:700;color:var(--label);font-size:16px}
+.ob-prev-f small{display:block;font-size:11px;font-weight:500;color:var(--label-2)}
 .ob .spacer{flex:1}
 .steps{display:flex;gap:6px}
 .steps i{height:4px;flex:1;border-radius:2px;background:var(--fill)}
@@ -641,7 +655,8 @@ body:not(.framed) .proto-fab{top:38%;right:0;writing-mode:vertical-rl;transform:
 .k-int{background:var(--int-chip,var(--int));color:var(--int-ink)}
 
 /* Chips de filtro (deportes) */
-.filters{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding:2px 2px 4px;margin:0 -2px}
+.filters{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding:2px 28px 4px 2px;margin:0 -2px;-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent);mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent)} /* el borde derecho se difumina: se ve que la fila sigue */
+.filters[style*="wrap"]{padding-right:2px;-webkit-mask-image:none;mask-image:none}
 .filters::-webkit-scrollbar{display:none}
 .fchip{flex:none;display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 14px;border-radius:999px;border:1px solid var(--sep);background:var(--card);color:var(--label);font-size:14px;font-weight:600;cursor:pointer}
 .fchip i{width:10px;height:10px;border-radius:50%;flex:none}
@@ -1064,6 +1079,7 @@ button.hp-encaje{cursor:pointer;align-items:center;min-height:44px}
 .step button{width:var(--tap);height:var(--tap);border:0;background:none;color:var(--ink);font-size:20px;cursor:pointer}
 .step b{min-width:72px;text-align:center;font-size:16px;font-stretch:80%}
 .seg2{display:flex;border:1px solid var(--rule);border-radius:var(--r-ctl);overflow-x:auto;scrollbar-width:none;max-width:100%}
+.fr-ctl .seg2{flex:1 1 100%}.fr-ctl .seg2 button{flex:1 1 auto;min-width:0;padding:0 4px;font-size:13px} /* las cuatro intensidades caben siempre: antes la cuarta se salía */
 .seg2 button{flex:1 0 auto;min-height:var(--tap);padding:0 14px;border:0;border-right:1px solid var(--rule);background:none;color:var(--ink-2);font:inherit;font-size:15px;font-weight:600;cursor:pointer;white-space:nowrap}
 .seg2 button:last-child{border-right:0}
 .seg2 button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}

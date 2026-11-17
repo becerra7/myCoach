@@ -44,7 +44,7 @@ function secAvisos() {
   if (window.PLATFORM && PLATFORM.name === 'claude-app') return '';
   const instalar = instalarEvt ? `<div class="btns" style="margin-top:0"><button class="btn tonal" type="button" data-a="app-instalar">Instalar myCoach</button></div><p class="small muted">Se abre como una app, sin la barra del navegador, y puede avisarte con ella cerrada.</p>` : '';
   if (!pushPosible()) return instalar || (esIOS() && !instalada() ? '<p class="small">En iPhone, los avisos funcionan con myCoach en la pantalla de inicio: en Safari, Compartir → Añadir a pantalla de inicio, y ábrela desde allí.</p>' : '<p class="small muted">Este navegador no puede mandar avisos.</p>');
-  if (!LIVE || S.modo !== 'vivo') return `${instalar}<p class="small muted">Los avisos se activan con tu cuenta conectada, no en el modo demo.</p>`;
+  if (!LIVE || S.modo !== 'vivo') return `${instalar}<p class="small">Los avisos (el semáforo de la mañana y la semana sin plan) llegan con tu cuenta, no con los datos de ejemplo.</p>${typeof PLATFORM !== 'undefined' && PLATFORM.name === 'web' ? '<div class="btns"><button class="btn fill" type="button" data-a="web-login">Entrar en myCoach</button></div>' : ''}`;
   cargarAvisos();
   const c = AV.cfg; if (c === undefined || c === 'cargando') return `${instalar}<p class="small muted" role="status">Mirando tus avisos…</p>`;
   if (c === null) return `${instalar}<p class="small">No he podido leer tus avisos.</p>`;

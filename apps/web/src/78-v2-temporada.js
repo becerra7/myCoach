@@ -40,11 +40,12 @@ function scrTemporada() {
   const [tono, ico, pal] = ESTADO_TEMP[d.donde_estas.estado] || ESTADO_TEMP.empezando, h = d.hasta_hoy || {};
   const fila = s => { const e = s.esperado, r = s.real, ahora = s.estado === 'en_curso';
     return `<div class="li${ahora ? ' ahora' : ''}" style="cursor:default"><span class="day" aria-hidden="true"><small>Sem.</small><b>${s.n}</b></span>
-      <span class="main"><b>${e.fase ? esc(cap1(e.fase)) : `Semana ${s.n}`}${ahora ? ' · esta semana' : ''}</b><span>Del ${fDia(s.lunes)} al ${fDia(addDays(s.lunes, 6))} · ${esc(txtEsperado(e))}</span>
-      ${r ? `<span>${ahora ? 'Llevas' : 'Hecho'}: ${nf(r.horas)} h${r.intensos != null ? ` · ${r.intensos} intenso${r.intensos === 1 ? '' : 's'}` : ''}${r.larga_min ? ` · largo de ${dur(r.larga_min)}` : ''}</span>` : ''}${e.nota ? `<span>${esc(e.nota)}</span>` : ''}</span>
-      ${r && !ahora && s.pct_horas != null ? `<span class="val" aria-label="${s.pct_horas} por ciento de las horas"><b class="cifra" style="font-size:20px;color:var(--ink)">${s.pct_horas} %</b></span>` : ''}</div>`; };
+      <span class="main"><b>${e.fase ? esc(cap1(e.fase)) : `Semana ${s.n}`}${ahora ? ' · esta semana' : ''}</b><span>Del ${fDia(s.lunes)} al ${fDia(addDays(s.lunes, 6))}</span>
+      <span class="temp-l"><i>Previsto</i>${esc(txtEsperado(e))}</span>
+      ${r ? `<span class="temp-l"><i>${ahora ? 'Llevas' : 'Hecho'}</i>${nf(r.horas)} h${r.intensos != null ? ` · ${r.intensos} intenso${r.intensos === 1 ? '' : 's'}` : ''}${r.larga_min ? ` · largo de ${dur(r.larga_min)}` : ''}</span>` : ''}${e.nota ? `<span>${esc(e.nota)}</span>` : ''}</span>
+      ${r && !ahora && s.pct_horas != null ? `<span class="val" aria-label="${s.pct_horas} por ciento de las horas"><b class="cifra" style="font-size:20px;color:var(--ink)">${s.pct_horas} %</b><small class="temp-pct" aria-hidden="true">de las horas</small></span>` : ''}</div>`; };
   return envuelve(`${esc(d.nombre || d.objetivo || 'Semana a semana')}${d.hasta ? ` · hasta el ${fDia(d.hasta)}` : ''}${demo}`, `
-    <section class="card" aria-label="Dónde estás">${tag(tono, ico, pal)}<p class="frase" style="font-size:22px">${esc(d.donde_estas.texto)}</p>
+    <section class="card" aria-label="Dónde estás">${tag(tono, ico, pal)}<p class="frase" style="font-size:22px">${esc(String(d.donde_estas.texto || '').replace(/[:,]\s*vas (por (detrás|delante) de|según) lo esperado\.?$/i, '.'))}</p>
       ${h.semanas_cerradas >= 1 && h.horas_esperadas ? barra2('Horas', `${nf(h.horas_hechas)} de ${nf(h.horas_esperadas)} h`, h.pct_horas || 0) : ''}
       ${h.semanas_cerradas >= 1 ? facts2([h.intensos_esperados ? ['Intensos', `${h.intensos_hechos} de ${h.intensos_esperados}`] : null, h.largas_previstas ? ['Largas', `${h.largas_hechas} de ${h.largas_previstas}`] : null, h.fuerza_esperada ? ['Fuerza', `${h.fuerza_hecha} de ${h.fuerza_esperada}`] : null]) : ''}
       <p class="small muted">Semana ${d.semana_actual || '—'} de ${d.semanas_totales}${d.semanas_restantes ? ` · quedan ${d.semanas_restantes}` : ''}. ${d.donde_estas.estado === 'por_detras' ? 'No se trata de recuperar lo perdido: se reajusta lo que queda.' : ''}</p>

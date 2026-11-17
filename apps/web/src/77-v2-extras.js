@@ -41,7 +41,10 @@ async function molestiaSigue() {
 /* Buscar */
 const norm = t => String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 function resultadosBusca(q) {
-  const n = norm(q).trim(); if (n.length < 2) return '<p class="muted" style="padding:0 4px">Escribe al menos dos letras: el nombre de una salida, un deporte, un pueblo o un entreno.</p>';
+  const n = norm(q).trim();
+  if (n.length < 2) { // sin texto todavía: lo último que has hecho, que es lo que más se busca
+    const ult = [...acts()].sort((a, b) => a.f < b.f ? 1 : -1).slice(0, 5);
+    return `<p class="muted" style="padding:0 4px">Escribe al menos dos letras: una salida, un deporte, un pueblo o un entreno.</p>${ult.length ? grupo2(ult.map(a => fila2(esc(a.lugar), `${cap1(fLarga(a.f))} · ${esc(detalleAct(a))}`, `data-a="push" data-v="actividad" data-id="${a.id}"`, { icono: `<i class="dot" style="background:${scol(a.dep)}" aria-hidden="true"></i>` })).join(''), 'Lo último que has hecho') : ''}`; }
   const as = acts().filter(a => norm(`${a.lugar} ${SPORTS[a.dep]?.n}`).includes(n)).sort((a, b) => a.f < b.f ? 1 : -1).slice(0, 12);
   const ps = pueblosDe([]).filter(t => norm(t.n).includes(n)).slice(0, 8);
   const es = (Array.isArray(ENTS) ? ENTS : []).filter(e => norm(e.nombre).includes(n)).slice(0, 6);

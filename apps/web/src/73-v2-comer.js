@@ -6,7 +6,8 @@ function tabComerV2() {
   const o = objetivosComida(HOY), sum = sumaComida(HOY), falta = o.hidrato[0] - sum.c, s = sesion(HOY), menu = menuDelDia(HOY);
   const frase = !sum.ms.length ? `${o.cg.n}: aún no has registrado nada.` : falta > 0 ? `${o.cg.n}: te ${falta === 1 ? 'falta' : 'faltan'} ${qTxt(falta)} de hidrato.` : sum.c > o.hidrato[1] ? `${o.cg.n}: llevas ${qTxt(sum.c - o.hidrato[1])} de hidrato de más.` : `${o.cg.n}: vas en objetivo de hidrato.`;
   const rango = ([lo, hi]) => lo === hi ? nf(lo) : `${nf(lo)}-${nf(hi)}`;
-  const durante = s && SPORTS[s.dep]?.cardio && s.t !== 'descanso' && !s.a ? (s.min >= 90 ? '60-90 g de hidrato por hora desde la segunda hora (geles, barritas o bebida).' : 'La sesión de hoy dura menos de 90 min: con agua basta.') : '';
+  // En sesiones largas, lo que hay que llevar ya lo dice la línea del entreno en "Tu día": aquí solo se avisa de cuándo no hace falta nada.
+  const durante = s && SPORTS[s.dep]?.cardio && s.t !== 'descanso' && !s.a && !(s.min >= 90) ? 'La sesión de hoy dura menos de 90 min: con agua basta.' : '';
   const delMenu = menu ? Object.values(menu.comidas || {}).map(c => c?.plan?.descripcion).filter(Boolean) : [];
   return { title: 'Comer', html: `<div class="v2">${cab2('Comer', `${cap1(fLarga(HOY))}${S.modo === 'demo' ? ' · <span class="demo-tag">Ejemplo</span>' : ''}`)}
     <div class="v2-cols"><div class="col">

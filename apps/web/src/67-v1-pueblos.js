@@ -32,7 +32,9 @@ function tabPueblosV1() {
     ${blk(`${blkH(titulo, M.fuente === 'demo' ? '<span class="demo-tag">Ejemplo</span>' : '')}
       <div class="tot x4"><div><b>${nf(r.h, r.h < 10 ? 1 : 0)}</b><span class="n">horas</span></div><div><b>${nf(r.km, 0)}</b><span class="n">kilómetros</span></div><div><b>${nf(r.desn, 0)}</b><span class="n">metros de desnivel</span></div><div><b>${r.n}</b><span class="n">actividades</span></div></div>
       ${deps.length ? `<div class="reparto" role="img" aria-label="Reparto de horas: ${deps.map(([k, v]) => `${SPORTS[k].n} ${Math.round(v / tot * 100)} %`).join(', ')}">${deps.map(([k, v]) => `<i style="flex:${v};background:${scol(k)}"></i>`).join('')}</div>
-      <div class="leyenda">${deps.map(([k, v]) => `<span><i style="background:${scol(k)}"></i>${SPORTS[k].n} ${Math.round(v / tot * 100)} %</span>`).join('')}</div>` : ''}`, 'first')}
+      <div class="leyenda">${(() => { // los cuatro deportes que más pesan y el resto junto: con diez, la leyenda ocupaba cuatro líneas (la lista entera la lee el lector de pantalla en la barra)
+        const top = deps.slice(0, 4), resto = deps.slice(4).reduce((s, [, v]) => s + v, 0);
+        return top.map(([k, v]) => `<span><i style="background:${scol(k)}"></i>${SPORTS[k].n} ${Math.round(v / tot * 100)} %</span>`).join('') + (resto ? `<span><i style="background:var(--fill)"></i>${deps.length - 4 === 1 ? SPORTS[deps[4][0]].n : 'Otros'} ${Math.round(resto / tot * 100)} %</span>` : ''); })()}</div>` : ''}`, 'first')}
     <div class="grid2">
     ${blk(`${vizT('Tu año, día a día', info('cal', 'Tu año, día a día', 'Cada cuadro es un día de los últimos doce meses; más oscuro, más horas: menos de 1 h, de 1 a 2 h y más de 2 h. Las columnas son semanas, de lunes a domingo.'))}
       <div class="heat viz" role="img" aria-label="Los últimos doce meses día a día: ${cal.activos} días con actividad">${cal.celdas}</div>

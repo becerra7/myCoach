@@ -36,12 +36,16 @@ tabV2('plan', tabPlanV2);
 const CAMB = { datos: undefined, fuente: null };
 async function cargarCambios() {
   const f = fuenteDatos(); if (f === 'espera') { cuandoHayaConector(); return; } CAMB.fuente = f;
-  if (f === 'demo') { CAMB.datos = [{ fecha: addDays(HOY, -3), porque: 'Semáforo ámbar: has dormido 5 h 50', cambios: { [addDays(HOY, -3)]: { d: '45 min suaves', dep: 'bici' } } }, { fecha: addDays(HOY, -9), porque: 'Cena de trabajo el jueves', cambios: { [addDays(HOY, -9)]: null, [addDays(HOY, -8)]: { d: 'Series 4 × 8 min', dep: 'bici' } } }]; return; }
+  if (f === 'demo') { CAMB.datos = [{ fecha: addDays(HOY, -3), porque: 'Semáforo ámbar: has dormido 5 h 50', cambios: { [addDays(HOY, -3)]: { d: '45 min suaves', dep: 'bici' } }, antes: { [addDays(HOY, -3)]: { d: 'Series 4 × 8 min', dep: 'bici' } } }, { fecha: addDays(HOY, -9), porque: 'Cena de trabajo el jueves', cambios: { [addDays(HOY, -9)]: null, [addDays(HOY, -8)]: { d: 'Series 4 × 8 min', dep: 'bici' } }, antes: { [addDays(HOY, -9)]: { d: 'Series 4 × 8 min', dep: 'bici' }, [addDays(HOY, -8)]: null } }]; return; }
   CAMB.datos = 'cargando';
   try { CAMB.datos = (await coachCall('app_leer', { doc: 'coach/decisiones' }, true)) || []; } catch (e) { CAMB.datos = null; }
   render();
 }
-function textoCambio(c) {
+/* Cada línea de un cambio: [día, lo que había, lo que queda]. Los cambios antiguos no guardaban lo que había: ahí solo sale cómo queda. */
+function textoCambio(c, antes) {
+  const nom = s => s ? (s.t === 'descanso' ? 'Descanso' : s.d || s.t || 'Sesión') : 'Libre';
+  if (c && typeof c === 'object' && !Array.isArray(c) && antes && typeof antes === 'object')
+    return Object.entries(c).filter(([f]) => /^\d{4}-\d{2}-\d{2}$/.test(f)).map(([f, s]) => ({ dia: cap1(fLarga(f)), antes: nom(antes[f]), despues: nom(s) }));
   if (Array.isArray(c)) return c.map(x => typeof x === 'string' ? x : [x.fecha ? cap1(fLarga(x.fecha)) : '', x.antes != null ? `antes, ${typeof x.antes === 'string' ? x.antes : x.antes?.d || x.antes?.descripcion || 'nada'}` : '', x.despues != null ? `después, ${typeof x.despues === 'string' ? x.despues : x.despues?.d || x.despues?.descripcion || 'nada'}` : ''].filter(Boolean).join(': ').replace(': después', '; después'));
   if (c && typeof c === 'object') return Object.entries(c).filter(([f]) => /^\d{4}-\d{2}-\d{2}$/.test(f)).map(([f, s]) => `${cap1(fLarga(f))}: ${s ? (s.t === 'descanso' ? 'descanso' : s.d || s.t || 'sesión cambiada') : 'sin sesión'}`);
   return [];
@@ -53,8 +57,8 @@ function scrCambios() {
   if (d === undefined || d === 'cargando') cuerpo = '<p class="muted" role="status">Leyendo los cambios…</p>';
   else if (d === null) cuerpo = '<div class="card"><p>No he podido leer los cambios.</p><div class="btns"><button class="btn tonal" type="button" data-a="v2-cambios-recargar">Volver a probar</button></div></div>';
   else { const l = (Array.isArray(d) ? d : []).slice().reverse().slice(0, 40);
-    cuerpo = l.length ? `<div class="list">${l.map(x => { const lineas = textoCambio(x.cambios);
-      return `<div class="li" style="cursor:default"><span class="main cambio-l"><small>${x.fecha ? cap1(fLarga(x.fecha)) : ''}${x.tipo === 'comida' ? ' · comidas' : ''}</small><b>${esc(x.porque || 'Cambio del plan')}</b>${lineas.slice(0, 4).map(t => `<span>${esc(t)}</span>`).join('')}</span></div>`; }).join('')}</div>`
+    cuerpo = l.length ? `<div class="list">${l.map(x => { const lineas = textoCambio(x.cambios, x.antes);
+      return `<div class="li" style="cursor:default"><span class="main cambio-l"><small>${x.fecha ? cap1(fLarga(x.fecha)) : ''}${x.tipo === 'comida' ? ' · comidas' : ''}</small><b>${esc(x.porque || 'Cambio del plan')}</b>${lineas.slice(0, 4).map(t => typeof t === 'string' ? `<span>${esc(t)}</span>` : `<span class="cambio-ad"><i>${esc(t.dia)}</i><s>${esc(t.antes)}</s><span aria-hidden="true">→</span><span class="vh"> pasa a </span><b>${esc(t.despues)}</b></span>`).join('')}</span></div>`; }).join('')}</div>`
       : '<div class="card"><b>Aún no hay cambios</b><p class="small muted">Cuando tú, tu entrenador o tu Claude cambiéis el plan, aquí quedará qué se cambió y por qué.</p></div>'; }
   return { title: 'Cambios del plan', html: `<div class="v2">${cab2('Cambios del plan', `Qué se cambió y por qué${CAMB.fuente === 'demo' ? ' · <span class="demo-tag">Ejemplo</span>' : ''}`)}${cuerpo}</div>` };
 }

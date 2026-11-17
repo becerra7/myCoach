@@ -157,7 +157,9 @@ function despuesMotivo(k, s) {
 function hojaNo100(sel) {
   const s = sesion(HOY), d = sel && despuesMotivo(sel, s);
   openSheet({ title: 'No estoy al 100 %', size: 'auto', id: 'v-no100', body: () => `<p class="muted">Te enseño cómo queda hoy antes de cambiar nada.</p>
-    <div class="filas">${MOTIVOS.map(([k, t, x]) => `<button class="fila-b" type="button" data-a="v-motivo" data-v="${k}" aria-pressed="${sel === k}"><span><b>${t}</b><span class="small muted" style="display:block">${x}</span></span>${sel === k ? tag('good', '✓', '') : ''}</button>`).join('')}</div>
+    <div class="filas">${MOTIVOS.map(([k, t, x]) => `<button class="fila-b" type="button" data-a="v-motivo" data-v="${k}" aria-pressed="${sel === k}"><span><b>${t}</b><span class="small muted" style="display:block">${x}</span></span>${sel === k ? tag('good', '✓', '') : ''}</button>`).join('')}
+      ${sel ? '' : `${s && !s.a && s.t !== 'descanso' && SPORTS[s.dep]?.cardio && esV2() ? '<button class="fila-b" type="button" data-a="v2-carga"><span><b>Quiero ajustarla yo</b><span class="small muted" style="display:block">Cambias minutos o intensidad y ves si entra en lo que aguantas hoy</span></span></button>' : ''}
+        <button class="fila-b" type="button" data-a="coach-sentir-hoja"><span><b>Contarte cómo me encuentro</b><span class="small muted" style="display:block">Ánimo, físico o una molestia: cuenta para el semáforo</span></span></button>`}</div>
     ${sel ? (s && s.t !== 'descanso' && !s.a ? `<div class="antes-despues"><div><span class="xs muted">Antes</span><p><s>${esc(s.d)}</s></p></div><div class="ahora"><span class="xs muted">Después</span><p><b>${esc(d.d)}</b></p></div></div>
       ${sel === 'molestia' ? '<p class="small muted" style="margin-top:8px">Si en dos o tres días no mejora, consulta a un profesional.</p>' : ''}
       <div class="btns"><button class="btn fill" type="button" data-a="v-motivo-ok" data-v="${sel}">Aplicar el cambio</button><button class="link" type="button" data-a="coach-sentir-hoja">Contar cómo me encuentro</button></div>`

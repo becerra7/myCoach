@@ -52,7 +52,7 @@ function enClaude(prompt) {
   if (navigator.clipboard?.writeText) navigator.clipboard.writeText(prompt).then(done, () => showPrompt(prompt)); else showPrompt(prompt);
   markFlow('ia');
 }
-function showPrompt(p) { openSheet({ title: 'Encargo para Claude', size: 'auto', body: () => `<p class="small muted">Cópialo y pégalo en Claude con tu conector de Garmin activo.</p><label class="vh" for="pr-t">Encargo</label><textarea id="pr-t" class="card" style="min-height:140px;font:14px/1.4 var(--font-ui);color:var(--label);border:0" readonly>${esc(p)}</textarea><a class="btn fill" href="https://claude.ai/new" target="_blank" rel="noopener">Abrir Claude</a>` }); }
+function showPrompt(p) { openSheet({ title: 'Encargo para Claude', size: 'auto', body: () => `<p class="small muted">Cópialo y pégalo en tu Claude, con myCoach conectado.</p><label class="vh" for="pr-t">Encargo</label><textarea id="pr-t" class="card" style="min-height:140px;font:14px/1.4 var(--font-ui);color:var(--label);border:0" readonly>${esc(p)}</textarea><a class="btn fill" href="https://claude.ai/new" target="_blank" rel="noopener">Abrir Claude</a>` }); }
 
 /* ===== Navegación ===== */
 // Pueblos ya no es pestaña: vive dentro de Más (los avisos y tu Claude siguen pudiendo abrirlo por su nombre).

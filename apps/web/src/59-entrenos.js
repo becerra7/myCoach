@@ -14,7 +14,7 @@ async function cargarEntrenos(fresco) {
 const clonar = o => JSON.parse(JSON.stringify(o));
 const resumenEntreno = e => [`${e.ejercicios.length} ejercicio${e.ejercicios.length === 1 ? '' : 's'}`, e.min_estimados ? `≈ ${dur(e.min_estimados)}` : '', e.lugar === 'gym' ? 'gimnasio' : e.lugar === 'casa' ? 'en casa' : ''].filter(Boolean).join(' · ');
 const ultimaVez = e => e.ultima_sesion ? `Última vez: ${fDia(e.ultima_sesion.fecha)}` : 'Sin hacer todavía';
-const sinConector = '<p class="small">Tus entrenos viven en tu conector de Garmin. Conéctalo para verlos.</p>';
+const sinConector = `<div class="card stack" style="gap:8px"><b>Aquí salen tus entrenos</b><p class="small">Los de fuerza con sus ejercicios y los de bici y correr con sus series. Entra en myCoach para verlos.</p>${typeof PLATFORM !== 'undefined' && PLATFORM.name === 'web' ? '<div class="btns"><button class="btn fill" type="button" data-a="web-login">Entrar en myCoach</button></div>' : ''}</div>`;
 
 /* Lista: fuerza (editables) y bici y correr (guiados, los crea Claude) */
 let CENTS; // entrenos de bici y correr: undefined · 'cargando' · null · lista
@@ -177,6 +177,7 @@ function hojaElegirEntreno(f) {
   if (ENTS === undefined) cargarEntrenos(true);
   const s = sesion(f);
   openSheet({ title: 'Poner un entreno de fuerza', size: 'auto', id: 'elegir-entreno', body: () => {
+    if (!LIVE || S.modo !== 'vivo') return sinConector; // con datos de ejemplo no hay entrenos que cargar: antes se quedaba en "Cargando…"
     if (!Array.isArray(ENTS)) return ENTS === null ? '<p class="small">No he podido leer tus entrenos.</p>' : '<p class="small muted" role="status">Cargando tus entrenos…</p>';
     if (!ENTS.length) return '<p class="small">Aún no tienes entrenos. Pídele a Claude una sesión de fuerza y que la guarde con un nombre.</p>';
     return `<p class="small muted">${cap1(fLarga(f))}${s && s.t !== 'descanso' ? `. Sustituye: <b>${esc(s.d)}</b>` : ''}.</p>

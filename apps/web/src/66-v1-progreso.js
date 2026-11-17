@@ -125,7 +125,7 @@ function sumaTerreno(as, peso) {
 function tablaTerreno(dep, T, R = null) {
   const V = VEL[dep], una = T.llano && T.llano.n === 1 || T.subida && T.subida.n === 1;
   const n = x => `${una ? `${nf(x.km, x.km < 10 ? 1 : 0)} km` : `${nf(x.km, 0)} km en ${x.n} ${dep === 'bici' ? 'salida' : 'actividad'}${x.n === 1 ? '' : 's'}`}${x.min ? ` · ${dur(Math.round(x.min))}` : ''}`;
-  const celda = (nom, v, u, ref) => `<div class="ter-c"><span class="n">${nom}</span><b>${v}${u && v !== '—' ? ` <small>${u}</small>` : ''}</b>${ref ? `<small class="ter-ref">Tu media ${ref}</small>` : ''}</div>`;
+  const celda = (nom, v, u, ref) => v === '—' ? '' : `<div class="ter-c"><span class="n">${nom}</span><b>${v}${u && v !== '—' ? ` <small>${u}</small>` : ''}</b>${ref ? `<small class="ter-ref">Tu media ${ref}</small>` : ''}</div>`;
   const fila = (nom, ico, x, celdas, extra = '') => `<div class="ter-f"><div class="ter-n"><b><i aria-hidden="true">${ico}</i>${nom}</b><span>${x ? n(x) : 'Sin tramos en este periodo'}${extra}</span></div>${x ? celdas.join('') : ''}</div>`;
   const r = (k, f) => R && R[k] ? f(R[k]) : null;
   const vel = (k, x) => celda(V.n, V.f(x.kmh), V.u, r(k, y => V.f(y.kmh)));
@@ -291,7 +291,7 @@ function progRodillo() {
   const resumen = as => { const min = as.reduce((s, a) => s + a.min, 0), cf = as.filter(a => a.fc), mf = cf.reduce((s, a) => s + a.min, 0), cc = as.filter(a => a.cg != null), mc = cc.reduce((s, a) => s + a.min, 0);
     return { n: as.length, h: min / 60, fc: mf ? cf.reduce((s, a) => s + a.fc * a.min, 0) / mf : null, cgh: mc ? cc.reduce((s, a) => s + a.cg, 0) / (mc / 60) : null }; };
   const D = resumen(todas), F = resumen(fuera), np = conW.length ? conW.reduce((s, a) => s + a.pw.np * a.min, 0) / conW.reduce((s, a) => s + a.min, 0) : null;
-  const celda = (nom, v, u, ref) => `<div class="ter-c"><span class="n">${nom}</span><b>${v}${u && v !== '—' ? ` <small>${u}</small>` : ''}</b>${ref ? `<small class="ter-ref">${ref}</small>` : ''}</div>`;
+  const celda = (nom, v, u, ref) => v === '—' ? '' : `<div class="ter-c"><span class="n">${nom}</span><b>${v}${u && v !== '—' ? ` <small>${u}</small>` : ''}</b>${ref ? `<small class="ter-ref">${ref}</small>` : ''}</div>`;
   const fila = (nom, ico, x, w) => `<div class="ter-f"><div class="ter-n"><b><i aria-hidden="true">${ico}</i>${nom}</b><span>${x.n ? `${x.n} ${x.n === 1 ? 'sesión' : 'sesiones'} · ${dur(Math.round(x.h * 60))}` : 'Nada en este periodo'}</span></div>${x.n ? [celda('Pulso', x.fc ? nf(x.fc, 0) : '—', 'ppm'), celda('Carga por hora', x.cgh ? nf(x.cgh, 0) : '—', ''), w ? celda('Potencia', nf(w, 0), 'W', conW.length < x.n ? `En ${conW.length} de ${x.n} sesiones` : '') : ''].join('') : ''}</div>`;
   const parte = D.h + F.h ? Math.round(D.h / (D.h + F.h) * 100) : 0;
   const numeros = blk(`${blkH(`Tus números en ${INS_TXT[dias]}`, info('rod-num', 'Dentro y fuera', 'Solo se compara lo que significa lo mismo en los dos sitios: las horas, el pulso medio y la carga por hora (la Exercise Load de Garmin dividida por las horas: cuánto aprieta cada hora). La velocidad y los km del rodillo no se usan. La potencia es la normalizada media; fuera sale si llevas potenciómetro.'))}
@@ -338,7 +338,10 @@ function progRodillo() {
   // Horas por semana en rodillo.
   const nSem = Math.min(52, Math.ceil(dias / 7)), sems = Array.from({ length: nSem }, (_, i) => addDays(SEM, (i - nSem + 1) * 7));
   const porSem = sems.map(w => [fDia(w), acts().filter(a => a.rod && weekOf(a.f) === w).reduce((s, a) => s + a.min, 0) / 60, w === SEM]), vy = niceMax(Math.max(...porSem.map(v => v[1]), 1));
-  top.push(blk(`${vizT('Horas por semana', info('vol-rod', 'Horas por semana', 'Horas de rodillo cada semana; cada barra empieza el lunes que marca. La de esta semana va más clara porque aún no ha acabado.'))}
+  // Con una o dos semanas no hay gráfica que leer (una barra sola y un eje de décimas): se dice la cifra.
+  const semRod = porSem.filter(v => v[1] > 0);
+  if (semRod.length && semRod.length < 3) top.push(blk(`${blkH('Horas por semana')}<p class="lee">${nf(semRod.reduce((s, v) => s + v[1], 0), 1)} h de rodillo en ${semRod.length === 1 ? 'una semana' : 'dos semanas'} de este periodo. Con tres semanas verás aquí cómo van.</p>`));
+  else top.push(blk(`${vizT('Horas por semana', info('vol-rod', 'Horas por semana', 'Horas de rodillo cada semana; cada barra empieza el lunes que marca. La de esta semana va más clara porque aún no ha acabado.'))}
     <div class="viz">${vBarras({ datos: porSem, y0: 0, y1: vy, ticks: vTicks(0, vy), h: 160, u: 'h', cada: Math.ceil(nSem / 6), color: d => d[2] ? `color-mix(in srgb,${col} 45%,var(--paper))` : col,
       tip: d => `Semana del ${d[0]}: ${nf(d[1])} h${d[2] ? ' (en curso)' : ''}`, etiqueta: nSem <= 13 ? (d => d[1] ? nf(d[1], 1) : '') : null, aria: 'Horas de rodillo por semana', fmt: v => nf(v, 1) })}</div>`));
   // Pulso medio de cada sesión: las suaves en color, frente al techo de los fondos (umbral de Garmin).
@@ -445,7 +448,7 @@ function progForma() {
   // Frescura y carga responden a lo mismo (¿cómo llego?): en escritorio van juntas, en móvil una tras otra.
   return `${dondeEstas()}${evolucionGarmin()}${horasDeportes()}<div class="grid2">${bloquePeso(insDesde())}${bloqueMedidas(insDesde())}</div>
     ${carga ? `<div class="grid2">${fresc}${carga}</div>` : fresc}
-    <div class="btns" style="margin:8px 0 24px"><button class="link" type="button" data-a="push" data-v="numeros">Tus umbrales y predicciones</button></div>`;
+    <div class="btns" style="margin:8px 0 24px"><button class="link" type="button" data-a="push" data-v="numeros">Umbrales y predicciones</button></div>`;
 }
 
 function tabProgresoV1() {
@@ -516,7 +519,7 @@ function scrNumeros() {
     tarjeta('edad', 'Edad física', edad, 'La calcula Garmin con tu VO2máx, tu pulso en reposo y tu actividad.'),
     tarjeta('acl', 'Aclimatación', acl, 'Cuánto te has adaptado al calor y a la altitud con lo que has entrenado allí.'),
   ].join('');
-  return { title: 'Tus números', html: head('Tus números', 'Lo que Garmin calcula de ti') + `<div class="content" style="max-width:760px">${html ||
+  return { title: 'Umbrales y predicciones', html: head('Umbrales y predicciones', 'Lo que Garmin calcula de ti') + `<div class="content" style="max-width:760px">${html ||
     `${pendiente('Aún no tengo tus números', 'Salen de tu Garmin: umbral, FTP, predicciones de carrera y edad física. Actualiza para traerlos.')}<div class="btns"><button class="btn fill" type="button" data-a="v-sync">Actualizar con Garmin</button></div>`}</div>` };
 }
 /* El periodo es un desplegable nativo: se cambia con el evento change, no con el clic general (que lo anularía). */

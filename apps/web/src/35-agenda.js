@@ -179,7 +179,7 @@ function cardAvisoPlan() {
   else if ([5, 6, 0].includes(dow) && !planDe(PROX)) { w = PROX; t = 'Prepara la semana que viene'; s = `Del ${fDia(PROX)} al ${fDia(addDays(PROX, 6))}${CAL ? ', encajada en tu agenda' : ''}.`; }
   if (!w) return '';
   return `<div class="adapt b-full"><div class="row">${ic('plan', 26)}<div class="grow"><b style="font-size:17px">${t}</b><p class="small muted">${s}</p></div></div>
-    <div class="btns"><button class="btn fill" type="button" data-a="plan-sem" data-v="${w}">Prepararla</button><button class="btn text" type="button" data-a="claude" data-v="${w === SEM ? 'Prepárame el resto de esta semana' : 'Prepárame la semana que viene'}">${ic('claude', 18)} Con Claude</button></div></div>`;
+    <div class="btns"><button class="btn ${w === SEM ? 'fill' : 'tonal'}" type="button" data-a="plan-sem" data-v="${w}">Prepararla</button><button class="btn text" type="button" data-a="claude" data-v="${w === SEM ? 'Prepárame el resto de esta semana' : 'Prepárame la semana que viene'}">${ic('claude', 18)} Con Claude</button></div></div>`;
 }
 
 /* Ajustes: conectar el calendario */

@@ -80,6 +80,17 @@
 .app[data-os][data-d2] .sheet .filas{background:var(--surface);border-radius:var(--r-card);padding:0 16px}
 .app[data-os][data-d2] .sheet .filas>.fila-b{padding:12px 0;border-bottom:1px solid var(--rule)}
 .app[data-os][data-d2] .sheet .filas>.fila-b:last-child{border-bottom:0}
+/* Tu plan a futuro: previsto y hecho en dos líneas con su rótulo, para comparar de un vistazo */
+.act-vs{padding:0 4px;display:flex;flex-direction:column;align-items:flex-start;gap:4px}.act-vs p{margin:0}
+/* Calendario, semana: el título de la sesión, como mucho en dos líneas (el detalle se lee al abrir el día) */
+.app[data-os][data-d2] .dias .t b{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden}
+.cambio-ad{display:flex;flex-wrap:wrap;gap:2px 6px;align-items:baseline}
+.cambio-ad i{flex:1 1 100%;font-style:normal;font-size:12px;color:var(--ink-2)}
+.cambio-ad s{color:var(--ink-2)}
+.cambio-ad b{font-weight:600;color:var(--ink)}
+.temp-l{display:grid;grid-template-columns:62px minmax(0,1fr);gap:6px}
+.temp-l i{font-style:normal;font-weight:600;color:var(--ink)}
+.temp-pct{display:block;font-size:11px;color:var(--ink-2);text-align:right;white-space:nowrap}
 
 /* ===== Controles ===== */
 .app[data-os][data-d2] .btn{border-radius:999px;font-weight:650}
@@ -133,7 +144,7 @@
   .app[data-os="ios"][data-d2] .tabbar{left:12px;right:12px;bottom:calc(10px + env(safe-area-inset-bottom,0px));display:flex;gap:8px;pointer-events:none}
   body.framed .app[data-os="ios"][data-d2] .tabbar{bottom:20px}
   .app[data-os="ios"][data-d2] .tabs{display:flex;flex:1;height:60px;padding:4px;border-radius:999px;border:1px solid var(--rule);background:var(--glass);-webkit-backdrop-filter:blur(20px) saturate(160%);backdrop-filter:blur(20px) saturate(160%);pointer-events:auto}
-  .app[data-os="ios"][data-d2] .tab{min-height:0;border-radius:999px;font-size:10px;letter-spacing:-.1px}
+  .app[data-os="ios"][data-d2] .tab{min-height:0;border-radius:999px;font-size:11px;letter-spacing:-.2px}
   .app[data-os="ios"][data-d2] .tab[aria-current="page"]{background:var(--fill)!important;color:var(--ink)}
   .app[data-os][data-d2] .tab[aria-current="page"]::before{display:none}
   .app[data-os="ios"][data-d2] #claude-btn{display:grid;flex:none;width:60px;height:60px;margin:0;border:0;border-radius:50%;background:var(--ink);color:var(--paper);box-shadow:0 4px 14px rgba(0,0,0,.18);-webkit-backdrop-filter:none;backdrop-filter:none;pointer-events:auto}
@@ -192,6 +203,8 @@
 .opc4 button{min-height:var(--tap);border:0;border-radius:12px;background:var(--fill);color:var(--ink);font:inherit;font-weight:600;font-size:14px;cursor:pointer;padding:0 4px}
 .opc4 button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
 .teselas{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.tes-sub{display:block;font-style:normal;font-size:11px;font-weight:500;color:var(--ink-2)}
+@container app (max-width:839px){.teselas>.tes:last-child:nth-child(even){grid-column:1/-1}} /* si quedan impares, la última ocupa el ancho en vez de dejar un hueco */
 @container app (min-width:840px){.teselas{grid-template-columns:repeat(4,minmax(0,1fr))}}
 .tes{display:flex;flex-direction:column;gap:4px;align-items:stretch;text-align:left;min-width:0;min-height:128px;padding:14px;border:0;border-radius:var(--r-card,20px);background:var(--surface);color:inherit;font:inherit;cursor:pointer}
 .tes:hover{background:color-mix(in srgb,var(--surface) 94%,var(--ink))}

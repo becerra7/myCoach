@@ -42,7 +42,9 @@ function resumenGeneral() {
       <span class="cifra xl">${nf(nota, 1)}<small>sobre 10</small></span>${mejor.length > 1 ? `<span>Tu punto fuerte: ${esc(mejor[0].n.toLowerCase())}. Con más margen: ${esc(mejor[mejor.length - 1].n.toLowerCase())}.</span>` : ''}</button>`); }
   for (const k of ['es', 'vo2', 'vo2b', 'hill']) { const m = METS_V2[k], todo = serieGarmin(k); if (!todo.length) { if (k !== 'vo2b') out.push(teselaVacia(k, m.n, 'Aún sin datos')); continue; }
     const pts = todo.filter(p => p.f >= desde), ps = pts.length >= 2 ? pts : todo.slice(-2), ult = todo[todo.length - 1];
-    out.push(tesela(k, m.n, m.fmt(ult.v), spark(ps.map(p => p.v)), tend(ps), `${m.n}: ${m.fmt(ult.v)}`)); }
+    // Con qué se mide, debajo del nombre, y la unidad junto a la cifra: "Fondo 6283" a secas no decía de qué.
+    const sub = String(m.sub || '').replace(/ de Garmin$/, ''), u = m.u === 'puntos' ? '<small>puntos</small>' : '';
+    out.push(tesela(k, `${m.n}${sub ? `<i class="tes-sub">${esc(sub)}</i>` : ''}`, m.fmt(ult.v) + u, spark(ps.map(p => p.v)), tend(ps), `${m.n} (${sub}): ${m.fmt(ult.v)} ${m.u || ''}`)); }
   { const dias = insDias(), nSem = Math.min(52, Math.ceil(dias / 7)), sems = Array.from({ length: nSem }, (_, i) => addDays(SEM, (i - nSem + 1) * 7));
     const hs = sems.map(w => Object.values(((M.weeks || []).find(x => x[0] === w) || [w, {}])[1]).reduce((a, b) => a + (b || 0), 0) / 60), media = hs.reduce((a, b) => a + b, 0) / nSem;
     out.push(hs.some(Boolean) ? tesela('horas', 'Horas por semana', `${nf(media, 1)}<small>h</small>`, spark(hs), null, `Horas por semana: ${nf(media, 1)} de media`) : teselaVacia('horas', 'Horas por semana', 'Aún sin actividades')); }
@@ -55,9 +57,9 @@ function resumenGeneral() {
     out.push(tsb == null ? teselaVacia('frescura', 'Frescura', 'Aún sin datos') : tesela('frescura', 'Frescura', esc(zona[2]).replace(', ', ',<br>'), '', { txt: `${tsb > 0 ? '+' : tsb < 0 ? '−' : ''}${Math.abs(tsb)}`, cls: '' }, `Frescura: ${zona[2]}`).replace('class="cifra"', 'class="cifra" style="font-size:22px;line-height:1.1"')); }
   { const g = cargaGarmin(), cg = g && g.carga;
     if (cg && cg.aguda_7d != null && Array.isArray(cg.franja_optima_cronica)) { const [lo, hi] = cg.franja_optima_cronica, v = cg.aguda_7d;
-      out.push(tesela('carga', 'Carga de 7 días', String(Math.round(v)), '', v > hi ? { txt: '! Por encima de tu franja', cls: 'warn' } : v < lo ? { txt: '↓ Por debajo de tu franja', cls: '' } : { txt: '✓ En tu franja', cls: 'good' }, `Carga de 7 días: ${Math.round(v)}`)); } }
+      out.push(tesela('carga', 'Carga de 7 días<i class="tes-sub">La de Garmin</i>', `${Math.round(v)}<small>puntos</small>`, '', v > hi ? { txt: '! Por encima de tu franja', cls: 'warn' } : v < lo ? { txt: '↓ Por debajo de tu franja', cls: '' } : { txt: '✓ En tu franja', cls: 'good' }, `Carga de 7 días: ${Math.round(v)}`)); } }
   return `<div class="teselas">${out.join('')}</div>
-    ${grupo2(fila2('Medidas', 'Pecho, cintura, cadera y brazos', 'data-a="push" data-v="metrica" data-id="medidas"') + fila2('Tus umbrales y predicciones', 'Lo que Garmin calcula de ti', 'data-a="push" data-v="numeros"'))}`;
+    ${grupo2(fila2('Medidas', 'Pecho, cintura, cadera y brazos', 'data-a="push" data-v="metrica" data-id="medidas"') + fila2('Umbrales y predicciones', 'Lo que Garmin calcula de ti', 'data-a="push" data-v="numeros"'))}`;
 }
 function tabProgresoV2() {
   const d365 = addDays(HOY, -365), deps = DEP_PROG.filter(d => S.sports.includes(d) || acts().some(a => a.dep === d && a.f > d365));

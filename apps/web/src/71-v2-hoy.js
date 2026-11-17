@@ -83,8 +83,9 @@ function tabHoyV2() {
   const datos = sm?.datos || [], lectura = datos.filter(d => d.estado && d.estado !== 'sin_dato').slice(0, 2).map(d => `${(NOMBRE_CORTO[d.clave] || d.nombre).toLowerCase()} ${(TONO_EST[d.estado] || TONO_EST.normal)[2].toLowerCase()}`).join(' · ');
   const filas = [
     sm ? fila2(sm.color === 'verde' ? 'Por qué vas bien' : 'Por qué te lo digo', esc(lectura || 'Lo que ha medido tu Garmin esta noche'), 'data-a="v2-porque"') : '',
-    s && !hecho && s.t !== 'descanso' && SPORTS[s.dep]?.cardio ? fila2('Ajustar duración o intensidad', 'Ves si sigue entrando en lo que aguantas hoy', 'data-a="v2-carga"') : '',
-    fila2(sentir ? 'Cómo te encuentras' : sinDesc ? '¿Cómo te encuentras hoy?' : 'Cuéntame cómo te encuentras', esc(sentir ? sentir.replace(/^Hoy: /, '') : sinDesc ? 'Tu Garmin no mide el descanso: es lo que más pesa' : 'Ánimo, físico o una molestia'), 'data-a="coach-sentir-hoja"'),
+    // Ajustar la sesión y contar cómo estás viven en "No estoy al 100 %": una sola puerta. La fila se queda si ya has contado algo (enseña qué)
+    // o si tu Garmin no mide el descanso (ahí es lo que más pesa); sin sesión pendiente, también, porque no hay tarjeta con esa puerta.
+    !(sentir || sinDesc || !s || hecho || s.t === 'descanso') ? '' : fila2(sentir ? 'Cómo te encuentras' : sinDesc ? '¿Cómo te encuentras hoy?' : 'Cuéntame cómo te encuentras', esc(sentir ? sentir.replace(/^Hoy: /, '') : sinDesc ? 'Tu Garmin no mide el descanso: es lo que más pesa' : 'Ánimo, físico o una molestia'), 'data-a="coach-sentir-hoja"'),
     siguienteComida(),
   ].join('');
   const aviso = cardAvisoPlan(), r = resumen(SEM), pl = planDe(SEM);
